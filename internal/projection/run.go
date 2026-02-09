@@ -1,0 +1,151 @@
+package projection
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"kimen/internal/exitcode"
+	"kimen/internal/vault"
+)
+
+type RunSpec struct {
+	Command  []string
+	Request  Request
+	FilesDir string
+	Stdin    io.Reader
+	Stdout   io.Writer
+	Stderr   io.Writer
+}
+
+func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
+	if len(spec.Command) == 0 {
+		return errors.New("missing command")
+	}
+
+	var cleanup func()
+	filesDir := spec.FilesDir
+	if len(spec.Request.Files) > 0 && filesDir == "" {
+		dir, err := os.MkdirTemp("", "kimen-files-*")
+		if err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			_ = os.RemoveAll(dir)
+			return err
+		}
+		filesDir = dir
+		cleanup = func() { _ = os.RemoveAll(dir) }
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	envExtra := make(map[string]string)
+	for _, m := range spec.Request.Envs {
+		sec, err := r.GetSecret(ctx, m.Name)
+		if err != nil {
+			return err
+		}
+		envExtra[m.Var] = string(sec.Value)
+		vault.Burn(sec.Value)
+	}
+
+	if len(spec.Request.Files) > 0 {
+		if err := RenderDir(ctx, r, filesDir, spec.Request.Files); err != nil {
+			return err
+		}
+		envExtra["KIMEN_FILES_DIR"] = filesDir
+	}
+
+	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
+	cmd.Stdin = spec.Stdin
+	cmd.Stdout = spec.Stdout
+	cmd.Stderr = spec.Stderr
+
+	env := os.Environ()
+	if runtime.GOOS == "windows" {
+		env = normalizeWindowsEnv(env)
+	}
+	for k, v := range envExtra {
+		env = append(env, k+"="+v)
+	}
+	cmd.Env = env
+
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return exitcode.New(ee.ExitCode(), err)
+	}
+	return err
+}
+
+func normalizeWindowsEnv(env []string) []string {
+	// On Windows, env var keys are case-insensitive; prefer last-wins behavior.
+	m := make(map[string]string)
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		m[strings.ToUpper(k)] = kv
+	}
+	out := make([]string, 0, len(m))
+	for _, kv := range m {
+		out = append(out, kv)
+	}
+	return out
+}
+
+func RenderDir(ctx context.Context, r vault.Reader, dir string, files []FileMapping) error {
+	_ = ctx
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.RelPath == "" {
+			return errors.New("empty relpath")
+		}
+		full := filepath.Join(dir, filepath.FromSlash(f.RelPath))
+		if !strings.HasPrefix(full, filepath.Clean(dir)+string(os.PathSeparator)) && filepath.Clean(full) != filepath.Clean(dir) {
+			return fmt.Errorf("refusing to write outside dir: %s", f.RelPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return err
+		}
+		sec, err := r.GetSecret(ctx, f.Name)
+		if err != nil {
+			return err
+		}
+		if err := writeFile0600(full, sec.Value); err != nil {
+			vault.Burn(sec.Value)
+			return err
+		}
+		vault.Burn(sec.Value)
+	}
+	return nil
+}
+
+func writeFile0600(path string, b []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
