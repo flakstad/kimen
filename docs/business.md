@@ -42,7 +42,7 @@ The value is in coordination, not in holding the raw secret material.
 
 ## Three viable business shapes (ranked by alignment)
 
-### 1) Hosted sync & coordination (best fit)
+### 1) Hosted sync & coordination (best fit for many teams)
 
 What stays local:
 
@@ -71,6 +71,29 @@ Why it works:
 - you don’t become a critical runtime dependency
 
 The server stays optional, replaceable, and boring.
+
+### 1b) Git-first sync & coordination (no hosted service required)
+
+Some teams will never want a hosted coordination service. Kimen can still support a strong team story by making Git (or other user-owned remotes) a first-class option.
+
+What stays local:
+
+- encryption
+- projections
+- policy evaluation (when added)
+- runtime behavior
+
+What “the remote” does:
+
+- store ciphertext (bundles today; merge-friendly encrypted objects/events later)
+- provide distribution, review, and access control via existing Git hosting and org policies
+
+This shifts monetization away from “hosting” and toward:
+
+- support and distribution
+- team licenses for advanced coordination features (approval workflows, audit exports, rotation tooling, policy packs)
+
+Git-first can still benefit from optional coordination features (locks, conflict tooling, rewrap/rotation helpers) without Kimen operating a central plaintext vault.
 
 ### 2) Team / enterprise features (without centralizing runtime)
 
@@ -131,3 +154,7 @@ Kimen remains complete without money; money appears when friction between people
 This statement is a good north star:
 
 > Kimen is fully functional as a local tool. Optional hosted services may exist for teams that want shared state and coordination, but runtime behavior is always local.
+
+## Team sync direction
+
+See `docs/team-sync.md` for a more detailed discussion of collaboration models (bundles, Git-first, hosted coordination).

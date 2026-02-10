@@ -69,3 +69,11 @@ These are scoped so the CLI remains the primary API and tests stay strong:
    - harden `bundle seal/open` flows for GitHub Actions usage
    - doc templates for common CI patterns
 
+## Team collaboration (directional)
+
+For teams, Kimen can evolve along two compatible tracks:
+
+- **Git-first remotes**: merge-friendly encrypted objects/events that work well with Git, plus tooling for conflicts, locks, and membership changes.
+- **Optional hosted coordination**: ciphertext sync + membership + audit aggregation, without hosting plaintext secrets or executing projections.
+
+See `docs/team-sync.md`.

@@ -109,3 +109,9 @@ Optional: emit a non-secret hint (e.g. `EnvironmentFile=/path/to/app.env`) behin
 - Runtime daemon required for normal usage
 - “Unlock agent” / keychain integration (valuable, but a separate milestone)
 - Full templating language (if templating is added later, keep it intentionally constrained)
+
+## Next: team collaboration
+
+After this sequence, the next “big decision” is team collaboration.
+
+See `docs/team-sync.md` for models and tradeoffs (bundles, Git-first, hosted coordination).

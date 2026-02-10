@@ -6,6 +6,11 @@ Pieces exist. The *idea* exists in fragments. But the system described here — 
 
 This document tries to be precise and fair about that claim.
 
+For a more practical “should I use this vs X?” view, see:
+
+- `docs/alternatives.md`
+- `docs/when-to-use.md`
+
 ## The landscape, clearly mapped
 
 ### 1) Traditional secret *stores* (Vault, 1Password, Bitwarden, etc.)
@@ -82,6 +87,13 @@ They don’t usually model:
 - *why* it exists (intent)
 - *how long* it should exist (lifetime)
 - *what form* it should take *per use* (projection selection)
+
+It’s worth calling out explicitly:
+
+- Kimen’s bundle transport overlaps with `sops`/`age` workflows (ciphertext in Git, decrypt in CI).
+- Kimen’s `run`/`render` UX overlaps with “inject” features in some CLIs.
+
+Kimen’s differentiation is treating projections/lifecycle/planning as the primary abstraction, not a convenience layer on top of `get`.
 
 ### 4) Capability systems (keychains, tokens, OAuth scopes)
 
