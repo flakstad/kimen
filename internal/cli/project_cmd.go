@@ -31,6 +31,7 @@ const (
 
 func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 	var envMappings []string
 	var fileMappings []string
@@ -71,7 +72,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 				}
 				vaultPath = p
 			}
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -97,6 +98,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
@@ -110,6 +112,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 
 func newRenderCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 	var outDir string
 	var fileMappings []string
@@ -134,7 +137,7 @@ func newRenderCommand() *cobra.Command {
 				}
 				vaultPath = p
 			}
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -163,6 +166,7 @@ func newRenderCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringVar(&outDir, "dir", "", "output directory (created if missing)")

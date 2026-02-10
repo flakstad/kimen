@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,43 @@ func TestCLI_SecretGetIsUnsafeByDefault(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+}
+
+func TestCLI_ConfigUnlockExecIsUsed(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:          vaultPath,
+		envConfigPath:         configPath,
+		"GO_WANT_HELPER_PROC": "1",
+		"KIMEN_HELPER_PP":     "pass",
+	})
+	defer restore()
+
+	// Configure unlock to call back into the test binary.
+	_, errBuf, err := runCLI([]string{
+		"config", "unlock", "set", "exec", "--",
+		os.Args[0], "-test.run=TestHelperPassphraseCommand", "--",
+	}, nil)
+	if err != nil {
+		t.Fatalf("config unlock set: %v (stderr=%s)", err, errBuf)
+	}
+
+	// With no KIMEN_PASSPHRASE or flags, vault init should use the configured exec.
+	_, errBuf, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v (stderr=%s)", err, errBuf)
+	}
+}
+
+func TestHelperPassphraseCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROC") != "1" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, os.Getenv("KIMEN_HELPER_PP"))
+	os.Exit(0)
 }
 
 func withEnv(kv map[string]string) func() {

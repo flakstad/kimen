@@ -9,6 +9,7 @@ This document describes what each command does, how it works, and the typical us
 - Kimen defaults to a local vault path. You can override it with `--vault` or `KIMEN_VAULT`.
 - Most commands that need secrets require an unlock passphrase:
   - `KIMEN_PASSPHRASE` (non-interactive)
+  - `--passphrase-cmd "<command...>"` (read one line from command stdout)
   - `--passphrase-stdin` (read one line)
   - interactive terminal prompt (when available)
 - Kimen tries hard to avoid printing secret values by default.
@@ -18,10 +19,54 @@ This document describes what each command does, how it works, and the typical us
 
 - `KIMEN_VAULT`: vault file path (overrides the default)
 - `KIMEN_PASSPHRASE`: passphrase used to unlock the vault (non-interactive)
+- `KIMEN_CONFIG`: config file path (overrides the default user config location)
 
 When using file projections with `kimen run`, Kimen also sets:
 
 - `KIMEN_FILES_DIR`: the directory where projected files were written for that run
+
+## Passphrase storage and ergonomics
+
+Today, Kimen does **not** ship an “unlock agent” or built-in OS keychain integration (see `docs/plan-1-2-3.md` for non-goals in the current milestone sequence). That means the CLI needs a passphrase source on each invocation.
+
+Kimen’s lookup order is:
+
+1) `KIMEN_PASSPHRASE` (if set)
+2) explicit flags (`--passphrase-cmd`, `--passphrase-stdin`)
+3) `kimen config unlock …` (default method)
+4) interactive prompt (TTY only)
+
+Good practical options:
+
+- **Interactive typing (default):** safest and simplest; Kimen prompts when stdin is a TTY.
+- **One terminal session (local dev):** set `KIMEN_PASSPHRASE` in your current shell session (not in dotfiles), then `unset KIMEN_PASSPHRASE` when done.
+- **OS keychain / password manager (recommended):** store the passphrase in your OS credential store, and configure a default unlock command once via `kimen config unlock set exec -- ...`.
+- **CI:** set `KIMEN_PASSPHRASE` as a CI secret and run non-interactively.
+
+Notes:
+
+- The config file stores **how to obtain** the passphrase (method + optional command), not the passphrase itself.
+- `unlock.method=stdin` is generally not recommended because it can conflict with commands that also read values from stdin (e.g. `kimen secret set --stdin`).
+- Why not “store the passphrase in a local auth file”, like gcloud?
+  - gcloud’s local credentials are typically used to obtain **revocable, short-lived** tokens from a server with centralized IAM/policy controls.
+  - Kimen is designed to work **offline**; if you store the vault-unlock secret in a local file, the vault’s security largely becomes “can an attacker read/copy that file?”.
+  - Prefer OS-backed secure storage (Keychain/Secret Service/1Password/Bitwarden/etc) via `unlock.method=exec`.
+
+Examples:
+
+```bash
+# Configure macOS Keychain (store the item via Keychain Access; then):
+kimen config unlock set exec -- security find-generic-password -w -s kimen/vault
+
+# Configure 1Password CLI:
+kimen config unlock set exec -- op read op://Personal/kimen-vault/passphrase
+
+# Configure Bitwarden CLI (requires you to be logged in/unlocked; see bw docs):
+kimen config unlock set exec -- bw get password kimen-vault
+
+# Configure Google Secret Manager (requires gcloud auth; adds a network dependency):
+kimen config unlock set exec -- gcloud secrets versions access latest --secret kimen-vault-passphrase
+```
 
 ## `kimen vault …`
 
@@ -46,8 +91,7 @@ Examples:
 
 ```bash
 export KIMEN_VAULT="$HOME/.config/kimen/vault.db"
-export KIMEN_PASSPHRASE="dev-pass"
-kimen vault init
+kimen vault init  # prompts for passphrase
 ```
 
 ### `kimen vault info`

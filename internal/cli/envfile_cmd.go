@@ -19,6 +19,7 @@ var simpleEnvValueRE = regexp.MustCompile(`^[A-Za-z0-9_./:@+\-]*$`)
 
 func newEnvfileCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 
 	var mapPath string
@@ -46,7 +47,7 @@ func newEnvfileCommand() *cobra.Command {
 				vaultPath = p
 			}
 
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -85,6 +86,7 @@ func newEnvfileCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")

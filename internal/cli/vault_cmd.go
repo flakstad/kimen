@@ -23,6 +23,7 @@ func newVaultCommand() *cobra.Command {
 
 func newVaultInitCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 
 	cmd := &cobra.Command{
@@ -40,7 +41,7 @@ func newVaultInitCommand() *cobra.Command {
 				return err
 			}
 
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -59,6 +60,7 @@ func newVaultInitCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	return cmd
 }
 

@@ -24,6 +24,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newEnvfileCommand())
 	cmd.AddCommand(newProjectCommand())
 	cmd.AddCommand(newBundleCommand())
+	cmd.AddCommand(newConfigCommand())
 
 	cmd.SetErr(os.Stderr)
 	cmd.SetOut(os.Stdout)

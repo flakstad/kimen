@@ -28,6 +28,7 @@ func newSecretCommand() *cobra.Command {
 
 func newSecretSetCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 	var fromStdin bool
 	var typ string
@@ -50,7 +51,7 @@ func newSecretSetCommand() *cobra.Command {
 				vaultPath = p
 			}
 
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -82,6 +83,7 @@ func newSecretSetCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read secret value from stdin (raw bytes)")
 	cmd.Flags().StringVar(&typ, "type", "", "secret type label (optional)")
 	return cmd
@@ -108,6 +110,7 @@ func readSecretValue(cmd *cobra.Command, fromStdin bool) ([]byte, error) {
 
 func newSecretListCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 	var jsonOut bool
 
@@ -122,7 +125,7 @@ func newSecretListCommand() *cobra.Command {
 				}
 				vaultPath = p
 			}
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -152,12 +155,14 @@ func newSecretListCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
 func newSecretGetCommand() *cobra.Command {
 	var vaultPath string
+	var passphraseCmd string
 	var passphraseStdin bool
 	var unsafe bool
 
@@ -178,7 +183,7 @@ func newSecretGetCommand() *cobra.Command {
 				}
 				vaultPath = p
 			}
-			pp, err := (passphraseSource{fromStdin: passphraseStdin}).resolve()
+			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
 				return err
 			}
@@ -203,6 +208,7 @@ func newSecretGetCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().BoolVar(&unsafe, "unsafe-stdout", false, "allow printing secrets to stdout (dangerous)")
 	return cmd
 }
