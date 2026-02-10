@@ -14,14 +14,21 @@ import (
 func newProjectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "project",
-		Short: "Realize secrets into runtime form",
+		Short: "Realize secrets into runtime form (explicit projection commands)",
 	}
-	cmd.AddCommand(newProjectRunCommand())
-	cmd.AddCommand(newProjectRenderCommand())
+	cmd.AddCommand(newRunCommand(runUsageProject, runMissingCommandProject))
+	cmd.AddCommand(newRenderCommand())
 	return cmd
 }
 
-func newProjectRunCommand() *cobra.Command {
+const (
+	runUsageRoot             = "run -- <command> [args...]"
+	runUsageProject          = "run -- <command> [args...]"
+	runMissingCommandRoot    = "missing command; use `kimen run -- <command>`"
+	runMissingCommandProject = "missing command; use `kimen project run -- <command>`"
+)
+
+func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	var vaultPath string
 	var passphraseStdin bool
 	var envMappings []string
@@ -29,11 +36,11 @@ func newProjectRunCommand() *cobra.Command {
 	var filesDir string
 
 	cmd := &cobra.Command{
-		Use:   "run -- <command> [args...]",
+		Use:   use,
 		Short: "Run a command with projected secrets (env and/or files)",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return errors.New("missing command; use `kimen project run -- <command>`")
+				return errors.New(missingCommandMsg)
 			}
 			return nil
 		},
@@ -80,7 +87,7 @@ func newProjectRunCommand() *cobra.Command {
 	return cmd
 }
 
-func newProjectRenderCommand() *cobra.Command {
+func newRenderCommand() *cobra.Command {
 	var vaultPath string
 	var passphraseStdin bool
 	var outDir string

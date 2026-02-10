@@ -39,11 +39,23 @@ func TestCLI_VaultInit_SecretSet_List_Render(t *testing.T) {
 		t.Fatalf("expected foo in output, got %q", out)
 	}
 
-	_, errBuf, err = runCLI([]string{"project", "render", "--dir", outDir, "--file", "config.txt=foo"}, nil)
+	_, errBuf, err = runCLI([]string{"render", "--dir", outDir, "--file", "config.txt=foo"}, nil)
+	if err != nil {
+		t.Fatalf("render: %v (stderr=%s)", err, errBuf)
+	}
+	b, err := os.ReadFile(filepath.Join(outDir, "config.txt"))
+	if err != nil {
+		t.Fatalf("read rendered file: %v", err)
+	}
+	if string(b) != "mysecret" {
+		t.Fatalf("unexpected rendered content: %q", string(b))
+	}
+
+	_, errBuf, err = runCLI([]string{"project", "render", "--dir", outDir, "--file", "config2.txt=foo"}, nil)
 	if err != nil {
 		t.Fatalf("project render: %v (stderr=%s)", err, errBuf)
 	}
-	b, err := os.ReadFile(filepath.Join(outDir, "config.txt"))
+	b, err = os.ReadFile(filepath.Join(outDir, "config2.txt"))
 	if err != nil {
 		t.Fatalf("read rendered file: %v", err)
 	}

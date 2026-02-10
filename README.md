@@ -10,6 +10,18 @@ Kimen treats secrets as *latent capabilities*, not static values: secrets remain
 - **Intent** is an explicit request for a secret *in a particular form*, for a particular use.
 - **Projections** are the realized output (env vars, files, exec contexts, etc.) with an explicit lifetime.
 
+## Projections
+
+Kimen’s core abstraction is the **projection**: secrets are inert at rest and only become usable when you explicitly project them into a runtime shape.
+
+Common entrypoints:
+
+- `kimen run` (preferred): run a command with projected env/files
+- `kimen render`: render projected files into a directory
+- `kimen project ...`: explicit grouped projection commands
+
+See `docs/projections.md`.
+
 ## Does something like this already exist?
 
 Short answer, honestly: **this exact thing does not really exist as a coherent tool**.
@@ -48,7 +60,7 @@ echo -n 'shh' | kimen secret set api_key --stdin
 Run a command with projected secrets (env + files):
 
 ```bash
-kimen project run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
+kimen run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
 ```
 
 Export/import the vault as an age-encrypted bundle (useful for CI and “no-trust” sync transports):
