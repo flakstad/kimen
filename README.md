@@ -37,14 +37,6 @@ Common entrypoints:
 
 See `docs/projections.md`.
 
-## Does something like this already exist?
-
-Short answer, honestly: **this exact thing does not really exist as a coherent tool**.
-
-Pieces exist. The idea exists in fragments. But the system described here — local-first, projection-centric, intent-driven — is genuinely novel *as a whole*.
-
-For a precise, fair map of the landscape and what’s novel about Kimen, see `docs/landscape.md`.
-
 ## Local-first, but what about teams and business models?
 
 Kimen is designed to be complete and useful with **no server**. If there’s a business play, it’s in optional coordination (sync, membership, auditing) rather than centralizing runtime or turning Kimen into a hosted vault.
