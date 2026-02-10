@@ -26,6 +26,12 @@ See `docs/business.md`.
 
 ## Quickstart (current CLI)
 
+Build and install from source:
+
+```bash
+make install
+```
+
 Set a vault location (optional) and initialize:
 
 ```bash
