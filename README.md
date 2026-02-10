@@ -4,6 +4,14 @@ Kimen is a local-first tool for bringing secrets into usable runtime form. It st
 
 Kimen treats secrets as *latent capabilities*, not static values: secrets remain inert by default, and only become “real” in a specific form when intent is expressed.
 
+## Why Kimen
+
+Kimen solves one problem especially well:
+
+> “I want secrets encrypted at rest locally, but I need them to show up only at the moment I run something, as env vars or files, and then disappear.”
+
+That’s what projections are for: `kimen run` scopes secrets to a single process, and file projections can live in a temp directory that is removed immediately after the command exits.
+
 ## Status
 
 Kimen is early-stage and evolving. The CLI and on-disk formats may change.
