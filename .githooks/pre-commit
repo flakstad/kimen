@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Skip locally if needed (e.g. WIP commits).
+if [[ "${KIMEN_SKIP_PRECOMMIT:-}" == "1" ]]; then
+  exit 0
+fi
+
+make test build

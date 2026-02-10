@@ -61,6 +61,17 @@ Build and install from source:
 make install
 ```
 
+## Development
+
+### Pre-commit hook (tests + build)
+
+Hooks are stored in `.githooks/` and can be enabled via:
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
 Set a vault location (optional) and initialize:
 
 ```bash

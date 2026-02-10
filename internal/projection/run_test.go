@@ -43,8 +43,6 @@ func TestParseRequestValidation(t *testing.T) {
 }
 
 func TestRunCommand_EnvAndFiles(t *testing.T) {
-	t.Parallel()
-
 	req, err := ParseRequest([]string{"FOO=foo"}, []string{"cfg.txt=bar"}, "")
 	if err != nil {
 		t.Fatalf("ParseRequest: %v", err)
@@ -95,8 +93,6 @@ func TestRunCommand_EnvAndFiles(t *testing.T) {
 }
 
 func TestRunCommand_ExitCodeForwarding(t *testing.T) {
-	t.Parallel()
-
 	v := fakeVault{m: map[string][]byte{}}
 	req, err := ParseRequest(nil, nil, "")
 	if err != nil {
@@ -126,14 +122,10 @@ func TestRunCommand_ExitCodeForwarding(t *testing.T) {
 }
 
 func TestRunCommand_StdinProjection(t *testing.T) {
-	t.Parallel()
-
 	restore := setEnv("GO_WANT_HELPER_PROCESS", "1")
 	defer restore()
 
 	t.Run("secret", func(t *testing.T) {
-		t.Parallel()
-
 		req, err := ParseRequest(nil, nil, "foo")
 		if err != nil {
 			t.Fatalf("ParseRequest: %v", err)
@@ -158,8 +150,6 @@ func TestRunCommand_StdinProjection(t *testing.T) {
 	})
 
 	t.Run("exec", func(t *testing.T) {
-		t.Parallel()
-
 		execOut := fmt.Sprintf("exec:%s -test.run=TestHelperProcess -- execout stdin-from-exec", os.Args[0])
 		req, err := ParseRequest(nil, nil, execOut)
 		if err != nil {
@@ -186,8 +176,6 @@ func TestRunCommand_StdinProjection(t *testing.T) {
 }
 
 func TestRunCommand_ExecSource_EnvAndFiles(t *testing.T) {
-	t.Parallel()
-
 	restore := setEnv("GO_WANT_HELPER_PROCESS", "1")
 	defer restore()
 
