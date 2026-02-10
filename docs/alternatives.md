@@ -19,7 +19,9 @@ This doc compares Kimen to adjacent tools and helps decide when to use which.
 - Local development loops: project secrets into a REPL or dev server without exporting global env vars.
 - Operator workflows: run one privileged command with scoped secrets.
 - CI: decrypt a bundle locally inside the job, then use `kimen run` for minimal exposure.
-- Agent runtimes: run an agent with only the credentials it needs for that run.
+- Short-lived agent runs: run an agent with only the credentials it needs for that run (best for batch-style or interactive sessions).
+
+For always-on agents and long-running services, Kimen can still help with startup-time hygiene, but it does not (yet) provide rotation/renewal, policy engines, or an unattended unlock story.
 
 ## Where Kimen is not the best fit (today)
 
@@ -35,4 +37,3 @@ Kimen can coexist with other tools:
 - Kimen can still be the **projection engine** that shapes and scopes those secrets at runtime.
 
 That’s often the least-disruptive adoption path.
-

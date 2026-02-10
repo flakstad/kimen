@@ -113,3 +113,5 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/alternatives.md`: adjacent tools and comparisons
 - `docs/team-sync.md`: team collaboration models and future direction
 - `docs/team-sync-roadmap.md`: team sync roadmap (directional)
+- `docs/threat-model.md`: what Kimen does and does not protect against
+- `docs/stability.md`: early-stage stability and upgrade expectations
