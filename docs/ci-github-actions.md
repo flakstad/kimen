@@ -13,8 +13,8 @@ The transport that stores the encrypted bundle is “no-trust”: it only holds 
 1) Generate an age identity for CI (private key stays in GitHub Actions Secrets):
 
 ```bash
-age-keygen -o ci.agekey
-age-keygen -y ci.agekey > ci.agepub
+kimen bundle keygen --out ci.agekey
+kimen bundle recipient --identity ci.agekey > ci.agepub
 ```
 
 2) Seal the vault to the CI recipient:
@@ -61,4 +61,3 @@ Notes:
 - This trusts GitHub Actions Secrets to hold the CI identity and/or vault passphrase.
 - The bundle transport (repo/blob store) never needs plaintext access.
 - Prefer `kimen project run` so secrets are realized only for the child process lifetime.
-

@@ -7,9 +7,51 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"filippo.io/age"
 )
+
+func GenerateIdentityFile(outPath string, overwrite bool) (*age.X25519Identity, string, error) {
+	if !overwrite {
+		if _, err := os.Stat(outPath); err == nil {
+			return nil, "", fmt.Errorf("refusing to overwrite existing identity: %s", outPath)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
+		return nil, "", err
+	}
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		return nil, "", err
+	}
+
+	contents := id.String()
+	if !strings.HasSuffix(contents, "\n") {
+		contents += "\n"
+	}
+	tmp := outPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(contents), 0o600); err != nil {
+		return nil, "", err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return nil, "", err
+	}
+	if err := os.Rename(tmp, outPath); err != nil {
+		_ = os.Remove(tmp)
+		return nil, "", err
+	}
+	return id, id.Recipient().String(), nil
+}
+
+func RecipientForIdentity(id age.Identity) (string, error) {
+	xid, ok := id.(*age.X25519Identity)
+	if ok {
+		return xid.Recipient().String(), nil
+	}
+	return "", errors.New("unsupported identity type for recipient (expected X25519)")
+}
 
 func SealVaultFile(vaultPath, outPath string, recipientStrings []string) error {
 	recipients, err := parseRecipients(recipientStrings)
@@ -88,6 +130,9 @@ func OpenToVaultFile(bundlePath, outVaultPath string, id age.Identity, overwrite
 func LoadIdentity(identityFile string, fromStdin bool, stdin io.Reader) (age.Identity, error) {
 	var r io.Reader
 	if fromStdin {
+		if stdin == nil {
+			return nil, errors.New("missing stdin reader")
+		}
 		r = stdin
 	} else {
 		if identityFile == "" {

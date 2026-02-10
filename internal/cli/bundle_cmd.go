@@ -16,8 +16,69 @@ func newBundleCommand() *cobra.Command {
 		Use:   "bundle",
 		Short: "Export/import encrypted vault bundles for sync/CI",
 	}
+	cmd.AddCommand(newBundleKeygenCommand())
+	cmd.AddCommand(newBundleRecipientCommand())
 	cmd.AddCommand(newBundleSealCommand())
 	cmd.AddCommand(newBundleOpenCommand())
+	return cmd
+}
+
+func newBundleKeygenCommand() *cobra.Command {
+	var outPath string
+	var overwrite bool
+	var printRecipient bool
+
+	cmd := &cobra.Command{
+		Use:   "keygen",
+		Short: "Generate an age identity for bundle encryption/decryption",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if outPath == "" {
+				return errors.New("--out is required")
+			}
+			id, recipient, err := bundle.GenerateIdentityFile(outPath, overwrite)
+			if err != nil {
+				return err
+			}
+			_ = id
+			if printRecipient {
+				fmt.Fprintln(cmd.OutOrStdout(), recipient)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&outPath, "out", "", "output identity file path (private key)")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "overwrite existing identity file")
+	cmd.Flags().BoolVar(&printRecipient, "print-recipient", false, "print the corresponding recipient to stdout")
+	return cmd
+}
+
+func newBundleRecipientCommand() *cobra.Command {
+	var identityFile string
+	var identityStdin bool
+
+	cmd := &cobra.Command{
+		Use:   "recipient",
+		Short: "Print the age recipient for an identity file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if identityFile == "" && !identityStdin {
+				return errors.New("provide --identity or --identity-stdin")
+			}
+			id, err := bundle.LoadIdentity(identityFile, identityStdin, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			recipient, err := bundle.RecipientForIdentity(id)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), recipient)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&identityFile, "identity", "", "age identity file (private key)")
+	cmd.Flags().BoolVar(&identityStdin, "identity-stdin", false, "read age identity from stdin")
 	return cmd
 }
 

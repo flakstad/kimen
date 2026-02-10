@@ -66,7 +66,8 @@ kimen run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
 Export/import the vault as an age-encrypted bundle (useful for CI and “no-trust” sync transports):
 
 ```bash
-kimen bundle seal --out vault.age --recipient age1...
+kimen bundle keygen --out ci.agekey --print-recipient > ci.agepub
+kimen bundle seal --out vault.age --recipient "$(cat ci.agepub)"
 kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity path/to/age.key --overwrite
 ```
 
