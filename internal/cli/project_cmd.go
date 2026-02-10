@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kimen/internal/mapfile"
 	"kimen/internal/projection"
 	"kimen/internal/vault"
 )
@@ -33,7 +34,11 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	var passphraseStdin bool
 	var envMappings []string
 	var fileMappings []string
+	var envPathMappings []string
+	var mapPath string
+	var profile string
 	var filesDir string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   use,
@@ -45,6 +50,19 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings)
+			if err != nil {
+				return err
+			}
+			if err := validateEnvPaths(req, envPaths); err != nil {
+				return err
+			}
+
+			if dryRun {
+				p := planFromResolved("run", args, req, envPaths, filesDir)
+				return printPlanHuman(cmd, p)
+			}
+
 			if vaultPath == "" {
 				p, err := defaultVaultPath()
 				if err != nil {
@@ -64,13 +82,10 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 			}
 			defer v.Close()
 
-			req, err := projection.ParseRequest(envMappings, fileMappings)
-			if err != nil {
-				return err
-			}
 			return projection.RunCommand(cmd.Context(), v, projection.RunSpec{
 				Command:  args,
 				Request:  req,
+				EnvPaths: envPaths,
 				FilesDir: filesDir,
 				Stdout:   cmd.OutOrStdout(),
 				Stderr:   cmd.ErrOrStderr(),
@@ -81,9 +96,13 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
+	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=secretName (repeatable)")
 	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable)")
+	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory for projected files (defaults to a temp dir for this run)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print a plan and exit without running the command")
 	return cmd
 }
 
@@ -92,6 +111,8 @@ func newRenderCommand() *cobra.Command {
 	var passphraseStdin bool
 	var outDir string
 	var fileMappings []string
+	var mapPath string
+	var profile string
 
 	cmd := &cobra.Command{
 		Use:   "render --dir <path> --file <relpath=secretName>...",
@@ -100,7 +121,7 @@ func newRenderCommand() *cobra.Command {
 			if strings.TrimSpace(outDir) == "" {
 				return errors.New("--dir is required")
 			}
-			if len(fileMappings) == 0 {
+			if len(fileMappings) == 0 && mapPath == "" && profile == "" {
 				return errors.New("at least one --file is required")
 			}
 
@@ -123,7 +144,7 @@ func newRenderCommand() *cobra.Command {
 			}
 			defer v.Close()
 
-			req, err := projection.ParseRequest(nil, fileMappings)
+			req, _, err := resolveRunMappings(mapPath, profile, nil, fileMappings, nil)
 			if err != nil {
 				return err
 			}
@@ -137,7 +158,48 @@ func newRenderCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
+	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
+	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringVar(&outDir, "dir", "", "output directory (created if missing)")
 	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable)")
 	return cmd
+}
+
+func resolveRunMappings(mapPath, profile string, envMappings, fileMappings, envPathMappings []string) (projection.Request, []projection.EnvPathMapping, error) {
+	var req projection.Request
+	var envPaths []projection.EnvPathMapping
+
+	if mapPath != "" && profile != "" {
+		return projection.Request{}, nil, errors.New("use only one of --map or --profile")
+	}
+	if profile != "" {
+		p, err := mapfile.ResolveProfile(profile)
+		if err != nil {
+			return projection.Request{}, nil, err
+		}
+		mapPath = p
+	}
+	if mapPath != "" {
+		m, err := mapfile.ParseFile(mapPath)
+		if err != nil {
+			return projection.Request{}, nil, err
+		}
+		req = m.Request
+		envPaths = m.EnvPaths
+	}
+
+	inlineReq, err := projection.ParseRequest(envMappings, fileMappings)
+	if err != nil {
+		return projection.Request{}, nil, err
+	}
+	req.Envs = append(req.Envs, inlineReq.Envs...)
+	req.Files = append(req.Files, inlineReq.Files...)
+
+	inlineEnvPaths, err := projection.ParseEnvPathMappings(envPathMappings)
+	if err != nil {
+		return projection.Request{}, nil, err
+	}
+	envPaths = append(envPaths, inlineEnvPaths...)
+
+	return req, envPaths, nil
 }

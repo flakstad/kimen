@@ -18,6 +18,7 @@ import (
 type RunSpec struct {
 	Command  []string
 	Request  Request
+	EnvPaths []EnvPathMapping
 	FilesDir string
 	Stdin    io.Reader
 	Stdout   io.Writer
@@ -62,6 +63,15 @@ func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
 			return err
 		}
 		envExtra["KIMEN_FILES_DIR"] = filesDir
+	}
+
+	if len(spec.EnvPaths) > 0 {
+		if filesDir == "" {
+			return errors.New("envpath mappings require file projection (no files-dir)")
+		}
+		for _, m := range spec.EnvPaths {
+			envExtra[m.Var] = filepath.Join(filesDir, filepath.FromSlash(m.RelPath))
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)

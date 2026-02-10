@@ -45,6 +45,9 @@ env MAILERSEND_TOKEN=linje.prod.mailersend_token
 
 # file mappings
 file config/creds.edn=linje.prod.creds_edn
+
+# env var pointing at a projected file
+envpath GOOGLE_APPLICATION_CREDENTIALS=key.json
 ```
 
 This can be extended later without committing to EDN/JSON/YAML semantics.
@@ -106,4 +109,3 @@ Optional: emit a non-secret hint (e.g. `EnvironmentFile=/path/to/app.env`) behin
 - Runtime daemon required for normal usage
 - “Unlock agent” / keychain integration (valuable, but a separate milestone)
 - Full templating language (if templating is added later, keep it intentionally constrained)
-

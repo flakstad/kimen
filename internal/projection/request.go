@@ -25,6 +25,11 @@ type FileMapping struct {
 	Name    string
 }
 
+type EnvPathMapping struct {
+	Var     string
+	RelPath string
+}
+
 func ParseRequest(envMappings, fileMappings []string) (Request, error) {
 	var req Request
 	for _, m := range envMappings {
@@ -64,4 +69,28 @@ func ParseRequest(envMappings, fileMappings []string) (Request, error) {
 	}
 
 	return req, nil
+}
+
+func ParseEnvPathMappings(mappings []string) ([]EnvPathMapping, error) {
+	var out []EnvPathMapping
+	for _, m := range mappings {
+		varName, rel, ok := strings.Cut(m, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid envpath mapping %q (expected VAR=relpath)", m)
+		}
+		varName = strings.TrimSpace(varName)
+		rel = strings.TrimSpace(rel)
+		if !envVarRE.MatchString(varName) {
+			return nil, fmt.Errorf("invalid env var name %q", varName)
+		}
+		if rel == "" {
+			return nil, errors.New("empty relpath in envpath mapping")
+		}
+		clean := path.Clean(rel)
+		if clean == "." || clean == "/" || strings.HasPrefix(clean, "../") || clean == ".." || strings.HasPrefix(clean, "/") {
+			return nil, fmt.Errorf("invalid relative path %q", rel)
+		}
+		out = append(out, EnvPathMapping{Var: varName, RelPath: clean})
+	}
+	return out, nil
 }

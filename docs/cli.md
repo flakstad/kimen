@@ -12,6 +12,7 @@ This document describes what each command does, how it works, and the typical us
   - `--passphrase-stdin` (read one line)
   - interactive terminal prompt (when available)
 - Kimen tries hard to avoid printing secret values by default.
+- Many commands accept `--map` / `--profile` to avoid repeating long mapping lists (see `docs/maps.md`).
 
 ## Environment variables
 
@@ -165,6 +166,19 @@ kimen run --env API_KEY=api_key -- curl -H "Authorization: Bearer $API_KEY" http
 kimen run --file cfg.txt=api_key -- sh -lc 'cat "$KIMEN_FILES_DIR/cfg.txt"'
 ```
 
+Maps and profiles:
+
+```bash
+kimen run --map .kimen/profiles/linje-prod.kmap -- clojure -M:dev
+kimen run --profile linje-prod -- clojure -M:dev
+```
+
+Dry-run planning:
+
+```bash
+kimen run --profile linje-prod --dry-run -- clojure -M:dev
+```
+
 ### `kimen render`
 
 What it does:
@@ -187,6 +201,48 @@ Example:
 ```bash
 OUTDIR="$(mktemp -d -t kimen-render.XXXXXX)"
 kimen render --dir "$OUTDIR" --file cfg.txt=api_key
+```
+
+Maps and profiles:
+
+```bash
+kimen render --dir "$OUTDIR" --map .kimen/profiles/linje-prod.kmap
+kimen render --dir "$OUTDIR" --profile linje-prod
+```
+
+## `kimen plan`
+
+What it does:
+
+- Prints a “projection plan” showing what would materialize (secret names, env var names, file paths), **without values**.
+
+Use cases:
+
+- Reviewing changes (especially in CI).
+- Debugging large profiles/maps safely.
+
+Examples:
+
+```bash
+kimen plan --profile linje-prod --json -- clojure -M:dev
+kimen plan --map .kimen/profiles/linje-prod.kmap
+```
+
+## `kimen envfile`
+
+What it does:
+
+- Writes a `KEY=VALUE` envfile from secret mappings, without printing secrets to stdout.
+
+Use cases:
+
+- systemd `EnvironmentFile=...` workflows.
+- Deploy scripts that want a stable artifact.
+
+Example:
+
+```bash
+kimen envfile --profile linje-prod --out /tmp/linje.env
 ```
 
 ### `kimen project …`
@@ -275,4 +331,3 @@ Example:
 ```bash
 kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity ci.agekey --overwrite
 ```
-

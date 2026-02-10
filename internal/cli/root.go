@@ -18,8 +18,10 @@ func NewRootCommand() *cobra.Command {
 
 	cmd.AddCommand(newVaultCommand())
 	cmd.AddCommand(newSecretCommand())
+	cmd.AddCommand(newPlanCommand())
 	cmd.AddCommand(newRunCommand(runUsageRoot, runMissingCommandRoot))
 	cmd.AddCommand(newRenderCommand())
+	cmd.AddCommand(newEnvfileCommand())
 	cmd.AddCommand(newProjectCommand())
 	cmd.AddCommand(newBundleCommand())
 
