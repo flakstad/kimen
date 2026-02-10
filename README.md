@@ -1,14 +1,29 @@
 # Kimen
 
-Kimen is a local-first system for bringing secrets into usable runtime form. It stores secrets securely at rest and produces short-lived, context-specific projections—such as environment variables, rendered configuration files, or scoped execution contexts—only when they are intentionally requested.
+Kimen is a local-first tool for bringing secrets into usable runtime form. It stores secrets securely at rest and produces short-lived, context-specific projections—such as environment variables, rendered configuration files, or scoped execution contexts—only when they are intentionally requested.
 
 Kimen treats secrets as *latent capabilities*, not static values: secrets remain inert by default, and only become “real” in a specific form when intent is expressed.
+
+## Status
+
+Kimen is early-stage and evolving. The CLI and on-disk formats may change.
 
 ## Mental model
 
 - **Secrets** are encrypted, inert source material.
 - **Intent** is an explicit request for a secret *in a particular form*, for a particular use.
 - **Projections** are the realized output (env vars, files, exec contexts, etc.) with an explicit lifetime.
+
+## Features (current)
+
+- Local encrypted vault (`vault.db`)
+- Projections:
+  - `kimen run` (scoped env/files for a single command)
+  - `kimen render` (write secret files with strict perms)
+  - `kimen envfile` (write `KEY=VALUE` envfiles without printing secrets)
+- Repeatable intent: `--map` / `--profile`
+- Safe planning: `kimen plan` (no secret values)
+- CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
 
 ## Projections
 
@@ -63,6 +78,16 @@ Run a command with projected secrets (env + files):
 kimen run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
 ```
 
+Create a map/profile (optional, recommended for real projects):
+
+```bash
+mkdir -p .kimen/profiles
+cat > .kimen/profiles/dev.kmap <<'EOF'
+env API_KEY=api_key
+EOF
+kimen run --profile dev -- printenv API_KEY
+```
+
 Export/import the vault as an age-encrypted bundle (useful for CI and “no-trust” sync transports):
 
 ```bash
@@ -87,3 +112,4 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/when-to-use.md`: guidance on when Kimen fits (and when it doesn’t)
 - `docs/alternatives.md`: adjacent tools and comparisons
 - `docs/team-sync.md`: team collaboration models and future direction
+- `docs/team-sync-roadmap.md`: team sync roadmap (directional)

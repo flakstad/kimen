@@ -92,3 +92,7 @@ Kimen should ideally support multiple collaboration backends:
 
 Both can preserve the local-first core if the server never sees plaintext secrets and never participates in runtime projections.
 
+## Roadmap
+
+See `docs/team-sync-roadmap.md` for a phased implementation plan.
+
