@@ -53,7 +53,7 @@ jobs:
         env:
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
         run: |
-          ./kimen project run --env API_KEY=api_key -- your-build-step
+          ./kimen run --env API_KEY=api_key -- your-build-step
 ```
 
 Notes:

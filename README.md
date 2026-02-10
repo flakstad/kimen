@@ -76,3 +76,9 @@ See also `docs/ci-github-actions.md`.
 ## Roadmap
 
 Ideas and possible future projection types live in `docs/roadmap.md`.
+
+## Docs
+
+- `docs/cli.md`: full CLI/API reference with use-cases and how it works
+- `docs/projections.md`: the projection model (why `run`/`render` exist)
+- `docs/ci-github-actions.md`: CI pattern using bundles + projections
