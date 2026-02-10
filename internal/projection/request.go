@@ -13,6 +13,7 @@ var envVarRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 type Request struct {
 	Envs  []EnvMapping
 	Files []FileMapping
+	Stdin string
 }
 
 type EnvMapping struct {
@@ -30,12 +31,12 @@ type EnvPathMapping struct {
 	RelPath string
 }
 
-func ParseRequest(envMappings, fileMappings []string) (Request, error) {
+func ParseRequest(envMappings, fileMappings []string, stdin string) (Request, error) {
 	var req Request
 	for _, m := range envMappings {
 		varName, secretName, ok := strings.Cut(m, "=")
 		if !ok {
-			return Request{}, fmt.Errorf("invalid --env mapping %q (expected VAR=secretName)", m)
+			return Request{}, fmt.Errorf("invalid --env mapping %q (expected VAR=<value>)", m)
 		}
 		varName = strings.TrimSpace(varName)
 		secretName = strings.TrimSpace(secretName)
@@ -43,7 +44,7 @@ func ParseRequest(envMappings, fileMappings []string) (Request, error) {
 			return Request{}, fmt.Errorf("invalid env var name %q", varName)
 		}
 		if secretName == "" {
-			return Request{}, errors.New("empty secret name in --env mapping")
+			return Request{}, errors.New("empty value in --env mapping")
 		}
 		req.Envs = append(req.Envs, EnvMapping{Var: varName, Name: secretName})
 	}
@@ -51,7 +52,7 @@ func ParseRequest(envMappings, fileMappings []string) (Request, error) {
 	for _, m := range fileMappings {
 		rel, secretName, ok := strings.Cut(m, "=")
 		if !ok {
-			return Request{}, fmt.Errorf("invalid --file mapping %q (expected relpath=secretName)", m)
+			return Request{}, fmt.Errorf("invalid --file mapping %q (expected relpath=<value>)", m)
 		}
 		rel = strings.TrimSpace(rel)
 		secretName = strings.TrimSpace(secretName)
@@ -59,13 +60,18 @@ func ParseRequest(envMappings, fileMappings []string) (Request, error) {
 			return Request{}, errors.New("empty path in --file mapping")
 		}
 		if secretName == "" {
-			return Request{}, errors.New("empty secret name in --file mapping")
+			return Request{}, errors.New("empty value in --file mapping")
 		}
 		clean := path.Clean(rel)
 		if clean == "." || clean == "/" || strings.HasPrefix(clean, "../") || clean == ".." || strings.HasPrefix(clean, "/") {
 			return Request{}, fmt.Errorf("invalid relative path %q", rel)
 		}
 		req.Files = append(req.Files, FileMapping{RelPath: clean, Name: secretName})
+	}
+
+	stdin = strings.TrimSpace(stdin)
+	if stdin != "" {
+		req.Stdin = stdin
 	}
 
 	return req, nil

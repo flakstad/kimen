@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -50,12 +51,12 @@ func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
 
 	envExtra := make(map[string]string)
 	for _, m := range spec.Request.Envs {
-		sec, err := r.GetSecret(ctx, m.Name)
+		val, err := ResolveValue(ctx, r, m.Name)
 		if err != nil {
 			return err
 		}
-		envExtra[m.Var] = string(sec.Value)
-		vault.Burn(sec.Value)
+		envExtra[m.Var] = string(val)
+		vault.Burn(val)
 	}
 
 	if len(spec.Request.Files) > 0 {
@@ -75,7 +76,18 @@ func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
 	}
 
 	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
-	cmd.Stdin = spec.Stdin
+
+	stdin := spec.Stdin
+	if strings.TrimSpace(spec.Request.Stdin) != "" {
+		val, err := ResolveValue(ctx, r, spec.Request.Stdin)
+		if err != nil {
+			return err
+		}
+		defer vault.Burn(val)
+		stdin = bytes.NewReader(val)
+	}
+
+	cmd.Stdin = stdin
 	cmd.Stdout = spec.Stdout
 	cmd.Stderr = spec.Stderr
 
@@ -175,15 +187,15 @@ func RenderDir(ctx context.Context, r vault.Reader, dir string, files []FileMapp
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 			return err
 		}
-		sec, err := r.GetSecret(ctx, f.Name)
+		val, err := ResolveValue(ctx, r, f.Name)
 		if err != nil {
 			return err
 		}
-		if err := writeFile0600(full, sec.Value); err != nil {
-			vault.Burn(sec.Value)
+		if err := writeFile0600(full, val); err != nil {
+			vault.Burn(val)
 			return err
 		}
-		vault.Burn(sec.Value)
+		vault.Burn(val)
 	}
 	return nil
 }

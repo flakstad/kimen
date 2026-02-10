@@ -8,8 +8,9 @@ A map file is a comment-friendly, line-oriented projection spec.
 
 Each non-empty line is one of:
 
-- `env VAR=secret.name`
-- `file relpath=secret.name`
+- `env VAR=<value>`
+- `file relpath=<value>`
+- `stdin <value>`
 - `envpath VAR=relpath`
 
 Rules:
@@ -18,6 +19,9 @@ Rules:
 - Inline comments are supported: `…  # comment`.
 - `envpath` resolves to `$KIMEN_FILES_DIR/<relpath>` (or `<files-dir>/<relpath>` when specified).
 - `envpath` is intended to point at a file that is also projected via `file …`.
+- `<value>` is usually a vault secret name, but can also be an alternate source:
+  - `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
+    - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
 
 Example (`.kimen/profiles/linje-prod.kmap`):
 
@@ -29,6 +33,9 @@ env MAILERSEND_TOKEN=linje.prod.mailersend_token
 # files
 file key.json=linje.prod.gcp_sa_key_json
 envpath GOOGLE_APPLICATION_CREDENTIALS=key.json
+
+# stdin (example)
+stdin exec:gcloud auth print-access-token
 ```
 
 Use it:
@@ -55,4 +62,3 @@ kimen run --profile linje-prod -- clojure -M:dev
 
 - If both a map/profile and inline flags are provided, Kimen combines them.
 - Inline flags are appended after the map, so they naturally “win” for duplicate env vars or file paths.
-

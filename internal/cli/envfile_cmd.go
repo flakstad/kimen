@@ -58,9 +58,12 @@ func newEnvfileCommand() *cobra.Command {
 			}
 			defer v.Close()
 
-			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings)
+			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, "")
 			if err != nil {
 				return err
+			}
+			if strings.TrimSpace(req.Stdin) != "" {
+				return errors.New("stdin projection is only supported for `kimen run`")
 			}
 			if err := validateEnvPaths(req, envPaths); err != nil {
 				return err
@@ -84,8 +87,8 @@ func newEnvfileCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
-	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=secretName (repeatable)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable; used for envpath validation)")
+	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>; used for envpath validation)")
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
 	cmd.Flags().StringVar(&outPath, "out", "", "output envfile path")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "base directory used to resolve envpath values")
@@ -96,12 +99,12 @@ func buildEnvfileLines(cmd *cobra.Command, v *vault.Vault, req projection.Reques
 	envOut := make(map[string]string)
 
 	for _, m := range req.Envs {
-		sec, err := v.GetSecret(cmd.Context(), m.Name)
+		val, err := projection.ResolveValue(cmd.Context(), v, m.Name)
 		if err != nil {
 			return nil, err
 		}
-		envOut[m.Var] = string(sec.Value)
-		vault.Burn(sec.Value)
+		envOut[m.Var] = string(val)
+		vault.Burn(val)
 	}
 
 	for _, ep := range envPaths {

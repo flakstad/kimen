@@ -22,6 +22,8 @@ Kimen is early-stage and evolving. The CLI and on-disk formats may change.
 - **Intent** is an explicit request for a secret *in a particular form*, for a particular use.
 - **Projections** are the realized output (env vars, files, exec contexts, etc.) with an explicit lifetime.
 
+In practice, most projections read bytes from the local vault by secret name. Kimen can also support producing projected bytes at projection time (e.g. from local commands) while keeping the same projection-first workflow.
+
 ## Features (current)
 
 - Local encrypted vault (`vault.db`)

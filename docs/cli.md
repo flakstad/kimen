@@ -140,8 +140,9 @@ See `docs/projections.md` for the conceptual model.
 What it does:
 
 - Runs a child process with secrets projected into:
-  - environment variables (`--env VAR=secretName`)
-  - files (`--file relpath=secretName`)
+  - environment variables (`--env VAR=<value>`)
+  - files (`--file relpath=<value>`)
+  - stdin (`--stdin <value>`)
 
 Use cases:
 
@@ -151,7 +152,7 @@ Use cases:
 
 How it works:
 
-- Fetches required secrets from the vault.
+- Resolves required values (vault secrets and/or `exec:` sources).
 - Applies env overrides for the child process.
 - If `--file` is used, writes the projected files under a directory and sets `KIMEN_FILES_DIR`.
   - If `--files-dir` is not provided, a temp directory is created and removed after the command exits.
@@ -164,6 +165,9 @@ kimen run --env API_KEY=api_key -- curl -H "Authorization: Bearer $API_KEY" http
 
 # File projection (temp dir by default):
 kimen run --file cfg.txt=api_key -- sh -lc 'cat "$KIMEN_FILES_DIR/cfg.txt"'
+
+# Stdin projection:
+kimen run --stdin api_key -- sh -lc 'cat -'
 ```
 
 Maps and profiles:
@@ -178,6 +182,15 @@ Dry-run planning:
 ```bash
 kimen run --profile linje-prod --dry-run -- clojure -M:dev
 ```
+
+### Value sources (`secret name` vs `exec:...`)
+
+Wherever Kimen accepts a value on the right-hand side (e.g. `--env VAR=...`, `--file path=...`, `--stdin ...`), the default is a vault secret name.
+
+Kimen also supports deriving values at projection time:
+
+- `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
+  - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
 
 ### `kimen render`
 

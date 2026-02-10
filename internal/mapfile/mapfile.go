@@ -18,12 +18,14 @@ import (
 //
 //	env LINJE_API_TOKEN=linje.prod.api_token
 //	file key.json=gcp.sa_key_json
+//	stdin exec:some-command
 //	envpath GOOGLE_APPLICATION_CREDENTIALS=key.json
 //
 // Blank lines and lines starting with # are ignored.
 //
 // Rules:
-// - "env" and "file" use the same mapping shape as flags: <lhs>=<secretName>.
+// - "env" and "file" use the same mapping shape as flags: <lhs>=<value>.
+// - "stdin" sets the command stdin source for run projections.
 // - "envpath" maps an env var to a file path under KIMEN_FILES_DIR. It does not itself create the file mapping.
 type Map struct {
 	Request  projection.Request
@@ -48,6 +50,7 @@ func Parse(r io.Reader) (Map, error) {
 	var envMappings []string
 	var fileMappings []string
 	var envPathMappings []string
+	var stdin string
 
 	sc := bufio.NewScanner(r)
 	lineNo := 0
@@ -65,17 +68,20 @@ func Parse(r io.Reader) (Map, error) {
 			}
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		kind, rest := splitKindAndRest(line)
+		if kind == "" || rest == "" {
 			return Map{}, fmt.Errorf("invalid map line %d: expected '<kind> <mapping>'", lineNo)
 		}
-		kind := fields[0]
-		rest := fields[1]
 		switch kind {
 		case "env":
 			envMappings = append(envMappings, rest)
 		case "file":
 			fileMappings = append(fileMappings, rest)
+		case "stdin":
+			if stdin != "" {
+				return Map{}, fmt.Errorf("invalid map line %d: multiple stdin entries", lineNo)
+			}
+			stdin = rest
 		case "envpath":
 			envPathMappings = append(envPathMappings, rest)
 		default:
@@ -86,7 +92,7 @@ func Parse(r io.Reader) (Map, error) {
 		return Map{}, err
 	}
 
-	req, err := projection.ParseRequest(envMappings, fileMappings)
+	req, err := projection.ParseRequest(envMappings, fileMappings, stdin)
 	if err != nil {
 		return Map{}, err
 	}
@@ -95,6 +101,17 @@ func Parse(r io.Reader) (Map, error) {
 		return Map{}, err
 	}
 	return Map{Request: req, EnvPaths: envPaths}, nil
+}
+
+func splitKindAndRest(line string) (kind, rest string) {
+	for i, r := range line {
+		if r == ' ' || r == '\t' {
+			kind = line[:i]
+			rest = strings.TrimSpace(line[i:])
+			return kind, rest
+		}
+	}
+	return "", ""
 }
 
 // ResolveProfile looks up a profile name to a map file path.

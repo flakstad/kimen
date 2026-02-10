@@ -11,6 +11,7 @@ Kimen currently supports:
 - **env projection** (inject env vars for a child process)
 - **file projection** (write secrets to `0600` files under a `0700` dir)
 - **exec projection** (`kimen project run`) to scope projections to a single command
+- **stdin projection** (write projected bytes to a child process stdin)
 
 Future projections that fit the model:
 
@@ -26,6 +27,16 @@ Future projections that fit the model:
 3) **FD/pipe/stdin projections**
    - deliver secret material via stdin, named pipes, or inherited file descriptors
    - reduces reliance on env vars and persistent files
+
+## Sources beyond stored secrets
+
+Kimen’s mental model is “explicit intent → short-lived projection”. The simplest source of bytes is the local vault, but the same projection model can apply when values are produced on demand.
+
+Examples of sources that still preserve the local-first invariant:
+
+- local `exec:` commands (derive at projection time)
+- external secret managers as a *source of truth* (Kimen stays the projection engine)
+- minted short-lived credentials (cloud/db) that become inputs to projections
 
 4) **Plan/inspect projections (no materialization)**
    - output *what would happen*: which secrets, which env vars/paths, what lifetime/cleanup

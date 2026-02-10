@@ -18,6 +18,7 @@ type planOutput struct {
 	Command      []string                 `json:"command,omitempty"`
 	Env          []projection.EnvMapping  `json:"env"`
 	Files        []projection.FileMapping `json:"files"`
+	Stdin        string                   `json:"stdin,omitempty"`
 	EnvPaths     []planEnvPath            `json:"env_paths"`
 	FilesDir     string                   `json:"files_dir,omitempty"`
 	TempFilesDir bool                     `json:"temp_files_dir"`
@@ -34,6 +35,7 @@ func newPlanCommand() *cobra.Command {
 	var envMappings []string
 	var fileMappings []string
 	var envPathMappings []string
+	var stdin string
 	var mapPath string
 	var profile string
 	var filesDir string
@@ -45,7 +47,7 @@ func newPlanCommand() *cobra.Command {
 		Short: "Show what would be projected (no secret values)",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings)
+			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, stdin)
 			if err != nil {
 				return err
 			}
@@ -65,9 +67,10 @@ func newPlanCommand() *cobra.Command {
 	cmd.Flags().StringVar(&mode, "mode", "run", "plan mode (run|render|envfile)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
-	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=secretName (repeatable)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable)")
+	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
+	cmd.Flags().StringVar(&stdin, "stdin", "", "show a stdin projection source (<value> or exec:<command...>)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory used to resolve envpath values (defaults to $KIMEN_FILES_DIR or a temp dir for run mode)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
@@ -79,6 +82,7 @@ func planFromResolved(mode string, command []string, req projection.Request, env
 		Command: append([]string(nil), command...),
 		Env:     append([]projection.EnvMapping(nil), req.Envs...),
 		Files:   append([]projection.FileMapping(nil), req.Files...),
+		Stdin:   strings.TrimSpace(req.Stdin),
 	}
 
 	switch mode {
@@ -145,6 +149,10 @@ func printPlanHuman(cmd *cobra.Command, p planOutput) error {
 		for _, f := range p.Files {
 			fmt.Fprintf(w, "  - %s <= %s\n", f.RelPath, f.Name)
 		}
+	}
+	if strings.TrimSpace(p.Stdin) != "" {
+		fmt.Fprintln(w, "stdin:")
+		fmt.Fprintf(w, "  - <= %s\n", p.Stdin)
 	}
 	if len(p.EnvPaths) > 0 {
 		fmt.Fprintln(w, "envpath:")

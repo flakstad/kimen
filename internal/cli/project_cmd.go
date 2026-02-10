@@ -35,6 +35,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	var envMappings []string
 	var fileMappings []string
 	var envPathMappings []string
+	var stdin string
 	var mapPath string
 	var profile string
 	var filesDir string
@@ -50,7 +51,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings)
+			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, stdin)
 			if err != nil {
 				return err
 			}
@@ -98,9 +99,10 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
-	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=secretName (repeatable)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable)")
+	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
+	cmd.Flags().StringVar(&stdin, "stdin", "", "project a value into the command stdin (<value> or exec:<command...>)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory for projected files (defaults to a temp dir for this run)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print a plan and exit without running the command")
 	return cmd
@@ -144,9 +146,12 @@ func newRenderCommand() *cobra.Command {
 			}
 			defer v.Close()
 
-			req, _, err := resolveRunMappings(mapPath, profile, nil, fileMappings, nil)
+			req, _, err := resolveRunMappings(mapPath, profile, nil, fileMappings, nil, "")
 			if err != nil {
 				return err
+			}
+			if strings.TrimSpace(req.Stdin) != "" {
+				return errors.New("stdin projection is only supported for `kimen run`")
 			}
 			if len(req.Files) == 0 {
 				return fmt.Errorf("no files to render")
@@ -161,11 +166,11 @@ func newRenderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringVar(&outDir, "dir", "", "output directory (created if missing)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=secretName (repeatable)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
 	return cmd
 }
 
-func resolveRunMappings(mapPath, profile string, envMappings, fileMappings, envPathMappings []string) (projection.Request, []projection.EnvPathMapping, error) {
+func resolveRunMappings(mapPath, profile string, envMappings, fileMappings, envPathMappings []string, stdin string) (projection.Request, []projection.EnvPathMapping, error) {
 	var req projection.Request
 	var envPaths []projection.EnvPathMapping
 
@@ -188,12 +193,18 @@ func resolveRunMappings(mapPath, profile string, envMappings, fileMappings, envP
 		envPaths = m.EnvPaths
 	}
 
-	inlineReq, err := projection.ParseRequest(envMappings, fileMappings)
+	inlineReq, err := projection.ParseRequest(envMappings, fileMappings, stdin)
 	if err != nil {
 		return projection.Request{}, nil, err
 	}
 	req.Envs = append(req.Envs, inlineReq.Envs...)
 	req.Files = append(req.Files, inlineReq.Files...)
+	if strings.TrimSpace(inlineReq.Stdin) != "" {
+		if strings.TrimSpace(req.Stdin) != "" {
+			return projection.Request{}, nil, errors.New("stdin projection specified multiple times (map/profile and flags)")
+		}
+		req.Stdin = inlineReq.Stdin
+	}
 
 	inlineEnvPaths, err := projection.ParseEnvPathMappings(envPathMappings)
 	if err != nil {

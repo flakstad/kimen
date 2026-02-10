@@ -4,11 +4,24 @@ Kimen’s core abstraction is the **projection**: a deterministic, intentional r
 
 Secrets are encrypted and inert at rest. They only become usable when you explicitly request a projection.
 
+## Sources (where projected bytes come from)
+
+In the common case, a projection reads bytes from the local vault by secret name.
+
+Kimen can also produce projected bytes *at projection time* from other **sources**, while keeping the same safety model (explicit intent, narrow scope, short lifetime, and `plan` support).
+
+Currently supported sources:
+
+- `secret name` (default): read from the local vault
+- `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
+  - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
+
 ## Built-in projection shapes (today)
 
 - **env**: inject secret values as environment variables for a child process
 - **files**: write secret values into `0600` files under a `0700` directory
 - **run**: scope projections to a single command execution (`kimen run`)
+- **stdin**: write projected bytes to the child process stdin (`kimen run --stdin ...`)
 
 ## CLI entrypoints
 
@@ -32,3 +45,4 @@ Most secret tools treat secrets as values to retrieve. Kimen treats secrets as l
 - for the right scope (a single process, a runtime dir)
 - for the right lifetime (ideally just the command execution)
 
+Adding sources and new shapes should preserve this invariant: Kimen stays a local-first projection engine; it does not try to become a centralized policy/enforcement system.
