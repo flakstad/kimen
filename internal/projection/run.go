@@ -73,10 +73,7 @@ func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
 	if runtime.GOOS == "windows" {
 		env = normalizeWindowsEnv(env)
 	}
-	for k, v := range envExtra {
-		env = append(env, k+"="+v)
-	}
-	cmd.Env = env
+	cmd.Env = applyEnvOverrides(env, envExtra, runtime.GOOS == "windows")
 
 	err := cmd.Run()
 	if err == nil {
@@ -104,6 +101,49 @@ func normalizeWindowsEnv(env []string) []string {
 		out = append(out, kv)
 	}
 	return out
+}
+
+func applyEnvOverrides(env []string, overrides map[string]string, windows bool) []string {
+	if len(overrides) == 0 {
+		return env
+	}
+
+	keySet := make(map[string]struct{}, len(overrides))
+	if windows {
+		for k := range overrides {
+			keySet[strings.ToUpper(k)] = struct{}{}
+		}
+	} else {
+		for k := range overrides {
+			keySet[k] = struct{}{}
+		}
+	}
+
+	keep := env[:0]
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if windows {
+			k = strings.ToUpper(k)
+		}
+		if _, exists := keySet[k]; exists {
+			continue
+		}
+		keep = append(keep, kv)
+	}
+
+	if windows {
+		for k, v := range overrides {
+			keep = append(keep, strings.ToUpper(k)+"="+v)
+		}
+		return keep
+	}
+	for k, v := range overrides {
+		keep = append(keep, k+"="+v)
+	}
+	return keep
 }
 
 func RenderDir(ctx context.Context, r vault.Reader, dir string, files []FileMapping) error {

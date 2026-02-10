@@ -59,3 +59,7 @@ kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity path/to/a
 ```
 
 See also `docs/ci-github-actions.md`.
+
+## Roadmap
+
+Ideas and possible future projection types live in `docs/roadmap.md`.
