@@ -649,6 +649,9 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
 	}
 	statusResp := parseJSONMap(t, out)
+	if !jsonHasKey(statusResp, "has_local") || !jsonHasKey(statusResp, "can_push") || !jsonHasKey(statusResp, "needs_pull") {
+		t.Fatalf("expected explicit status booleans in payload: %#v", statusResp)
+	}
 	if !jsonBool(statusResp, "has_lock") {
 		t.Fatalf("expected has_lock=true in sync status: %#v", statusResp)
 	}
@@ -712,6 +715,9 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 		t.Fatalf("sync status --json after lock remove: %v (stderr=%s)", err, errBuf)
 	}
 	statusResp = parseJSONMap(t, out)
+	if !jsonHasKey(statusResp, "has_local") || !jsonHasKey(statusResp, "can_push") || !jsonHasKey(statusResp, "needs_pull") {
+		t.Fatalf("expected explicit status booleans after lock removal: %#v", statusResp)
+	}
 	if jsonBool(statusResp, "has_lock") {
 		t.Fatalf("expected has_lock=false after lock removal: %#v", statusResp)
 	}
@@ -793,6 +799,9 @@ func TestCLI_SyncStatus_ReportsLocalVaultMissingBlocker(t *testing.T) {
 		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
 	}
 	statusResp := parseJSONMap(t, out)
+	if !jsonHasKey(statusResp, "has_local") || !jsonHasKey(statusResp, "can_push") {
+		t.Fatalf("expected explicit status booleans for missing-vault case: %#v", statusResp)
+	}
 	if jsonBool(statusResp, "can_push") {
 		t.Fatalf("expected can_push=false when local vault is missing: %#v", statusResp)
 	}
@@ -1322,6 +1331,11 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func jsonHasKey(payload map[string]any, key string) bool {
+	_, ok := payload[key]
+	return ok
 }
 
 func readConfig(t *testing.T) config {

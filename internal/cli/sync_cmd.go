@@ -48,6 +48,36 @@ type syncResult struct {
 	RecommendedAction string   `json:"recommended_action,omitempty"`
 }
 
+type syncStatusResult struct {
+	OK                bool     `json:"ok"`
+	Action            string   `json:"action"`
+	Remote            string   `json:"remote"`
+	RemoteType        string   `json:"remote_type,omitempty"`
+	RemotePath        string   `json:"remote_path,omitempty"`
+	BundlePath        string   `json:"bundle_path,omitempty"`
+	VaultPath         string   `json:"vault_path,omitempty"`
+	RemoteRev         string   `json:"remote_rev,omitempty"`
+	LastSeenRev       string   `json:"last_seen_rev,omitempty"`
+	HasRemote         bool     `json:"has_remote"`
+	HasLock           bool     `json:"has_lock"`
+	HasLocal          bool     `json:"has_local"`
+	InSync            bool     `json:"in_sync"`
+	CanPush           bool     `json:"can_push"`
+	NeedsPull         bool     `json:"needs_pull"`
+	LockPath          string   `json:"lock_path,omitempty"`
+	LockAge           string   `json:"lock_age,omitempty"`
+	LockPID           string   `json:"lock_pid,omitempty"`
+	LockHost          string   `json:"lock_host,omitempty"`
+	LockUser          string   `json:"lock_user,omitempty"`
+	LockCreated       string   `json:"lock_created,omitempty"`
+	LockError         string   `json:"lock_error,omitempty"`
+	LockBlocksPush    bool     `json:"lock_blocks_push"`
+	LikelyStale       bool     `json:"likely_stale"`
+	LockAgeSeconds    int64    `json:"lock_age_seconds"`
+	Blockers          []string `json:"blockers,omitempty"`
+	RecommendedAction string   `json:"recommended_action,omitempty"`
+}
+
 type syncErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
@@ -249,7 +279,7 @@ func newSyncStatusCommand() *cobra.Command {
 				recommended = "sync_push"
 			}
 
-			res := syncResult{
+			res := syncStatusResult{
 				OK:                true,
 				Action:            "sync_status",
 				Remote:            remote.Name,
