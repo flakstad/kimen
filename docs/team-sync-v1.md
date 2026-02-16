@@ -2,6 +2,8 @@
 
 This document defines the Team Sync v1 product surface for Kimen.
 
+For v2 implementation direction, see `docs/team-sync-v2-plan.md`.
+
 ## Guarantees
 
 - Local-first runtime: projections always happen locally.

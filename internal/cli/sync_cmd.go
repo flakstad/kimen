@@ -173,12 +173,33 @@ type syncPreflightResult struct {
 	Checks            []syncPreflightCheckResult `json:"checks"`
 }
 
+type syncAutoResult struct {
+	OK                   bool                       `json:"ok"`
+	Action               string                     `json:"action"`
+	Remote               string                     `json:"remote,omitempty"`
+	Mode                 string                     `json:"mode"`
+	Strict               bool                       `json:"strict"`
+	DryRun               bool                       `json:"dry_run,omitempty"`
+	Check                bool                       `json:"check,omitempty"`
+	NoDoctor             bool                       `json:"no_doctor,omitempty"`
+	Decision             string                     `json:"decision"`
+	ExitCode             int                        `json:"exit_code"`
+	LocalChanged         bool                       `json:"local_changed"`
+	LocalChangeUncertain bool                       `json:"local_change_uncertain,omitempty"`
+	Reason               string                     `json:"reason,omitempty"`
+	RecommendedAction    string                     `json:"recommended_action,omitempty"`
+	Status               *syncStatusResult          `json:"status,omitempty"`
+	Steps                []syncPreflightCheckResult `json:"steps"`
+}
+
 const (
 	syncPreflightCheckDoctor     = "doctor"
 	syncPreflightCheckStatus     = "sync_status"
 	syncPreflightCheckConflicts  = "sync_conflicts"
 	syncPreflightCheckPullDryRun = "sync_pull_dry_run"
 	syncPreflightCheckPushDryRun = "sync_push_dry_run"
+	syncAutoCheckSyncPush        = "sync_push"
+	syncAutoCheckSyncPull        = "sync_pull"
 )
 
 var syncPreflightCheckOrder = []string{
@@ -202,10 +223,177 @@ type pushLockInfo struct {
 }
 
 func newSyncCommand() *cobra.Command {
+	var remoteName string
+	var profile string
+	var bundleIn string
+	var identity string
+	var staleThreshold time.Duration
+	var strict bool
+	var dryRun bool
+	var checkOnly bool
+	var noDoctor bool
+	var allowMissingVault bool
+	var jsonOut bool
+
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync vault bundles with configured remotes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if staleThreshold < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--stale-threshold must be >= 0"))
+			}
+			if checkOnly && dryRun {
+				return syncCommandError(cmd, jsonOut, errors.New("--check and --dry-run cannot be used together"))
+			}
+			result := syncAutoResult{
+				OK:       true,
+				Action:   "sync",
+				Mode:     "apply",
+				Strict:   strict,
+				DryRun:   dryRun,
+				Check:    checkOnly,
+				NoDoctor: noDoctor,
+				Decision: "noop",
+				Steps:    make([]syncPreflightCheckResult, 0, 4),
+			}
+			if checkOnly {
+				result.Mode = "check"
+			}
+			if dryRun {
+				result.Mode = "dry_run"
+			}
+
+			appendStep := func(step syncPreflightCheckResult) {
+				result.Steps = append(result.Steps, step)
+			}
+			fail := func(step syncPreflightCheckResult) error {
+				appendStep(step)
+				code := step.ExitCode
+				if code == 0 {
+					code = exitcode.CodeSyncFailed
+				}
+				result.OK = false
+				result.Decision = "blocked"
+				result.ExitCode = code
+				result.Reason = syncReasonFromPayload(step.Payload)
+				result.RecommendedAction = strings.TrimSpace(step.RecommendedAction)
+				if result.RecommendedAction == "" {
+					result.RecommendedAction = "manual_review"
+				}
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			}
+
+			if !noDoctor {
+				doctorArgs := buildSyncPreflightDoctorArgs(profile, bundleIn, identity, strict, allowMissingVault)
+				doctorStep := runSyncPreflightCheck(syncPreflightCheckDoctor, doctorArgs)
+				if !doctorStep.OK {
+					return fail(doctorStep)
+				}
+				appendStep(doctorStep)
+			}
+
+			statusArgs := buildSyncPreflightStatusArgs(remoteName, staleThreshold, false)
+			statusStep := runSyncPreflightCheck(syncPreflightCheckStatus, statusArgs)
+			if !statusStep.OK {
+				return fail(statusStep)
+			}
+			appendStep(statusStep)
+
+			status, err := decodeSyncStatusPayload(statusStep.Payload)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			result.Status = &status
+			result.Remote = status.Remote
+			result.RecommendedAction = status.RecommendedAction
+
+			localChanged, uncertain, err := detectLocalChangesSinceBaseline(status)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			result.LocalChanged = localChanged
+			result.LocalChangeUncertain = uncertain
+
+			decision, decisionErr := chooseSyncAutoDecision(status, localChanged, uncertain)
+			result.Decision = decision
+			if decisionErr != nil {
+				result.OK = false
+				result.Decision = "blocked"
+				result.ExitCode = syncExitCode(decisionErr)
+				result.RecommendedAction = status.RecommendedAction
+				if details, ok := syncConflictDetailsFromError(decisionErr); ok {
+					result.Reason = details.Reason
+					result.RecommendedAction = recommendedActionForConflictReason(details.Reason)
+				} else if details, ok := syncConditionDetailsFromError(decisionErr); ok {
+					result.Reason = details.Reason
+					if strings.TrimSpace(details.RecommendedAction) != "" {
+						result.RecommendedAction = details.RecommendedAction
+					}
+				}
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			}
+			if result.Decision == "noop" || checkOnly {
+				if checkOnly {
+					switch result.Decision {
+					case "push":
+						result.Decision = "would_push"
+					case "pull":
+						result.Decision = "would_pull"
+					}
+				}
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			}
+
+			switch result.Decision {
+			case "push":
+				if dryRun {
+					step := runSyncPreflightCheck(syncPreflightCheckPushDryRun, buildSyncPreflightPushArgs(remoteName))
+					if !step.OK {
+						return fail(step)
+					}
+					appendStep(step)
+					result.Decision = "would_push"
+					return renderSyncAutoAndExit(cmd, result, jsonOut)
+				}
+				step := runSyncPreflightCheck(syncAutoCheckSyncPush, buildSyncAutoPushArgs(remoteName))
+				if !step.OK {
+					return fail(step)
+				}
+				appendStep(step)
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			case "pull":
+				if dryRun {
+					step := runSyncPreflightCheck(syncPreflightCheckPullDryRun, buildSyncPreflightPullArgs(remoteName))
+					if !step.OK {
+						return fail(step)
+					}
+					appendStep(step)
+					result.Decision = "would_pull"
+					return renderSyncAutoAndExit(cmd, result, jsonOut)
+				}
+				step := runSyncPreflightCheck(syncAutoCheckSyncPull, buildSyncAutoPullArgs(remoteName))
+				if !step.OK {
+					return fail(step)
+				}
+				appendStep(step)
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			default:
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			}
+		},
 	}
+	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&profile, "profile", "", "profile name passed to doctor")
+	cmd.Flags().StringVar(&bundleIn, "bundle-in", "", "bundle file passed to doctor")
+	cmd.Flags().StringVar(&identity, "identity", "", "identity file passed to doctor")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "stale lock threshold passed to sync status")
+	cmd.Flags().BoolVar(&strict, "strict", false, "treat doctor warnings as failures")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "plan and validate the selected sync action without mutation")
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "run checks and action selection only (no push/pull)")
+	cmd.Flags().BoolVar(&noDoctor, "no-doctor", false, "skip doctor check before action selection")
+	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.AddCommand(newSyncPreflightCommand())
 	cmd.AddCommand(newSyncStatusCommand())
 	cmd.AddCommand(newSyncConflictsCommand())
@@ -795,7 +983,10 @@ func newSyncResetBaselineCommand() *cobra.Command {
 				if c.Sync == nil {
 					c.Sync = make(map[string]syncConfig)
 				}
-				c.Sync[remote.Name] = syncConfig{LastSeenRev: newRev}
+				c.Sync[remote.Name] = syncConfig{
+					LastSeenRev:  newRev,
+					LastLocalRev: "",
+				}
 			}
 			if _, err := saveConfig(c); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
@@ -1162,10 +1353,21 @@ func newSyncPushCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
 			}
 
+			localRev, hasLocal, err := localVaultRevision(vaultPath)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			if !hasLocal {
+				return syncCommandError(cmd, jsonOut, errors.New("local vault disappeared before baseline update"))
+			}
+
 			if c.Sync == nil {
 				c.Sync = make(map[string]syncConfig)
 			}
-			c.Sync[remote.Name] = syncConfig{LastSeenRev: newRev}
+			c.Sync[remote.Name] = syncConfig{
+				LastSeenRev:  newRev,
+				LastLocalRev: localRev,
+			}
 			if _, err := saveConfig(c); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -1295,11 +1497,21 @@ func newSyncPullCommand() *cobra.Command {
 			if err := bundle.OpenToVaultFile(bundlePath, vaultPath, id, true); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+			localRev, hasLocal, err := localVaultRevision(vaultPath)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			if !hasLocal {
+				return syncCommandError(cmd, jsonOut, errors.New("local vault missing after pull"))
+			}
 
 			if c.Sync == nil {
 				c.Sync = make(map[string]syncConfig)
 			}
-			c.Sync[remote.Name] = syncConfig{LastSeenRev: remoteRev}
+			c.Sync[remote.Name] = syncConfig{
+				LastSeenRev:  remoteRev,
+				LastLocalRev: localRev,
+			}
 			if _, err := saveConfig(c); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -1431,6 +1643,168 @@ func buildSyncPreflightPushArgs(remoteName string) []string {
 		args = append(args, "--remote", strings.TrimSpace(remoteName))
 	}
 	return args
+}
+
+func buildSyncAutoPushArgs(remoteName string) []string {
+	args := []string{"sync", "push", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
+func buildSyncAutoPullArgs(remoteName string) []string {
+	args := []string{"sync", "pull", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
+func decodeSyncStatusPayload(payload map[string]any) (syncStatusResult, error) {
+	if len(payload) == 0 {
+		return syncStatusResult{}, errors.New("sync status returned empty payload")
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return syncStatusResult{}, err
+	}
+	var status syncStatusResult
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return syncStatusResult{}, fmt.Errorf("decode sync status payload: %w", err)
+	}
+	if strings.TrimSpace(status.Action) == "" {
+		return syncStatusResult{}, errors.New("sync status payload missing action")
+	}
+	return status, nil
+}
+
+func detectLocalChangesSinceBaseline(status syncStatusResult) (changed bool, uncertain bool, err error) {
+	if !status.HasLocal {
+		return false, false, nil
+	}
+	remoteName := strings.TrimSpace(status.Remote)
+	if remoteName == "" {
+		return true, true, nil
+	}
+	c, _, err := loadConfig()
+	if err != nil {
+		return false, false, err
+	}
+	syncState, ok := c.Sync[remoteName]
+	if !ok {
+		return true, true, nil
+	}
+	lastLocal := strings.TrimSpace(syncState.LastLocalRev)
+	if lastLocal == "" {
+		return true, true, nil
+	}
+	localRev, hasLocal, err := localVaultRevision(status.VaultPath)
+	if err != nil {
+		return false, false, err
+	}
+	if !hasLocal {
+		return false, false, nil
+	}
+	return strings.TrimSpace(localRev) != lastLocal, false, nil
+}
+
+func chooseSyncAutoDecision(status syncStatusResult, localChanged, localChangeUncertain bool) (string, error) {
+	if status.NeedsPull {
+		conflict := detectSyncConflict(strings.TrimSpace(status.LastSeenRev), strings.TrimSpace(status.RemoteRev), status.HasRemote)
+		if !status.HasLocal {
+			return "pull", nil
+		}
+		if localChanged || localChangeUncertain {
+			if conflict.HasConflict {
+				return "blocked", &syncConflictError{Details: conflict}
+			}
+			return "blocked", &syncConditionError{
+				Reason:            "manual_pull_required",
+				Message:           "remote pull required but local vault has unpushed changes; run `kimen sync pull` manually and re-apply local changes",
+				RecommendedAction: "sync_pull",
+			}
+		}
+		return "pull", nil
+	}
+	if status.CanPush {
+		if localChanged {
+			return "push", nil
+		}
+		return "noop", nil
+	}
+	if status.LockBlocksPush {
+		return "blocked", &syncConditionError{
+			Reason:            "remote_lock_present",
+			Message:           "remote push lock exists; wait or remove lock with `kimen sync unlock`",
+			RecommendedAction: "wait_or_sync_unlock",
+		}
+	}
+	if len(status.Blockers) > 0 {
+		return "blocked", &syncConditionError{
+			Reason:            status.Blockers[0],
+			Message:           fmt.Sprintf("sync is blocked (blockers=%s)", strings.Join(status.Blockers, ",")),
+			RecommendedAction: status.RecommendedAction,
+		}
+	}
+	return "noop", nil
+}
+
+func syncReasonFromPayload(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	if reason, ok := payload["reason"].(string); ok {
+		return strings.TrimSpace(reason)
+	}
+	return ""
+}
+
+func renderSyncAutoAndExit(cmd *cobra.Command, result syncAutoResult, jsonOut bool) error {
+	if result.ExitCode == 0 && !result.OK {
+		result.ExitCode = exitcode.CodeSyncFailed
+	}
+	if jsonOut {
+		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+			return err
+		}
+	} else {
+		renderSyncAutoHuman(cmd, result)
+	}
+	if result.ExitCode != 0 {
+		return exitcode.New(result.ExitCode, errors.New("sync failed"))
+	}
+	return nil
+}
+
+func renderSyncAutoHuman(cmd *cobra.Command, result syncAutoResult) {
+	fmt.Fprintf(cmd.OutOrStdout(), "sync (mode=%s strict=%t)\n", result.Mode, result.Strict)
+	if strings.TrimSpace(result.Remote) != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "remote: %s\n", result.Remote)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "decision: %s\n", result.Decision)
+	fmt.Fprintf(cmd.OutOrStdout(), "local-changed: %t\n", result.LocalChanged)
+	if result.LocalChangeUncertain {
+		fmt.Fprintln(cmd.OutOrStdout(), "local-change-uncertain: true")
+	}
+	for _, step := range result.Steps {
+		if step.OK {
+			fmt.Fprintf(cmd.OutOrStdout(), "[ok] %s\n", step.Name)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "[fail] %s (exit=%d)\n", step.Name, step.ExitCode)
+			if strings.TrimSpace(step.Error) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  error: %s\n", step.Error)
+			}
+		}
+	}
+	if strings.TrimSpace(result.RecommendedAction) != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", result.RecommendedAction)
+	}
+	if result.OK {
+		fmt.Fprintln(cmd.OutOrStdout(), "sync: ok")
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "sync: failed (exit=%d)\n", result.ExitCode)
 }
 
 func buildSyncPreflightArgs(checkName, remoteName, profile, bundleIn, identity string, staleThreshold time.Duration, strict, allowMissingVault bool) ([]string, error) {

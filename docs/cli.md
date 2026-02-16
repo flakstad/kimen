@@ -833,7 +833,41 @@ Automation notes:
 
 ## Sync: `kimen sync …`
 
-Sync uses a local baseline (`last_seen_rev`) to detect remote changes before push.
+Sync uses a local baseline (`last_seen_rev`) and local state marker (`last_local_rev`) to drive safe default orchestration and conflict checks.
+
+### `kimen sync` (default orchestration)
+
+What it does:
+
+- Runs doctor (unless `--no-doctor`) and sync status checks.
+- Selects a safe action:
+  - `noop`: already aligned
+  - `push`: local changes can be published safely
+  - `pull`: remote changes can be applied safely
+  - `blocked`: manual reconciliation is required
+- Executes push/pull automatically unless `--check` or `--dry-run` is set.
+
+Common flags:
+
+- `--check`: evaluate and report only (no push/pull)
+- `--dry-run`: run chosen action in dry-run mode
+- `--no-doctor`: skip doctor in orchestration mode
+- `--strict`: make doctor warnings fail the run
+- `--json`: emit one orchestration report
+
+Notes:
+
+- On orchestration failure with `--json`, Kimen emits a report on `stdout` (similar to `sync preflight`).
+- Existing explicit subcommands (`sync push/pull/status/conflicts/...`) remain available for expert/debug workflows.
+
+Examples:
+
+```bash
+kimen sync
+kimen sync --check --json
+kimen sync --dry-run --json
+kimen sync --remote team --json
+```
 
 ### `kimen sync preflight`
 

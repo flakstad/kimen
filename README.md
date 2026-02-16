@@ -21,6 +21,7 @@ Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 
 Team Sync v1 is now implemented for `fs` and `git` remotes, including:
 
+- orchestration-first default `kimen sync` (with `--check` / `--dry-run` / `--json`)
 - `sync preflight/status/conflicts/push/pull/reset-baseline/unlock/restore`
 - strict CI gating via `sync preflight --strict`
 - no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`
@@ -59,7 +60,7 @@ In practice, most projections read bytes from the local vault by secret name. Ki
 - Safe planning: `kimen plan` (no secret values)
 - CI scaffolding: `kimen init ci-pr-safety|ci-deploy|ci-sync-gate` (generate workflow starters)
 - CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
-- Local remote sync: `kimen remote add/get/set/list/rm` + `kimen sync preflight/status/conflicts/push/pull/reset-baseline/unlock/restore` for `fs` and `git` remotes (push lock files apply to shared fs remotes)
+- Local remote sync: `kimen remote add/get/set/list/rm` + orchestration/default sync (`kimen sync`) + explicit sync subcommands (`preflight/status/conflicts/push/pull/reset-baseline/unlock/restore`) for `fs` and `git` remotes (push lock files apply to shared fs remotes)
 
 ## Projections
 

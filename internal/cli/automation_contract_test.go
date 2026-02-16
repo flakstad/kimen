@@ -606,6 +606,140 @@ func TestCLI_Contract_SyncPreflightCheckSelectionValidation(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncOrchestrationJSONShape(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync --json: %v (stderr=%s)", err, errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "action", "mode", "decision", "exit_code", "steps", "status")
+	if report["action"] != "sync" || report["mode"] != "apply" {
+		t.Fatalf("unexpected sync orchestration action/mode: %#v", report)
+	}
+	if report["exit_code"] != float64(0) || !jsonBool(report, "ok") {
+		t.Fatalf("unexpected sync orchestration success codes: %#v", report)
+	}
+}
+
+func TestCLI_Contract_SyncOrchestrationConflictFailureOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v2"))
+	if err != nil {
+		t.Fatalf("secret set local-v2: %v", err)
+	}
+
+	restoreOther := withEnv(map[string]string{envVaultPath: otherVault})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v3"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected orchestration sync conflict failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	if strings.TrimSpace(errBuf) != "" {
+		t.Fatalf("expected orchestration sync conflict report on stdout only, got stderr=%q", errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "action", "decision", "exit_code", "reason")
+	if jsonBool(report, "ok") || report["decision"] != "blocked" {
+		t.Fatalf("unexpected sync orchestration conflict payload: %#v", report)
+	}
+	if report["exit_code"] != float64(exitcode.CodeSyncConflict) || report["reason"] != "remote_changed" {
+		t.Fatalf("unexpected sync orchestration conflict fields: %#v", report)
+	}
+}
+
 func TestCLI_Contract_DoctorJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

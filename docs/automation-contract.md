@@ -65,6 +65,9 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `sync --json`:
 
+- `sync --json` (orchestration mode, no subcommand): emits report on `stdout` for both success and orchestration failures:
+  - `{"ok":bool,"action":"sync","remote":"...","mode":"apply|dry_run|check","strict":bool,"dry_run":bool,"check":bool,"decision":"noop|push|pull|would_push|would_pull|blocked","exit_code":0|31|32|27|...,"local_changed":bool,"local_change_uncertain":bool,"reason":"...","recommended_action":"...","status":{...},"steps":[{"name":"doctor|sync_status|sync_push|sync_pull|sync_push_dry_run|sync_pull_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
+  - input/flag validation failures still use the standard error envelope on `stderr`
 - `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","has_local":bool,"in_sync":bool,"can_push":bool,"needs_pull":bool,"blockers":["..."],"recommended_action":"sync_pull|sync_push|wait_or_sync_unlock|configure_remote_recipient|configure_remote_identity|sync_reset_baseline_or_remote_recreate|vault_init|none",...}`
 - `sync preflight --json`: emits report on `stdout` for both success and failure:
   - `{"ok":bool,"action":"sync_preflight","remote":"...","strict":bool,"exit_code":0|31|32,"check_count":N,"failed_count":N,"failed_checks":["..."],"failed_check":"...","recommended_action":"...","checks":[{"name":"doctor|sync_status|sync_conflicts|sync_pull_dry_run|sync_push_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
@@ -91,7 +94,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - sync precondition errors (exit `32`) may include structured fields:
   - `reason`: e.g. `remote_lock_present`
   - `recommended_action`: e.g. `wait_or_sync_unlock`
-- error: standard error envelope on `stderr` (except `sync preflight --json`, which reports failures on `stdout`)
+- error: standard error envelope on `stderr` (except `sync --json` orchestration failures and `sync preflight --json`, which report failures on `stdout`)
 
 `plan --json` and `project plan --json`:
 
