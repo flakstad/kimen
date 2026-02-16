@@ -131,3 +131,21 @@ func TestCLI_InitCISyncGate_InvalidRemoteType(t *testing.T) {
 		t.Fatalf("unexpected init error payload: %#v", errResp)
 	}
 }
+
+func TestCLI_InitCISyncGate_TemplateMatchesCheckedInWorkflow(t *testing.T) {
+	workflowPath := filepath.Clean(filepath.Join("..", "..", ".github", "workflows", "kimen-sync-gate-template.yml"))
+	b, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("read checked-in workflow template: %v", err)
+	}
+
+	want := normalizeNewlines(string(b))
+	got := normalizeNewlines(renderDefaultCISyncGateTemplateWorkflow())
+	if got != want {
+		t.Fatalf("sync-gate template drift detected between canonical scaffold and %s", workflowPath)
+	}
+}
+
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
