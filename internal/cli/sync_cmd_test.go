@@ -688,6 +688,9 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
 	}
 	conflictsResp := parseJSONMap(t, out)
+	if !jsonHasKey(conflictsResp, "lock_blocks_push") || !jsonHasKey(conflictsResp, "likely_stale") || !jsonHasKey(conflictsResp, "lock_age_seconds") {
+		t.Fatalf("expected explicit lock booleans/numbers in sync conflicts: %#v", conflictsResp)
+	}
 	if !jsonBool(conflictsResp, "has_lock") {
 		t.Fatalf("expected has_lock=true in sync conflicts: %#v", conflictsResp)
 	}
@@ -1143,6 +1146,9 @@ func TestCLI_SyncConflictsAndResetBaseline(t *testing.T) {
 		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
 	}
 	conflicts := parseJSONMap(t, out)
+	if !jsonHasKey(conflicts, "lock_blocks_push") || !jsonHasKey(conflicts, "likely_stale") || !jsonHasKey(conflicts, "lock_age_seconds") {
+		t.Fatalf("expected explicit lock booleans/numbers in remote_changed conflict payload: %#v", conflicts)
+	}
 	if !jsonBool(conflicts, "has_conflict") || conflicts["reason"] != "remote_changed" {
 		t.Fatalf("expected remote_changed conflict, got %#v", conflicts)
 	}

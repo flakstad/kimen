@@ -41,9 +41,9 @@ type syncResult struct {
 	LockCreated       string   `json:"lock_created,omitempty"`
 	LockError         string   `json:"lock_error,omitempty"`
 	StaleLockBroken   bool     `json:"stale_lock_broken,omitempty"`
-	LockBlocksPush    bool     `json:"lock_blocks_push,omitempty"`
-	LikelyStale       bool     `json:"likely_stale,omitempty"`
-	LockAgeSeconds    int64    `json:"lock_age_seconds,omitempty"`
+	LockBlocksPush    bool     `json:"lock_blocks_push"`
+	LikelyStale       bool     `json:"likely_stale"`
+	LockAgeSeconds    int64    `json:"lock_age_seconds"`
 	Blockers          []string `json:"blockers,omitempty"`
 	RecommendedAction string   `json:"recommended_action,omitempty"`
 }
@@ -107,9 +107,9 @@ type syncConflictResult struct {
 	LockUser          string   `json:"lock_user,omitempty"`
 	LockCreated       string   `json:"lock_created,omitempty"`
 	LockError         string   `json:"lock_error,omitempty"`
-	LockBlocksPush    bool     `json:"lock_blocks_push,omitempty"`
-	LikelyStale       bool     `json:"likely_stale,omitempty"`
-	LockAgeSeconds    int64    `json:"lock_age_seconds,omitempty"`
+	LockBlocksPush    bool     `json:"lock_blocks_push"`
+	LikelyStale       bool     `json:"likely_stale"`
+	LockAgeSeconds    int64    `json:"lock_age_seconds"`
 	Blockers          []string `json:"blockers,omitempty"`
 	RecommendedAction string   `json:"recommended_action,omitempty"`
 }
