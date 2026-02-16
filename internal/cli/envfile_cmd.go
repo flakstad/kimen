@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,11 +12,25 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kimen/internal/exitcode"
 	"kimen/internal/projection"
 	"kimen/internal/vault"
 )
 
 var simpleEnvValueRE = regexp.MustCompile(`^[A-Za-z0-9_./:@+\-]*$`)
+
+type envfileResult struct {
+	OK     bool   `json:"ok"`
+	Action string `json:"action"`
+	Out    string `json:"out"`
+	Count  int    `json:"count"`
+}
+
+type envfileErrorResult struct {
+	OK       bool   `json:"ok"`
+	Error    string `json:"error"`
+	ExitCode int    `json:"exit_code"`
+}
 
 func newEnvfileCommand() *cobra.Command {
 	var vaultPath string
@@ -30,57 +45,69 @@ func newEnvfileCommand() *cobra.Command {
 
 	var outPath string
 	var filesDir string
+	var jsonOut bool
 
 	cmd := &cobra.Command{
 		Use:   "envfile --out <path>",
 		Short: "Write a KEY=VALUE envfile from secret mappings (no stdout secrets)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(outPath) == "" {
-				return errors.New("--out is required")
+				return envfileCommandError(cmd, jsonOut, errors.New("--out is required"))
 			}
 
 			if vaultPath == "" {
 				p, err := defaultVaultPath()
 				if err != nil {
-					return err
+					return envfileCommandError(cmd, jsonOut, err)
 				}
 				vaultPath = p
 			}
 
 			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
-				return err
+				return envfileCommandError(cmd, jsonOut, err)
 			}
 			defer vault.Burn(pp)
 
 			v, err := vault.Open(vaultPath, pp)
 			if err != nil {
-				return err
+				return envfileCommandError(cmd, jsonOut, err)
 			}
 			defer v.Close()
 
 			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, "")
 			if err != nil {
-				return err
+				return envfileCommandError(cmd, jsonOut, err)
 			}
 			if strings.TrimSpace(req.Stdin) != "" {
-				return errors.New("stdin projection is only supported for `kimen run`")
+				return envfileCommandError(cmd, jsonOut, errors.New("stdin projection is only supported for `kimen run`"))
 			}
 			if err := validateEnvPaths(req, envPaths); err != nil {
-				return err
+				return envfileCommandError(cmd, jsonOut, err)
 			}
 			if len(req.Envs) == 0 && len(envPaths) == 0 {
-				return errors.New("no env mappings provided (use --env/--map/--profile)")
+				return envfileCommandError(cmd, jsonOut, errors.New("no env mappings provided (use --env/--map/--profile)"))
 			}
 			if len(envPaths) > 0 && strings.TrimSpace(filesDir) == "" {
-				return errors.New("--files-dir is required when using envpath mappings")
+				return envfileCommandError(cmd, jsonOut, errors.New("--files-dir is required when using envpath mappings"))
 			}
 
 			lines, err := buildEnvfileLines(cmd, v, req, envPaths, filesDir)
 			if err != nil {
-				return err
+				return envfileCommandError(cmd, jsonOut, err)
 			}
-			return writeEnvfileAtomic(outPath, lines)
+			if err := writeEnvfileAtomic(outPath, lines); err != nil {
+				return envfileCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(envfileResult{
+					OK:     true,
+					Action: "envfile",
+					Out:    outPath,
+					Count:  len(lines),
+				})
+			}
+			return nil
 		},
 	}
 
@@ -94,6 +121,7 @@ func newEnvfileCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
 	cmd.Flags().StringVar(&outPath, "out", "", "output envfile path")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "base directory used to resolve envpath values")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
@@ -167,4 +195,34 @@ func writeEnvfileAtomic(path string, lines []string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+func envfileCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
+	if err == nil {
+		return nil
+	}
+	code := envfileExitCode(err)
+	if jsonOut {
+		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(envfileErrorResult{
+			OK:       false,
+			Error:    err.Error(),
+			ExitCode: code,
+		})
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
+	}
+	return exitcode.New(code, err)
+}
+
+func envfileExitCode(err error) int {
+	switch {
+	case errors.Is(err, vault.ErrSecretNotFound):
+		return exitcode.CodeSecretNotFound
+	case errors.Is(err, vault.ErrVaultNotFound):
+		return exitcode.CodeVaultNotFound
+	case errors.Is(err, vault.ErrWrongPassphrase):
+		return exitcode.CodeWrongPassphrase
+	default:
+		return exitcode.CodeEnvfileFailed
+	}
 }

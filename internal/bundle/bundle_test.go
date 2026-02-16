@@ -82,3 +82,39 @@ func TestOpenOverwriteProtection(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 }
+
+func TestValidateBundleWithIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	bundlePath := filepath.Join(dir, "vault.age")
+	idPath := filepath.Join(dir, "id.agekey")
+
+	if err := os.WriteFile(vaultPath, []byte("vault bytes"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, recip, err := GenerateIdentityFile(idPath, false)
+	if err != nil {
+		t.Fatalf("GenerateIdentityFile: %v", err)
+	}
+	if err := SealVaultFile(vaultPath, bundlePath, []string{recip}); err != nil {
+		t.Fatalf("SealVaultFile: %v", err)
+	}
+
+	id, err := LoadIdentity(idPath, false, nil)
+	if err != nil {
+		t.Fatalf("LoadIdentity: %v", err)
+	}
+	if err := ValidateBundleWithIdentity(bundlePath, id); err != nil {
+		t.Fatalf("ValidateBundleWithIdentity: %v", err)
+	}
+
+	wrongID, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("GenerateX25519Identity: %v", err)
+	}
+	if err := ValidateBundleWithIdentity(bundlePath, wrongID); err == nil {
+		t.Fatalf("expected validation failure with wrong identity")
+	}
+}

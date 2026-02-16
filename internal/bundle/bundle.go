@@ -127,6 +127,24 @@ func OpenToVaultFile(bundlePath, outVaultPath string, id age.Identity, overwrite
 	return os.Rename(tmp, outVaultPath)
 }
 
+func ValidateBundleWithIdentity(bundlePath string, id age.Identity) error {
+	if id == nil {
+		return errors.New("missing identity")
+	}
+	in, err := os.Open(bundlePath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	r, err := age.Decrypt(in, id)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(io.Discard, r)
+	return err
+}
+
 func LoadIdentity(identityFile string, fromStdin bool, stdin io.Reader) (age.Identity, error) {
 	var r io.Reader
 	if fromStdin {

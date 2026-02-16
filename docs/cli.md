@@ -68,6 +68,61 @@ kimen config unlock set exec -- bw get password kimen-vault
 kimen config unlock set exec -- gcloud secrets versions access latest --secret kimen-vault-passphrase
 ```
 
+## `kimen config …`
+
+Kimen config controls local CLI behavior (primarily passphrase unlock defaults). It does not store secret values.
+
+### `kimen config path`
+
+What it does:
+
+- Prints the config file path.
+- With `--json`, emits a structured success object.
+
+Examples:
+
+```bash
+kimen config path
+kimen config path --json
+```
+
+### `kimen config show`
+
+What it does:
+
+- Shows the full current config JSON.
+
+Examples:
+
+```bash
+kimen config show
+kimen config show --pretty=false
+```
+
+### `kimen config unlock set/show/clear`
+
+What it does:
+
+- `set`: configure default unlock method (`prompt`, `env`, `stdin`, `exec`).
+- `show`: show current unlock method.
+- `clear`: remove unlock config and revert to `prompt`.
+
+Examples:
+
+```bash
+kimen config unlock set env
+kimen config unlock set exec -- security find-generic-password -w -s kimen/vault
+kimen config unlock show
+kimen config unlock show --json
+kimen config unlock clear --json
+```
+
+Automation notes:
+
+- `config path --json`, `config unlock set/show/clear --json` emit JSON success payloads.
+- `config show` is already JSON by default and emits JSON error envelopes on failure.
+- config failures use exit code `26`.
+
 ## `kimen vault …`
 
 ### `kimen vault init`
@@ -92,6 +147,7 @@ Examples:
 ```bash
 export KIMEN_VAULT="$HOME/.config/kimen/vault.db"
 kimen vault init  # prompts for passphrase
+kimen vault init --json
 ```
 
 ### `kimen vault info`
@@ -108,7 +164,17 @@ Example:
 
 ```bash
 kimen vault info
+kimen vault info --json
 ```
+
+Automation notes:
+
+- `vault init --json` and `vault info --json` emit JSON success payloads.
+- On failure with `--json`, vault commands emit JSON error envelopes on stderr.
+- vault failures use:
+  - `14`: vault not found
+  - `15`: wrong passphrase / corrupted vault
+  - `24`: other vault command failures
 
 ## `kimen secret …`
 
@@ -131,13 +197,15 @@ Examples:
 
 ```bash
 echo -n 'shh123' | kimen secret set api_key --stdin
+kimen secret set api_key --stdin --json
 ```
 
 ### `kimen secret list`
 
 What it does:
 
-- Lists stored secret names (optionally as JSON).
+- Lists stored secret names.
+- With `--json`, returns a structured object with `names` and `count`.
 
 Use cases:
 
@@ -151,11 +219,48 @@ kimen secret list
 kimen secret list --json
 ```
 
+### `kimen secret rm <name>`
+
+What it does:
+
+- Removes a secret by name.
+
+Use cases:
+
+- Removing obsolete credentials.
+- Cleaning up temporary/bootstrap secrets after migration.
+
+Examples:
+
+```bash
+kimen secret rm api_key
+kimen secret rm api_key --json
+```
+
+### `kimen secret mv <old-name> <new-name>`
+
+What it does:
+
+- Renames a secret while preserving its value and metadata.
+
+Use cases:
+
+- Namespace cleanup (for example, `api_key` -> `linje.prod.api_key`).
+- Aligning secret names with profile/map conventions.
+
+Examples:
+
+```bash
+kimen secret mv api_key linje.prod.api_key
+kimen secret mv api_key linje.prod.api_key --json
+```
+
 ### `kimen secret get <name>` (discouraged)
 
 What it does:
 
 - Retrieves a secret and prints it to stdout **only** with `--unsafe-stdout`.
+- With `--json`, emits a structured response with `value_b64` (base64-encoded secret value).
 
 Use cases:
 
@@ -171,7 +276,87 @@ Examples:
 ```bash
 kimen secret get api_key              # fails by default
 kimen secret get api_key --unsafe-stdout | cat
+kimen secret get api_key --unsafe-stdout --json
 ```
+
+### Secret command exit codes
+
+Kimen now uses typed exit codes for common `secret` failures:
+
+- `12`: secret not found
+- `13`: secret already exists (rename destination conflict)
+- `14`: vault not found
+- `15`: wrong passphrase / corrupted vault
+- `1`: other errors
+
+These codes apply to `secret set/list/get/rm/mv` and are useful for scripts/CI.
+
+## `kimen map …`
+
+### `kimen map lint`
+
+What it does:
+
+- Lints a map file (or profile) without materializing any secrets.
+
+Checks include:
+
+- empty map files (no effective mappings) as errors
+- duplicate/conflicting `env` variable mappings
+- duplicate/conflicting `file` relative paths
+- duplicate/conflicting `envpath` variable mappings
+- `envpath` vars that shadow `env` vars with the same name as warnings
+- `envpath` entries that refer to missing `file` projections
+- projected file path/directory conflicts (for example `file creds=...` and `file creds/token=...`)
+- run-only/mode-specific warnings (for example `stdin` and `envpath` envfile behavior)
+- warnings when a map has only file mappings (so `kimen envfile` would fail)
+- warnings for likely shell-sensitive `exec:` specs that may need wrapper scripts
+- warnings when profile resolution has shadowed candidates in lower-precedence locations
+
+Examples:
+
+```bash
+kimen map lint --map .kimen/profiles/linje-prod.kmap
+kimen map lint --profile linje-prod --json
+kimen map lint --profile linje-prod --strict
+```
+
+Exit behavior:
+
+- exits `0` when lint has no errors (warnings are allowed)
+- with `--strict`, warnings are treated as failures
+- exits `20` when lint fails
+
+## `kimen doctor`
+
+What it does:
+
+- Runs local preflight checks for common automation/deploy prerequisites.
+- Emits human output by default, or JSON with `--json`.
+
+Checks include:
+
+- config path resolution and config JSON validity
+- passphrase source readiness for non-interactive usage
+- vault path/file/metadata/permissions
+- optional map/profile parse + lint checks (`--map` or `--profile`)
+- optional bundle decryptability preflight (`--bundle-in` + `--identity`)
+
+Examples:
+
+```bash
+kimen doctor
+kimen doctor --profile linje-prod --json
+kimen doctor --profile linje-prod --strict --json
+kimen doctor --allow-missing-vault
+kimen doctor --bundle-in vault.age --identity ci.agekey --json
+```
+
+Exit behavior:
+
+- exits `0` when there are no doctor errors
+- with `--strict`, warnings are treated as failures
+- exits `27` when doctor fails
 
 ## Projections: `kimen run`, `kimen render`, `kimen project …`
 
@@ -225,7 +410,14 @@ Dry-run planning:
 
 ```bash
 kimen run --profile linje-prod --dry-run -- clojure -M:dev
+kimen run --profile linje-prod --dry-run --json -- clojure -M:dev
 ```
+
+Automation notes:
+
+- setup/projection failures use typed exit codes (`12`, `14`, `15`, `23`)
+- when the child command starts and exits non-zero, Kimen forwards the child exit code
+- `kimen run --json` emits structured error envelopes on stderr for setup/projection failures
 
 ### Value sources (`secret name` vs `exec:...`)
 
@@ -258,7 +450,26 @@ Example:
 ```bash
 OUTDIR="$(mktemp -d -t kimen-render.XXXXXX)"
 kimen render --dir "$OUTDIR" --file cfg.txt=api_key
+kimen render --dir "$OUTDIR" --file cfg.txt=api_key --json
 ```
+
+Systemd-friendly runtime mode:
+
+```bash
+kimen render \
+  --systemd-service linje-api \
+  --runtime-dir /run \
+  --file cfg.txt=api_key \
+  --print-systemd-hints
+```
+
+This mode renders to `<runtime-dir>/kimen/<service>` with predictable permissions (`0700` dir, `0600` files).
+
+Automation notes:
+
+- render setup/projection failures use typed exit codes (`12`, `14`, `15`, `23`)
+- `kimen render --json` emits a JSON success object on stdout
+- on failure, `kimen render --json` emits a structured JSON error envelope on stderr
 
 Maps and profiles:
 
@@ -272,18 +483,34 @@ kimen render --dir "$OUTDIR" --profile linje-prod
 What it does:
 
 - Prints a “projection plan” showing what would materialize (secret names, env var names, file paths), **without values**.
+- Can optionally compute a projection diff with `--against-map` or `--against-profile`.
 
 Use cases:
 
 - Reviewing changes (especially in CI).
 - Debugging large profiles/maps safely.
+- Comparing intended projection changes before rollout.
 
 Examples:
 
 ```bash
 kimen plan --profile linje-prod --json -- clojure -M:dev
 kimen plan --map .kimen/profiles/linje-prod.kmap
+kimen plan --map .kimen/profiles/new.kmap --against-map .kimen/profiles/current.kmap --json
+kimen plan --profile new --against-profile current
 ```
+
+When diff flags are used, output includes:
+
+- added/removed/changed env mappings (by env var target)
+- added/removed/changed file mappings (by relative file path)
+- added/removed/changed `envpath` mappings (by env var target)
+- stdin source changes (when applicable)
+
+Automation notes:
+
+- `kimen plan --json` now emits a JSON error envelope on stderr when planning fails.
+- plan failures use exit code `21`.
 
 ## `kimen envfile`
 
@@ -300,7 +527,14 @@ Example:
 
 ```bash
 kimen envfile --profile linje-prod --out /tmp/linje.env
+kimen envfile --profile linje-prod --out /tmp/linje.env --json
 ```
+
+Automation notes:
+
+- `kimen envfile --json` emits a JSON success object on stdout.
+- On failure, `--json` emits a JSON error envelope on stderr.
+- Generic envfile failures use exit code `22` (with secret/vault failures reusing typed secret codes).
 
 ### `kimen project …`
 
@@ -309,12 +543,13 @@ What it does:
 - Provides the explicit grouped form of projection commands:
   - `kimen project run`
   - `kimen project render`
+  - `kimen project plan`
 
 Use cases:
 
 - Script clarity and future expansion.
 
-In everyday usage, prefer the short verbs `kimen run` / `kimen render`.
+In everyday usage, prefer the short verbs `kimen run` / `kimen render` / `kimen plan`.
 
 ## Bundles: `kimen bundle …` (sync/CI primitive)
 
@@ -337,6 +572,7 @@ Example:
 
 ```bash
 kimen bundle keygen --out ci.agekey --print-recipient > ci.agepub
+kimen bundle keygen --out ci.agekey --json
 ```
 
 ### `kimen bundle recipient`
@@ -353,6 +589,7 @@ Example:
 
 ```bash
 kimen bundle recipient --identity ci.agekey > ci.agepub
+kimen bundle recipient --identity ci.agekey --json
 ```
 
 ### `kimen bundle seal`
@@ -370,6 +607,7 @@ Example:
 
 ```bash
 kimen bundle seal --vault "$KIMEN_VAULT" --out vault.age --recipient "$(cat ci.agepub)"
+kimen bundle seal --vault "$KIMEN_VAULT" --out vault.age --recipient "$(cat ci.agepub)" --json
 ```
 
 ### `kimen bundle open`
@@ -387,4 +625,11 @@ Example:
 
 ```bash
 kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity ci.agekey --overwrite
+kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity ci.agekey --overwrite --json
 ```
+
+Automation notes:
+
+- `bundle keygen/recipient/seal/open --json` emit JSON success payloads.
+- On failure with `--json`, bundle commands emit JSON error envelopes on stderr.
+- bundle failures use exit code `25`.

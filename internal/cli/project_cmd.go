@@ -1,16 +1,36 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"kimen/internal/exitcode"
 	"kimen/internal/mapfile"
 	"kimen/internal/projection"
 	"kimen/internal/vault"
 )
+
+type projectionResult struct {
+	OK        bool     `json:"ok"`
+	Action    string   `json:"action"`
+	OutDir    string   `json:"out_dir,omitempty"`
+	FileCount int      `json:"file_count,omitempty"`
+	Hints     []string `json:"hints,omitempty"`
+}
+
+type projectionErrorResult struct {
+	OK       bool   `json:"ok"`
+	Error    string `json:"error"`
+	ExitCode int    `json:"exit_code"`
+}
+
+var systemdServiceNameRE = regexp.MustCompile(`^[A-Za-z0-9_.@-]+$`)
 
 func newProjectCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -19,6 +39,7 @@ func newProjectCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newRunCommand(runUsageProject, runMissingCommandProject))
 	cmd.AddCommand(newRenderCommand())
+	cmd.AddCommand(newPlanCommand())
 	return cmd
 }
 
@@ -41,50 +62,62 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	var profile string
 	var filesDir string
 	var dryRun bool
+	var jsonOut bool
 
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: "Run a command with projected secrets (env and/or files)",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return errors.New(missingCommandMsg)
+				return projectionCommandError(cmd, jsonOut, errors.New(missingCommandMsg))
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, stdin)
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			if err := validateEnvPaths(req, envPaths); err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 
 			if dryRun {
 				p := planFromResolved("run", args, req, envPaths, filesDir)
-				return printPlanHuman(cmd, p)
+				if jsonOut {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					if err := enc.Encode(p); err != nil {
+						return projectionCommandError(cmd, jsonOut, err)
+					}
+					return nil
+				}
+				if err := printPlanHuman(cmd, p); err != nil {
+					return projectionCommandError(cmd, jsonOut, err)
+				}
+				return nil
 			}
 
 			if vaultPath == "" {
 				p, err := defaultVaultPath()
 				if err != nil {
-					return err
+					return projectionCommandError(cmd, jsonOut, err)
 				}
 				vaultPath = p
 			}
 			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			defer vault.Burn(pp)
 
 			v, err := vault.Open(vaultPath, pp)
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			defer v.Close()
 
-			return projection.RunCommand(cmd.Context(), v, projection.RunSpec{
+			err = projection.RunCommand(cmd.Context(), v, projection.RunSpec{
 				Command:  args,
 				Request:  req,
 				EnvPaths: envPaths,
@@ -93,6 +126,10 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 				Stderr:   cmd.ErrOrStderr(),
 				Stdin:    cmd.InOrStdin(),
 			})
+			if err != nil {
+				return projectionCommandError(cmd, jsonOut, err)
+			}
+			return nil
 		},
 	}
 
@@ -107,6 +144,7 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	cmd.Flags().StringVar(&stdin, "stdin", "", "project a value into the command stdin (<value> or exec:<command...>)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory for projected files (defaults to a temp dir for this run)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print a plan and exit without running the command")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON where applicable (dry-run plan and structured errors)")
 	return cmd
 }
 
@@ -118,49 +156,94 @@ func newRenderCommand() *cobra.Command {
 	var fileMappings []string
 	var mapPath string
 	var profile string
+	var jsonOut bool
+	var systemdService string
+	var runtimeDir string
+	var printSystemdHints bool
 
 	cmd := &cobra.Command{
 		Use:   "render --dir <path> --file <relpath=secretName>...",
 		Short: "Render secrets into files in a directory (no lifecycle management)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(outDir) == "" {
-				return errors.New("--dir is required")
+			if strings.TrimSpace(systemdService) != "" && strings.TrimSpace(outDir) != "" {
+				return projectionCommandError(cmd, jsonOut, errors.New("use only one of --dir or --systemd-service"))
+			}
+			if strings.TrimSpace(outDir) == "" && strings.TrimSpace(systemdService) == "" {
+				return projectionCommandError(cmd, jsonOut, errors.New("--dir is required (or use --systemd-service)"))
+			}
+			if strings.TrimSpace(systemdService) == "" && printSystemdHints {
+				return projectionCommandError(cmd, jsonOut, errors.New("--print-systemd-hints requires --systemd-service"))
 			}
 			if len(fileMappings) == 0 && mapPath == "" && profile == "" {
-				return errors.New("at least one --file is required")
+				return projectionCommandError(cmd, jsonOut, errors.New("at least one --file is required"))
+			}
+
+			if strings.TrimSpace(systemdService) != "" {
+				service := strings.TrimSpace(systemdService)
+				if !systemdServiceNameRE.MatchString(service) {
+					return projectionCommandError(cmd, jsonOut, fmt.Errorf("invalid --systemd-service %q", service))
+				}
+				base := strings.TrimSpace(runtimeDir)
+				if base == "" {
+					base = "/run"
+				}
+				outDir = filepath.Join(base, "kimen", service)
 			}
 
 			if vaultPath == "" {
 				p, err := defaultVaultPath()
 				if err != nil {
-					return err
+					return projectionCommandError(cmd, jsonOut, err)
 				}
 				vaultPath = p
 			}
 			pp, err := resolvePassphrase(passphraseCmd, passphraseStdin)
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			defer vault.Burn(pp)
 
 			v, err := vault.Open(vaultPath, pp)
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			defer v.Close()
 
 			req, _, err := resolveRunMappings(mapPath, profile, nil, fileMappings, nil, "")
 			if err != nil {
-				return err
+				return projectionCommandError(cmd, jsonOut, err)
 			}
 			if strings.TrimSpace(req.Stdin) != "" {
-				return errors.New("stdin projection is only supported for `kimen run`")
+				return projectionCommandError(cmd, jsonOut, errors.New("stdin projection is only supported for `kimen run`"))
 			}
 			if len(req.Files) == 0 {
-				return fmt.Errorf("no files to render")
+				return projectionCommandError(cmd, jsonOut, fmt.Errorf("no files to render"))
 			}
 
-			return projection.RenderDir(cmd.Context(), v, outDir, req.Files)
+			if err := projection.RenderDir(cmd.Context(), v, outDir, req.Files); err != nil {
+				return projectionCommandError(cmd, jsonOut, err)
+			}
+
+			hints := []string(nil)
+			if strings.TrimSpace(systemdService) != "" && printSystemdHints {
+				hints = buildSystemdRenderHints(outDir)
+			}
+
+			if len(hints) > 0 && !jsonOut {
+				for _, h := range hints {
+					fmt.Fprintln(cmd.OutOrStdout(), h)
+				}
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(projectionResult{
+					OK:        true,
+					Action:    "render",
+					OutDir:    outDir,
+					FileCount: len(req.Files),
+					Hints:     hints,
+				})
+			}
+			return nil
 		},
 	}
 
@@ -170,7 +253,11 @@ func newRenderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringVar(&outDir, "dir", "", "output directory (created if missing)")
+	cmd.Flags().StringVar(&systemdService, "systemd-service", "", "render to a systemd-friendly runtime path (<runtime-dir>/kimen/<service>)")
+	cmd.Flags().StringVar(&runtimeDir, "runtime-dir", "/run", "base runtime directory used with --systemd-service")
+	cmd.Flags().BoolVar(&printSystemdHints, "print-systemd-hints", false, "print service wiring hints when using --systemd-service")
 	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
@@ -217,4 +304,45 @@ func resolveRunMappings(mapPath, profile string, envMappings, fileMappings, envP
 	envPaths = append(envPaths, inlineEnvPaths...)
 
 	return req, envPaths, nil
+}
+
+func projectionCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
+	if err == nil {
+		return nil
+	}
+	var ec *exitcode.Error
+	if errors.As(err, &ec) {
+		return err
+	}
+	code := projectionExitCode(err)
+	if jsonOut {
+		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(projectionErrorResult{
+			OK:       false,
+			Error:    err.Error(),
+			ExitCode: code,
+		})
+	}
+	return exitcode.New(code, err)
+}
+
+func projectionExitCode(err error) int {
+	switch {
+	case errors.Is(err, vault.ErrSecretNotFound):
+		return exitcode.CodeSecretNotFound
+	case errors.Is(err, vault.ErrSecretExists):
+		return exitcode.CodeSecretExists
+	case errors.Is(err, vault.ErrVaultNotFound):
+		return exitcode.CodeVaultNotFound
+	case errors.Is(err, vault.ErrWrongPassphrase):
+		return exitcode.CodeWrongPassphrase
+	default:
+		return exitcode.CodeProjectionFailed
+	}
+}
+
+func buildSystemdRenderHints(outDir string) []string {
+	return []string{
+		fmt.Sprintf("Environment=KIMEN_FILES_DIR=%s", outDir),
+		fmt.Sprintf("# files rendered under %s (dir 0700, files 0600)", outDir),
+	}
 }

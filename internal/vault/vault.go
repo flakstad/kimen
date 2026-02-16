@@ -200,23 +200,10 @@ func (v *Vault) PutSecret(ctx context.Context, s Secret) error {
 	}
 	s.UpdatedAt = now
 
-	plaintext, err := json.Marshal(s)
+	record, err := v.encryptSecretRecord(s)
 	if err != nil {
 		return err
 	}
-	defer Burn(plaintext)
-
-	aead, err := chacha20poly1305.NewX(v.dek)
-	if err != nil {
-		return err
-	}
-	nonce := make([]byte, chacha20poly1305.NonceSizeX)
-	if _, err := rand.Read(nonce); err != nil {
-		return err
-	}
-	aad := []byte("secret:" + s.Name)
-	ciphertext := aead.Seal(nil, nonce, plaintext, aad)
-	record := append(nonce, ciphertext...)
 
 	return v.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSecrets)
@@ -245,6 +232,103 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (Secret, error) {
 		return Secret{}, err
 	}
 
+	return v.decryptSecretRecord(name, record)
+}
+
+func (v *Vault) ListSecretNames(ctx context.Context) ([]string, error) {
+	_ = ctx
+	var names []string
+	err := v.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSecrets)
+		if b == nil {
+			return ErrInvalidVaultFile
+		}
+		return b.ForEach(func(k, _ []byte) error {
+			names = append(names, string(k))
+			return nil
+		})
+	})
+	return names, err
+}
+
+func (v *Vault) DeleteSecret(ctx context.Context, name string) error {
+	_ = ctx
+	if name == "" {
+		return errors.New("secret name required")
+	}
+	return v.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSecrets)
+		if b == nil {
+			return ErrInvalidVaultFile
+		}
+		if b.Get([]byte(name)) == nil {
+			return ErrSecretNotFound
+		}
+		return b.Delete([]byte(name))
+	})
+}
+
+func (v *Vault) RenameSecret(ctx context.Context, fromName, toName string) error {
+	_ = ctx
+	if fromName == "" || toName == "" {
+		return errors.New("secret name required")
+	}
+	if fromName == toName {
+		return errors.New("source and destination names must differ")
+	}
+
+	return v.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSecrets)
+		if b == nil {
+			return ErrInvalidVaultFile
+		}
+		raw := b.Get([]byte(fromName))
+		if raw == nil {
+			return ErrSecretNotFound
+		}
+		if b.Get([]byte(toName)) != nil {
+			return ErrSecretExists
+		}
+
+		sec, err := v.decryptSecretRecord(fromName, raw)
+		if err != nil {
+			return err
+		}
+		sec.Name = toName
+		sec.UpdatedAt = time.Now().UTC()
+
+		record, err := v.encryptSecretRecord(sec)
+		if err != nil {
+			return err
+		}
+		if err := b.Put([]byte(toName), record); err != nil {
+			return err
+		}
+		return b.Delete([]byte(fromName))
+	})
+}
+
+func (v *Vault) encryptSecretRecord(s Secret) ([]byte, error) {
+	plaintext, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	defer Burn(plaintext)
+
+	aead, err := chacha20poly1305.NewX(v.dek)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, chacha20poly1305.NonceSizeX)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	aad := []byte("secret:" + s.Name)
+	ciphertext := aead.Seal(nil, nonce, plaintext, aad)
+	return append(nonce, ciphertext...), nil
+}
+
+func (v *Vault) decryptSecretRecord(name string, record []byte) (Secret, error) {
 	aead, err := chacha20poly1305.NewX(v.dek)
 	if err != nil {
 		return Secret{}, err
@@ -269,22 +353,6 @@ func (v *Vault) GetSecret(ctx context.Context, name string) (Secret, error) {
 		return Secret{}, ErrCorruptedRecord
 	}
 	return s, nil
-}
-
-func (v *Vault) ListSecretNames(ctx context.Context) ([]string, error) {
-	_ = ctx
-	var names []string
-	err := v.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketSecrets)
-		if b == nil {
-			return ErrInvalidVaultFile
-		}
-		return b.ForEach(func(k, _ []byte) error {
-			names = append(names, string(k))
-			return nil
-		})
-	})
-	return names, err
 }
 
 type kdfDerived struct {

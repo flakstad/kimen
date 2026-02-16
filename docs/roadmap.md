@@ -64,17 +64,15 @@ Avoid turning the TUI into a “copy secrets” interface by default.
 These are scoped so the CLI remains the primary API and tests stay strong:
 
 1) **Ergonomics + safety**
-   - `kimen secret rm`
-   - `kimen secret mv` (or `rename`)
-   - better error codes and `--json` output for more commands
+   - extend typed error codes and `--json` output consistency across any remaining CLI surfaces
+   - expand map lint checks (e.g. unreachable mappings, profile composition pitfalls)
 
 2) **Projection planning**
    - `kimen project plan ...` that emits a plan (human + `--json`)
    - optionally: `kimen project run --dry-run` as a wrapper
 
 3) **Systemd-friendly mode**
-   - a command that renders to a chosen runtime dir with predictable naming/permissions
-   - document recommended unit file patterns
+   - extend the current runtime-dir render mode with stronger unit-file guidance and examples
 
 4) **CI bundles**
    - harden `bundle seal/open` flows for GitHub Actions usage

@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,5 +152,101 @@ func TestTamperSecretRecord(t *testing.T) {
 	// Ensure the vault file is still present; corruption is scoped to a record.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("stat vault: %v", err)
+	}
+}
+
+func TestDeleteSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.db")
+	pass := []byte("pass")
+
+	v, err := Init(path, pass)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer v.Close()
+
+	if err := v.PutSecret(context.Background(), Secret{Name: "api_key", Value: []byte("shh")}); err != nil {
+		t.Fatalf("PutSecret: %v", err)
+	}
+
+	if err := v.DeleteSecret(context.Background(), "api_key"); err != nil {
+		t.Fatalf("DeleteSecret: %v", err)
+	}
+
+	_, err = v.GetSecret(context.Background(), "api_key")
+	if !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected ErrSecretNotFound after delete, got %v", err)
+	}
+
+	err = v.DeleteSecret(context.Background(), "api_key")
+	if !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected ErrSecretNotFound on second delete, got %v", err)
+	}
+}
+
+func TestRenameSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.db")
+	pass := []byte("pass")
+
+	v, err := Init(path, pass)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer v.Close()
+
+	if err := v.PutSecret(context.Background(), Secret{Name: "old", Type: "string", Value: []byte("value")}); err != nil {
+		t.Fatalf("PutSecret(old): %v", err)
+	}
+
+	before, err := v.GetSecret(context.Background(), "old")
+	if err != nil {
+		t.Fatalf("GetSecret(old): %v", err)
+	}
+
+	if err := v.RenameSecret(context.Background(), "old", "new"); err != nil {
+		t.Fatalf("RenameSecret: %v", err)
+	}
+
+	_, err = v.GetSecret(context.Background(), "old")
+	if !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected old name to be removed, got %v", err)
+	}
+
+	after, err := v.GetSecret(context.Background(), "new")
+	if err != nil {
+		t.Fatalf("GetSecret(new): %v", err)
+	}
+	if string(after.Value) != "value" {
+		t.Fatalf("unexpected value: %q", after.Value)
+	}
+	if after.Type != "string" {
+		t.Fatalf("unexpected type: %q", after.Type)
+	}
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Fatalf("created_at changed during rename")
+	}
+	if after.UpdatedAt.Before(before.UpdatedAt) {
+		t.Fatalf("updated_at moved backwards")
+	}
+	Burn(before.Value)
+	Burn(after.Value)
+
+	if err := v.PutSecret(context.Background(), Secret{Name: "existing", Value: []byte("x")}); err != nil {
+		t.Fatalf("PutSecret(existing): %v", err)
+	}
+	err = v.RenameSecret(context.Background(), "new", "existing")
+	if !errors.Is(err, ErrSecretExists) {
+		t.Fatalf("expected ErrSecretExists, got %v", err)
+	}
+
+	err = v.RenameSecret(context.Background(), "missing", "other")
+	if !errors.Is(err, ErrSecretNotFound) {
+		t.Fatalf("expected ErrSecretNotFound, got %v", err)
 	}
 }

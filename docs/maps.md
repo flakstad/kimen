@@ -62,3 +62,32 @@ kimen run --profile linje-prod -- clojure -M:dev
 
 - If both a map/profile and inline flags are provided, Kimen combines them.
 - Inline flags are appended after the map, so they naturally “win” for duplicate env vars or file paths.
+
+## Linting maps
+
+Use map linting to catch common mistakes before running projections:
+
+```bash
+kimen map lint --map .kimen/profiles/linje-prod.kmap
+kimen map lint --profile linje-prod --json
+kimen map lint --profile linje-prod --strict
+```
+
+Current lint checks:
+
+- empty map files (no effective mappings) as errors
+- duplicate mappings with conflicting targets (`env`, `file`, `envpath`) as errors
+- redundant duplicate mappings with identical targets as warnings
+- `envpath` vars that shadow `env` vars with the same name as warnings
+- `envpath` entries that reference missing `file` projections as errors
+- projected file path/directory conflicts as errors (for example `file creds` and `file creds/token`)
+- mode-specific warnings (for example `stdin` is run-only; `envpath` requires `--files-dir` for `envfile`)
+- warnings when a map has only file mappings (so `kimen envfile` would fail)
+- warnings for shell-sensitive `exec:` specs that may require wrapper scripts
+- warnings for profile shadowing when multiple profile candidates exist but precedence chooses one
+
+Lint exit behavior:
+
+- exits `0` when there are no lint errors (warnings are allowed)
+- with `--strict`, warnings are treated as failures
+- exits `20` when lint errors are present

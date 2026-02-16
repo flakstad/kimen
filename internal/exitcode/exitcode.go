@@ -2,6 +2,21 @@ package exitcode
 
 import "fmt"
 
+const (
+	CodeSecretNotFound   = 12
+	CodeSecretExists     = 13
+	CodeVaultNotFound    = 14
+	CodeWrongPassphrase  = 15
+	CodeMapLintFailed    = 20
+	CodePlanFailed       = 21
+	CodeEnvfileFailed    = 22
+	CodeProjectionFailed = 23
+	CodeVaultFailed      = 24
+	CodeBundleFailed     = 25
+	CodeConfigFailed     = 26
+	CodeDoctorFailed     = 27
+)
+
 // Error carries an intended process exit code.
 // It is useful for subcommands that should forward child process exit statuses.
 type Error struct {

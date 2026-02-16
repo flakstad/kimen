@@ -7,7 +7,23 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"kimen/internal/exitcode"
 )
+
+type configResult struct {
+	OK     bool     `json:"ok"`
+	Action string   `json:"action"`
+	Path   string   `json:"path,omitempty"`
+	Method string   `json:"method,omitempty"`
+	Exec   []string `json:"exec,omitempty"`
+}
+
+type configErrorResult struct {
+	OK       bool   `json:"ok"`
+	Error    string `json:"error"`
+	ExitCode int    `json:"exit_code"`
+}
 
 func newConfigCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,18 +37,28 @@ func newConfigCommand() *cobra.Command {
 }
 
 func newConfigPathCommand() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "path",
 		Short: "Print the config file path",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := defaultConfigPath()
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:     true,
+					Action: "config_path",
+					Path:   p,
+				})
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), p)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
 }
 
 func newConfigShowCommand() *cobra.Command {
@@ -43,7 +69,7 @@ func newConfigShowCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := loadConfig()
 			if err != nil {
-				return err
+				return configCommandError(cmd, true, err)
 			}
 			var b []byte
 			if pretty {
@@ -52,11 +78,14 @@ func newConfigShowCommand() *cobra.Command {
 				b, err = json.Marshal(c)
 			}
 			if err != nil {
-				return err
+				return configCommandError(cmd, true, err)
 			}
 			b = append(b, '\n')
 			_, err = cmd.OutOrStdout().Write(b)
-			return err
+			if err != nil {
+				return configCommandError(cmd, true, err)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&pretty, "pretty", true, "pretty-print JSON")
@@ -75,17 +104,33 @@ func newConfigUnlockCommand() *cobra.Command {
 }
 
 func newConfigUnlockShowCommand() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show the configured unlock method",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := loadConfig()
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
 			}
 			if c.Unlock == nil {
+				if jsonOut {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+						OK:     true,
+						Action: "config_unlock_show",
+						Method: "prompt",
+					})
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "method: prompt (default)")
 				return nil
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:     true,
+					Action: "config_unlock_show",
+					Method: c.Unlock.Method,
+					Exec:   c.Unlock.Exec,
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "method: %s\n", c.Unlock.Method)
 			if c.Unlock.Method == "exec" {
@@ -94,29 +139,43 @@ func newConfigUnlockShowCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
 }
 
 func newConfigUnlockClearCommand() *cobra.Command {
-	return &cobra.Command{
+	var jsonOut bool
+	cmd := &cobra.Command{
 		Use:   "clear",
 		Short: "Remove unlock configuration (revert to prompt)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := loadConfig()
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
 			}
 			c.Unlock = nil
 			p, err := saveConfig(c)
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:     true,
+					Action: "config_unlock_clear",
+					Path:   p,
+					Method: "prompt",
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "ok (%s)\n", p)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
 }
 
 func newConfigUnlockSetCommand() *cobra.Command {
+	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "set <prompt|env|stdin|exec> [-- <command> [args...]]",
 		Short: "Set the default unlock method",
@@ -135,24 +194,48 @@ func newConfigUnlockSetCommand() *cobra.Command {
 				uc.Method = "exec"
 				uc.Exec = args[1:]
 				if len(uc.Exec) == 0 {
-					return errors.New("exec method requires a command (use: kimen config unlock set exec -- <command> [args...])")
+					return configCommandError(cmd, jsonOut, errors.New("exec method requires a command (use: kimen config unlock set exec -- <command> [args...])"))
 				}
 			default:
-				return fmt.Errorf("unknown unlock method %q", method)
+				return configCommandError(cmd, jsonOut, fmt.Errorf("unknown unlock method %q", method))
 			}
 
 			c, _, err := loadConfig()
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
 			}
 			c.Unlock = &uc
 			p, err := saveConfig(c)
 			if err != nil {
-				return err
+				return configCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:     true,
+					Action: "config_unlock_set",
+					Path:   p,
+					Method: uc.Method,
+					Exec:   uc.Exec,
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "ok (%s)\n", p)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
+}
+
+func configCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
+	if err == nil {
+		return nil
+	}
+	if jsonOut {
+		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(configErrorResult{
+			OK:       false,
+			Error:    err.Error(),
+			ExitCode: exitcode.CodeConfigFailed,
+		})
+	}
+	return exitcode.New(exitcode.CodeConfigFailed, err)
 }
