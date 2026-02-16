@@ -648,3 +648,160 @@ Automation notes:
 - `bundle keygen/recipient/seal/open --json` emit JSON success payloads.
 - On failure with `--json`, bundle commands emit JSON error envelopes on stderr.
 - bundle failures use exit code `25`.
+
+## Remotes: `kimen remote …`
+
+Remotes define where encrypted vault bundles are synchronized.
+
+Current support:
+
+- `type=fs` (filesystem path; either a directory containing `vault.age` or a direct `.age` file path)
+
+### `kimen remote add <name>`
+
+What it does:
+
+- Adds a named remote to local config.
+- Stores remote transport information plus optional sync credentials.
+
+Examples:
+
+```bash
+# Directory remote (bundle path becomes /srv/kimen/team-vault/vault.age)
+kimen remote add team \
+  --type fs \
+  --path /srv/kimen/team-vault \
+  --recipient age1... \
+  --identity ~/.config/kimen/team.agekey
+
+# Direct bundle file path:
+kimen remote add team --type fs --path /srv/kimen/team-vault.age --recipient age1... --identity ~/.config/kimen/team.agekey
+```
+
+### `kimen remote list`
+
+What it does:
+
+- Lists configured remotes.
+
+Examples:
+
+```bash
+kimen remote list
+kimen remote list --json
+```
+
+### `kimen remote rm <name>`
+
+What it does:
+
+- Removes a remote definition.
+- Also removes sync baseline state for that remote (`last_seen_rev`).
+
+Example:
+
+```bash
+kimen remote rm team
+kimen remote rm team --json
+```
+
+Automation notes:
+
+- `remote add/list/rm --json` emit JSON success payloads.
+- remote failures use exit code `30`.
+
+## Sync: `kimen sync …`
+
+Sync uses a local baseline (`last_seen_rev`) to detect remote changes before push.
+
+### `kimen sync status`
+
+What it does:
+
+- Compares local baseline state to the remote bundle revision.
+- Reports whether pushing is safe or pulling is required.
+
+Key fields (`--json`):
+
+- `has_remote`: remote bundle exists
+- `last_seen_rev`: last remote revision observed by local machine
+- `in_sync`: local baseline matches current remote revision
+- `can_push`: push is allowed without conflict
+- `needs_pull`: remote changed or baseline is missing
+
+Examples:
+
+```bash
+kimen sync status --remote team
+kimen sync status --remote team --json
+```
+
+### `kimen sync push`
+
+What it does:
+
+- Encrypts the local vault to the remote bundle path.
+- Updates `last_seen_rev` on success.
+
+Requirements:
+
+- remote must have `recipient` configured
+- local vault file must exist
+- remote baseline check must pass
+
+Examples:
+
+```bash
+kimen sync push --remote team
+kimen sync push --remote team --json
+```
+
+### `kimen sync pull`
+
+What it does:
+
+- Decrypts the remote bundle into the local vault file (overwrite).
+- Updates `last_seen_rev` to the pulled remote revision.
+
+Requirements:
+
+- remote must have `identity` configured
+- remote bundle must exist
+
+Examples:
+
+```bash
+kimen sync pull --remote team
+kimen sync pull --remote team --json
+```
+
+### Sync conflicts and what to do
+
+When `sync push` returns conflict exit code `31`, it means your local baseline does not match the remote state.
+
+Common conflict cases:
+
+- remote changed since your last sync
+- remote bundle was deleted since your last sync
+- remote already has data, but your local machine has no baseline yet
+
+Concrete recovery flow:
+
+```bash
+# 1) inspect state
+kimen sync status --remote team --json
+
+# 2) pull latest remote snapshot
+kimen sync pull --remote team
+
+# 3) re-apply local changes (if needed)
+kimen secret set api_key --stdin
+
+# 4) push again
+kimen sync push --remote team
+```
+
+Automation notes:
+
+- `sync` conflicts use exit code `31`.
+- other sync failures use exit code `32`.

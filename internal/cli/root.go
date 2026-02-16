@@ -25,6 +25,8 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newProjectCommand())
 	cmd.AddCommand(newBundleCommand())
 	cmd.AddCommand(newConfigCommand())
+	cmd.AddCommand(newRemoteCommand())
+	cmd.AddCommand(newSyncCommand())
 	cmd.AddCommand(newMapCommand())
 	cmd.AddCommand(newDoctorCommand())
 	cmd.AddCommand(newVersionCommand())

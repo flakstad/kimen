@@ -15,6 +15,9 @@ const (
 	CodeBundleFailed     = 25
 	CodeConfigFailed     = 26
 	CodeDoctorFailed     = 27
+	CodeRemoteFailed     = 30
+	CodeSyncConflict     = 31
+	CodeSyncFailed       = 32
 )
 
 // Error carries an intended process exit code.

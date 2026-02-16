@@ -12,7 +12,9 @@ import (
 const envConfigPath = "KIMEN_CONFIG"
 
 type config struct {
-	Unlock *unlockConfig `json:"unlock,omitempty"`
+	Unlock  *unlockConfig         `json:"unlock,omitempty"`
+	Remotes []remoteConfig        `json:"remotes,omitempty"`
+	Sync    map[string]syncConfig `json:"sync,omitempty"`
 }
 
 type unlockConfig struct {
@@ -27,6 +29,18 @@ type unlockConfig struct {
 	// Exec is the command+args to execute when method is "exec". It must print
 	// the passphrase as a single line to stdout.
 	Exec []string `json:"exec,omitempty"`
+}
+
+type remoteConfig struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Path      string `json:"path"`
+	Recipient string `json:"recipient,omitempty"`
+	Identity  string `json:"identity,omitempty"`
+}
+
+type syncConfig struct {
+	LastSeenRev string `json:"last_seen_rev,omitempty"`
 }
 
 func defaultConfigPath() (string, error) {

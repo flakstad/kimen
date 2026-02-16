@@ -26,7 +26,7 @@ Commands that use a standard error envelope emit:
 }
 ```
 
-This shape is used by `secret`, `vault`, `bundle`, `config`, `plan`, `envfile`, `run`, and `render` (when `--json` is set).
+This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `plan`, `envfile`, `run`, and `render` (when `--json` is set).
 
 ## Command JSON shapes
 
@@ -50,6 +50,18 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `plan`, `envfile`, 
 - `config show` always emits config JSON on success
 - `config path --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...}`
 - errors use standard error envelope on `stderr`
+
+`remote --json`:
+
+- success (`add|list|rm`): `{"ok":true,"action":"remote_add|remote_list|remote_rm",...}`
+- error: standard error envelope on `stderr`
+
+`sync --json`:
+
+- `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"in_sync":bool,"can_push":bool,"needs_pull":bool,...}`
+- `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"..."}`
+- `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true}`
+- error: standard error envelope on `stderr`
 
 `plan --json` and `project plan --json`:
 
@@ -106,6 +118,9 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `plan`, `envfile`, 
 - `25`: bundle command failed
 - `26`: config command failed
 - `27`: doctor failed
+- `30`: remote command failed
+- `31`: sync conflict (remote changed/deleted or baseline missing)
+- `32`: sync command failed (non-conflict)
 
 Notes:
 
