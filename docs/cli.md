@@ -771,17 +771,20 @@ What it does:
 
 - Encrypts the local vault to the remote bundle path.
 - Updates `last_seen_rev` on success.
+- Uses a lock file (`<bundle>.lock`) to avoid concurrent `sync push` writes on the same remote path.
 
 Requirements:
 
 - remote must have `recipient` configured
 - local vault file must exist
 - remote baseline check must pass
+- push lock must be available (or waited for via `--lock-wait`)
 
 Examples:
 
 ```bash
 kimen sync push --remote team
+kimen sync push --remote team --lock-wait 15s
 kimen sync push --remote team --json
 ```
 

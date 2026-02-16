@@ -65,6 +65,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync restore` success: `{"ok":true,"action":"sync_restore","vault_path":"...","source_backup_path":"...","current_backup_path":"..."}`
 - `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"..."}`
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
+- `sync push` uses a remote lock file (`<bundle>.lock`); lock contention failures use sync exit `32`
 - error: standard error envelope on `stderr`
 
 `plan --json` and `project plan --json`:

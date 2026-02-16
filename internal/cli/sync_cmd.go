@@ -434,6 +434,7 @@ func newSyncRestoreCommand() *cobra.Command {
 func newSyncPushCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var lockWait time.Duration
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Push local vault to remote as encrypted bundle",
@@ -464,10 +465,21 @@ func newSyncPushCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 
-			remoteRev, hasRemote, bundlePath, err := remoteRevision(remote)
+			bundlePath, err := remoteBundlePath(remote)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+			releaseLock, err := acquireRemotePushLock(bundlePath, lockWait)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			defer releaseLock()
+
+			remoteRev, hasRemote, _, err := remoteRevision(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+
 			lastSeen := ""
 			if c.Sync != nil {
 				lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
@@ -510,6 +522,7 @@ func newSyncPushCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().DurationVar(&lockWait, "lock-wait", 0, "how long to wait for remote push lock (e.g. 10s, 1m); default is fail-fast")
 	return cmd
 }
 
@@ -715,4 +728,42 @@ func copyFileAtomic(srcPath, dstPath string, mode os.FileMode) error {
 		return err
 	}
 	return nil
+}
+
+func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error) {
+	lockPath := bundlePath + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		return nil, err
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	deadline := time.Now().Add(wait)
+
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, "pid=%d\ncreated_at=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+			if closeErr := f.Close(); closeErr != nil {
+				_ = os.Remove(lockPath)
+				return nil, closeErr
+			}
+			return func() { _ = os.Remove(lockPath) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if wait == 0 || !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; use --lock-wait to wait)", lockPath)
+		}
+		sleep := 250 * time.Millisecond
+		remaining := time.Until(deadline)
+		if remaining < sleep {
+			sleep = remaining
+		}
+		if sleep <= 0 {
+			return nil, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress)", lockPath)
+		}
+		time.Sleep(sleep)
+	}
 }

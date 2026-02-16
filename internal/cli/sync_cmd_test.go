@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kimen/internal/exitcode"
 )
@@ -388,6 +389,118 @@ func TestCLI_SyncErrors_MissingRemoteMetadata_And_MultipleRemotes(t *testing.T) 
 	errResp = parseJSONMap(t, errOut)
 	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
 		t.Fatalf("unexpected sync status error payload: %#v", errResp)
+	}
+}
+
+func TestCLI_SyncPushFailsWhenRemoteLocked(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "push", "--remote", "origin", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push lock failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync push lock error payload: %#v", errResp)
+	}
+	if !strings.Contains(errResp["error"].(string), "remote push lock exists") {
+		t.Fatalf("expected lock error message, got %#v", errResp)
+	}
+}
+
+func TestCLI_SyncPushLockWaitSucceedsAfterRelease(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = os.Remove(lockPath)
+	}()
+
+	out, errBuf, err := runCLI([]string{"sync", "push", "--remote", "origin", "--lock-wait", "2s", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync push --lock-wait --json: %v (stderr=%s)", err, errBuf)
+	}
+	pushResp := parseJSONMap(t, out)
+	if pushResp["action"] != "sync_push" || pushResp["remote"] != "origin" {
+		t.Fatalf("unexpected sync push response after lock wait: %#v", pushResp)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file removed after successful push, stat err=%v", err)
 	}
 }
 
