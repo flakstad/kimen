@@ -27,6 +27,8 @@ type syncResult struct {
 	RemoteRev         string   `json:"remote_rev,omitempty"`
 	LastSeenRev       string   `json:"last_seen_rev,omitempty"`
 	BackupPath        string   `json:"backup_path,omitempty"`
+	DryRun            bool     `json:"dry_run,omitempty"`
+	WouldBackup       bool     `json:"would_backup,omitempty"`
 	HasRemote         bool     `json:"has_remote"`
 	HasLock           bool     `json:"has_lock"`
 	HasLocal          bool     `json:"has_local,omitempty"`
@@ -954,6 +956,7 @@ func newSyncPullCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
 	var noBackup bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Pull remote encrypted bundle into local vault",
@@ -990,22 +993,59 @@ func newSyncPullCommand() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(vaultPath), 0o700); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			backupPath := ""
-			if !noBackup {
-				if _, err := os.Stat(vaultPath); err == nil {
-					backupPath, err = backupExistingVault(vaultPath)
-					if err != nil {
-						return syncCommandError(cmd, jsonOut, err)
-					}
-				} else if !errors.Is(err, os.ErrNotExist) {
-					return syncCommandError(cmd, jsonOut, err)
-				}
+			hasLocal := false
+			if _, err := os.Stat(vaultPath); err == nil {
+				hasLocal = true
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return syncCommandError(cmd, jsonOut, err)
 			}
 
 			id, err := bundle.LoadIdentity(remote.Identity, false, nil)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+			if dryRun {
+				if err := bundle.ValidateBundleWithIdentity(bundlePath, id); err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				lastSeen := ""
+				if c.Sync != nil {
+					lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
+				}
+				inSync := lastSeen != "" && lastSeen == remoteRev
+				wouldBackup := hasLocal && !noBackup
+				if jsonOut {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(syncResult{
+						OK:          true,
+						Action:      "sync_pull_dry_run",
+						Remote:      remote.Name,
+						RemoteType:  remote.Type,
+						RemotePath:  remote.Path,
+						BundlePath:  bundleRef,
+						VaultPath:   vaultPath,
+						RemoteRev:   remoteRev,
+						LastSeenRev: lastSeen,
+						DryRun:      true,
+						WouldBackup: wouldBackup,
+						HasRemote:   true,
+						HasLocal:    hasLocal,
+						InSync:      inSync,
+					})
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: pull %s (rev=%s)\n", remote.Name, remoteRev)
+				fmt.Fprintf(cmd.OutOrStdout(), "would-backup: %t\n", wouldBackup)
+				fmt.Fprintf(cmd.OutOrStdout(), "in-sync: %t\n", inSync)
+				return nil
+			}
+
+			backupPath := ""
+			if !noBackup && hasLocal {
+				backupPath, err = backupExistingVault(vaultPath)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+			}
+
 			if err := bundle.OpenToVaultFile(bundlePath, vaultPath, id, true); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -1045,6 +1085,7 @@ func newSyncPullCommand() *cobra.Command {
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip creating a local vault backup before overwrite")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate pull preconditions without modifying local vault/baseline")
 	return cmd
 }
 

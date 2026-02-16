@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -378,6 +379,96 @@ func TestCLI_SyncPullRequiredForExistingRemote(t *testing.T) {
 	statusResp = parseJSONMap(t, out)
 	if !jsonBool(statusResp, "in_sync") || !jsonBool(statusResp, "can_push") || jsonBool(statusResp, "needs_pull") {
 		t.Fatalf("unexpected sync status after pull: %#v", statusResp)
+	}
+}
+
+func TestCLI_SyncPullDryRun_DoesNotMutateLocalVaultOrBaseline(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-new"))
+	if err != nil {
+		t.Fatalf("secret set local-new: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+
+	restoreOther := withEnv(map[string]string{envVaultPath: otherVault})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v2"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "pull", "--dry-run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync pull --dry-run --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_pull_dry_run" || !jsonBool(resp, "dry_run") {
+		t.Fatalf("unexpected sync pull dry-run response: %#v", resp)
+	}
+	if !jsonBool(resp, "would_backup") || !jsonBool(resp, "has_local") {
+		t.Fatalf("expected would_backup=true and has_local=true for dry-run: %#v", resp)
+	}
+
+	value, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	if err != nil {
+		t.Fatalf("secret get after dry-run: %v", err)
+	}
+	if value != "local-new" {
+		t.Fatalf("expected local vault unchanged after dry-run, got %q", value)
+	}
+	cfg := readConfig(t)
+	if _, ok := cfg.Sync["origin"]; ok {
+		t.Fatalf("expected sync baseline to remain unchanged after dry-run: %#v", cfg.Sync)
+	}
+	backups, err := filepath.Glob(vaultPath + ".bak.*")
+	if err != nil {
+		t.Fatalf("backup glob: %v", err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("expected no backup files created during dry-run, got %v", backups)
 	}
 }
 
@@ -1478,6 +1569,99 @@ func TestCLI_SyncGitRemote_PushPullRoundTrip(t *testing.T) {
 	}
 	if value != "team-v1" {
 		t.Fatalf("expected team-v1 after git pull, got %q", value)
+	}
+}
+
+func TestCLI_SyncGitRemote_PullDryRun_NoMutation(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	identityPath := filepath.Join(dir, "sync.agekey")
+	recipient := generateRecipient(t, identityPath)
+
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("team-v1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add git (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("sync push git (actor A): %v", err)
+	}
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add git (actor B): %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "pull", "--dry-run", "--json"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("sync pull git --dry-run --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_pull_dry_run" || !jsonBool(resp, "dry_run") {
+		restoreB()
+		t.Fatalf("unexpected sync pull dry-run response for git remote: %#v", resp)
+	}
+	if jsonBool(resp, "has_local") || jsonBool(resp, "would_backup") {
+		restoreB()
+		t.Fatalf("expected has_local=false and would_backup=false on git dry-run with no local vault: %#v", resp)
+	}
+	if _, err := os.Stat(vaultB); !errors.Is(err, os.ErrNotExist) {
+		restoreB()
+		t.Fatalf("expected no local vault file after git dry-run, got stat err=%v", err)
+	}
+	cfg := readConfig(t)
+	restoreB()
+	if _, ok := cfg.Sync["origin"]; ok {
+		t.Fatalf("expected no baseline mutation on git pull dry-run: %#v", cfg.Sync)
 	}
 }
 

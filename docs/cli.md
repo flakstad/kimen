@@ -844,6 +844,7 @@ What it does:
 - Decrypts the remote bundle into the local vault file (overwrite).
 - Creates a timestamped local vault backup before overwrite (default).
 - Updates `last_seen_rev` to the pulled remote revision.
+- `--dry-run` validates decryptability and reports what would happen without modifying local vault or sync baseline.
 
 Requirements:
 
@@ -854,6 +855,7 @@ Examples:
 
 ```bash
 kimen sync pull --remote team
+kimen sync pull --remote team --dry-run --json
 kimen sync pull --remote team --no-backup
 kimen sync pull --remote team --json
 ```
