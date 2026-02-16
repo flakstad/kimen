@@ -2840,6 +2840,332 @@ func TestCLI_SyncAuto_BlocksWhenRemoteChangedAndLocalDirty(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncChanges_DisjointAndConflictAnalysis(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set api_key a1: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set db_pw p1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("initial push (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a2"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set api_key a2 (actor A): %v", err)
+	}
+	restoreA()
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("vault init (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p2"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set db_pw p2 (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err := runCLI([]string{"sync", "changes", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync changes --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if !jsonBool(resp, "has_baseline") || !jsonBool(resp, "can_reconcile") {
+		restoreA()
+		t.Fatalf("expected baseline and reconcile for disjoint change set: %#v", resp)
+	}
+	if !containsString(jsonStringSlice(resp, "local_changed_keys"), "api_key") {
+		restoreA()
+		t.Fatalf("expected api_key in local_changed_keys: %#v", resp)
+	}
+	if !containsString(jsonStringSlice(resp, "remote_changed_keys"), "db_pw") {
+		restoreA()
+		t.Fatalf("expected db_pw in remote_changed_keys: %#v", resp)
+	}
+	if len(jsonStringSlice(resp, "conflict_keys")) != 0 {
+		restoreA()
+		t.Fatalf("expected no conflict_keys for disjoint change set: %#v", resp)
+	}
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a3-local"))
+	restoreA()
+	if err != nil {
+		t.Fatalf("set api_key a3-local (actor A): %v", err)
+	}
+
+	restoreB = withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull before overlap (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a3-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set api_key a3-remote (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push overlap (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err = runCLI([]string{"sync", "changes", "--json"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("sync changes --json overlap: %v (stderr=%s)", err, errBuf)
+	}
+	resp = parseJSONMap(t, out)
+	conflictKeys := jsonStringSlice(resp, "conflict_keys")
+	if !containsString(conflictKeys, "api_key") || jsonBool(resp, "can_reconcile") {
+		t.Fatalf("expected api_key conflict and can_reconcile=false: %#v", resp)
+	}
+}
+
+func TestCLI_SyncPullReconcile_DisjointMergeAndConflictFailure(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set api_key a1: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set db_pw p1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("initial push (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a2-local"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set api_key a2-local: %v", err)
+	}
+	restoreA()
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("vault init (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p2-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set db_pw p2-remote: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err := runCLI([]string{"sync", "pull", "--reconcile", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync pull --reconcile --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_pull_reconcile" || !jsonBool(resp, "reconcile") {
+		restoreA()
+		t.Fatalf("unexpected reconcile pull payload: %#v", resp)
+	}
+	apiVal, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret get api_key: %v", err)
+	}
+	dbVal, _, err := runCLI([]string{"secret", "get", "db_pw", "--unsafe-stdout"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("secret get db_pw: %v", err)
+	}
+	if apiVal != "a2-local" || dbVal != "p2-remote" {
+		t.Fatalf("expected reconciled values api_key=a2-local db_pw=p2-remote, got api_key=%q db_pw=%q", apiVal, dbVal)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a3-local"))
+	restoreA()
+	if err != nil {
+		t.Fatalf("set api_key a3-local: %v", err)
+	}
+
+	restoreB = withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull before overlap (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a3-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set api_key a3-remote: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push overlap (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, errOut, err := runCLI([]string{"sync", "pull", "--reconcile", "--json"}, nil)
+	restoreA()
+	if err == nil {
+		t.Fatalf("expected reconcile pull conflict")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "overlapping_changes" || errResp["recommended_action"] != "manual_reconcile" {
+		t.Fatalf("unexpected reconcile overlap error: %#v", errResp)
+	}
+}
+
 func generateRecipient(t *testing.T, identityPath string) string {
 	t.Helper()
 	out, errBuf, err := runCLI([]string{"bundle", "keygen", "--out", identityPath, "--json"}, nil)

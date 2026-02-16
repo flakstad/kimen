@@ -969,6 +969,30 @@ kimen sync push --remote team --break-stale-lock-after 30m
 kimen sync push --remote team --json
 ```
 
+### `kimen sync changes`
+
+What it does:
+
+- Computes key-level local/remote change analysis relative to the stored sync baseline.
+- Reports:
+  - `local_changed_keys`
+  - `remote_changed_keys`
+  - `overlapping_keys`
+  - `conflict_keys` (unsafe overlap that needs manual resolution)
+- Also reports current local-vs-remote divergence (`current_only_local_keys`, `current_only_remote_keys`, `current_different_keys`) even when baseline analysis is unavailable.
+
+Notes:
+
+- Requires passphrase access because key-level analysis decrypts local and remote vault data.
+- `can_reconcile=true` means disjoint changes can be merged safely using `sync pull --reconcile`.
+
+Examples:
+
+```bash
+kimen sync changes --remote team --json
+kimen sync changes --json
+```
+
 ### `kimen sync conflicts`
 
 What it does:
@@ -996,6 +1020,7 @@ What it does:
 - Creates a timestamped local vault backup before overwrite (default).
 - Updates `last_seen_rev` to the pulled remote revision.
 - `--dry-run` validates decryptability and reports what would happen without modifying local vault or sync baseline.
+- `--reconcile` merges disjoint local/remote key changes instead of replacing local vault contents.
 
 Requirements:
 
@@ -1007,6 +1032,7 @@ Examples:
 ```bash
 kimen sync pull --remote team
 kimen sync pull --remote team --dry-run --json
+kimen sync pull --remote team --reconcile --json
 kimen sync pull --remote team --no-backup
 kimen sync pull --remote team --json
 ```

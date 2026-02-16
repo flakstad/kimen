@@ -740,6 +740,131 @@ func TestCLI_Contract_SyncOrchestrationConflictFailureOnStdout(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncChangesJSONShape(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "changes", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync changes --json: %v (stderr=%s)", err, errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "action", "remote", "has_baseline", "has_remote", "has_local", "can_reconcile")
+	if report["action"] != "sync_changes" || !jsonBool(report, "ok") {
+		t.Fatalf("unexpected sync changes payload: %#v", report)
+	}
+}
+
+func TestCLI_Contract_SyncPullReconcileConflictJSONError(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v2"))
+	if err != nil {
+		t.Fatalf("secret set local-v2: %v", err)
+	}
+
+	restoreOther := withEnv(map[string]string{envVaultPath: otherVault})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v3"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "pull", "--reconcile", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync pull --reconcile conflict")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	errResp := parseJSONMap(t, errOut)
+	requireJSONKeys(t, errResp, "ok", "error", "exit_code", "reason", "recommended_action")
+	if errResp["reason"] != "overlapping_changes" || errResp["recommended_action"] != "manual_reconcile" {
+		t.Fatalf("unexpected reconcile conflict error payload: %#v", errResp)
+	}
+}
+
 func TestCLI_Contract_DoctorJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

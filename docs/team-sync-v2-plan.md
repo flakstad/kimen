@@ -42,6 +42,8 @@ Goal:
 
 - make `kimen sync` the default operator command
 
+Status: implemented.
+
 Behavior target:
 
 - run readiness checks by default (doctor/status path)
@@ -86,10 +88,12 @@ Goal:
 
 - explain *what* changed, not just that a conflict exists
 
+Status: implemented initial version.
+
 Additions:
 
-- key-level change summaries in `sync conflicts --json`
-- `sync changes --json` for local delta visibility since baseline
+- key-level change summaries in `sync changes --json`
+- disjoint/overlap/conflict classification (`local_changed_keys`, `remote_changed_keys`, `overlapping_keys`, `conflict_keys`)
 
 Acceptance gates:
 
@@ -102,10 +106,12 @@ Goal:
 
 - reduce manual conflict handling where it is safe
 
+Status: implemented initial version.
+
 Additions:
 
-- reconcile mode that auto-merges disjoint local/remote changes
-- explicit resolution commands for overlapping keys
+- reconcile mode that auto-merges disjoint local/remote changes (`sync pull --reconcile`)
+- overlapping key changes fail with explicit conflict reason (`overlapping_changes`)
 
 Acceptance gates:
 
@@ -118,6 +124,8 @@ Acceptance gates:
 Goal:
 
 - make orchestration robust for day-to-day team use
+
+Status: partially implemented.
 
 Additions:
 

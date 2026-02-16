@@ -111,6 +111,8 @@ CONFLICTS_JSON="$("$BIN" sync conflicts --remote team --json)"
 assert_contains "$CONFLICTS_JSON" '"has_conflict":true'
 assert_contains "$CONFLICTS_JSON" '"reason":"remote_changed"'
 assert_contains "$CONFLICTS_JSON" '"recommended_action":"sync_pull"'
+CHANGES_JSON="$("$BIN" sync changes --remote team --json)"
+assert_contains "$CHANGES_JSON" '"can_reconcile":true'
 PULL_DRY_JSON="$("$BIN" sync pull --remote team --dry-run --json)"
 assert_contains "$PULL_DRY_JSON" '"action":"sync_pull_dry_run"'
 VALUE_AFTER_PULL_DRY="$("$BIN" secret get api_key --unsafe-stdout)"
@@ -135,6 +137,25 @@ require_exit_code 0 "$BIN" sync preflight --remote team --strict --json
 VALUE_AFTER_RESTORE="$("$BIN" secret get api_key --unsafe-stdout)"
 if [[ "$VALUE_AFTER_RESTORE" != "local-v1" ]]; then
   echo "error: expected local-v1 after restore, got '$VALUE_AFTER_RESTORE'" >&2
+  exit 1
+fi
+
+echo "[e2e-sync-git] Reconcile disjoint local/remote changes"
+printf 'a-only' | "$BIN" secret set note_local --stdin >/dev/null
+
+as_actor_b
+printf 'b-only' | "$BIN" secret set note_remote --stdin >/dev/null
+"$BIN" sync push --remote team >/dev/null
+
+as_actor_a
+RECONCILE_CHANGES_JSON="$("$BIN" sync changes --remote team --json)"
+assert_contains "$RECONCILE_CHANGES_JSON" '"can_reconcile":true'
+RECONCILE_PULL_JSON="$("$BIN" sync pull --remote team --reconcile --json)"
+assert_contains "$RECONCILE_PULL_JSON" '"action":"sync_pull_reconcile"'
+NOTE_LOCAL_AFTER_RECONCILE="$("$BIN" secret get note_local --unsafe-stdout)"
+NOTE_REMOTE_AFTER_RECONCILE="$("$BIN" secret get note_remote --unsafe-stdout)"
+if [[ "$NOTE_LOCAL_AFTER_RECONCILE" != "a-only" || "$NOTE_REMOTE_AFTER_RECONCILE" != "b-only" ]]; then
+  echo "error: expected reconcile to keep note_local=a-only and pull note_remote=b-only" >&2
   exit 1
 fi
 

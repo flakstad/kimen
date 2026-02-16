@@ -42,8 +42,9 @@ type remoteConfig struct {
 }
 
 type syncConfig struct {
-	LastSeenRev  string `json:"last_seen_rev,omitempty"`
-	LastLocalRev string `json:"last_local_rev,omitempty"`
+	LastSeenRev          string            `json:"last_seen_rev,omitempty"`
+	LastLocalRev         string            `json:"last_local_rev,omitempty"`
+	BaselineSecretHashes map[string]string `json:"baseline_secret_hashes,omitempty"`
 }
 
 func defaultConfigPath() (string, error) {

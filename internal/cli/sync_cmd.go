@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 
 	"kimen/internal/bundle"
 	"kimen/internal/exitcode"
+	"kimen/internal/vault"
 )
 
 type syncResult struct {
@@ -44,6 +48,10 @@ type syncResult struct {
 	LockCreated       string   `json:"lock_created,omitempty"`
 	LockError         string   `json:"lock_error,omitempty"`
 	StaleLockBroken   bool     `json:"stale_lock_broken,omitempty"`
+	Reconcile         bool     `json:"reconcile,omitempty"`
+	CanReconcile      bool     `json:"can_reconcile,omitempty"`
+	ConflictKeys      []string `json:"conflict_keys,omitempty"`
+	MergedKeyCount    int      `json:"merged_key_count,omitempty"`
 	LockBlocksPush    bool     `json:"lock_blocks_push"`
 	LikelyStale       bool     `json:"likely_stale"`
 	LockAgeSeconds    int64    `json:"lock_age_seconds"`
@@ -192,6 +200,54 @@ type syncAutoResult struct {
 	Steps                []syncPreflightCheckResult `json:"steps"`
 }
 
+type syncChangesResult struct {
+	OK                    bool     `json:"ok"`
+	Action                string   `json:"action"`
+	Remote                string   `json:"remote,omitempty"`
+	HasBaseline           bool     `json:"has_baseline"`
+	BaselineRev           string   `json:"baseline_rev,omitempty"`
+	RemoteRev             string   `json:"remote_rev,omitempty"`
+	HasRemote             bool     `json:"has_remote"`
+	HasLocal              bool     `json:"has_local"`
+	LocalChangedKeys      []string `json:"local_changed_keys,omitempty"`
+	RemoteChangedKeys     []string `json:"remote_changed_keys,omitempty"`
+	OverlappingKeys       []string `json:"overlapping_keys,omitempty"`
+	ConflictKeys          []string `json:"conflict_keys,omitempty"`
+	LocalOnlyChangedKeys  []string `json:"local_only_changed_keys,omitempty"`
+	RemoteOnlyChangedKeys []string `json:"remote_only_changed_keys,omitempty"`
+	CurrentOnlyLocalKeys  []string `json:"current_only_local_keys,omitempty"`
+	CurrentOnlyRemoteKeys []string `json:"current_only_remote_keys,omitempty"`
+	CurrentDifferentKeys  []string `json:"current_different_keys,omitempty"`
+	CanReconcile          bool     `json:"can_reconcile"`
+	RecommendedAction     string   `json:"recommended_action,omitempty"`
+}
+
+type syncVaultSnapshot struct {
+	Hashes  map[string]string
+	Secrets map[string]vault.Secret
+}
+
+type syncChangeOp string
+
+const (
+	syncChangeUnchanged syncChangeOp = "unchanged"
+	syncChangeAdded     syncChangeOp = "added"
+	syncChangeRemoved   syncChangeOp = "removed"
+	syncChangeModified  syncChangeOp = "modified"
+)
+
+type syncChangeAnalysis struct {
+	HasBaseline           bool
+	LocalOps              map[string]syncChangeOp
+	RemoteOps             map[string]syncChangeOp
+	LocalChangedKeys      []string
+	RemoteChangedKeys     []string
+	OverlappingKeys       []string
+	ConflictKeys          []string
+	LocalOnlyChangedKeys  []string
+	RemoteOnlyChangedKeys []string
+}
+
 const (
 	syncPreflightCheckDoctor     = "doctor"
 	syncPreflightCheckStatus     = "sync_status"
@@ -200,6 +256,7 @@ const (
 	syncPreflightCheckPushDryRun = "sync_push_dry_run"
 	syncAutoCheckSyncPush        = "sync_push"
 	syncAutoCheckSyncPull        = "sync_pull"
+	syncAutoCheckSyncReconcile   = "sync_pull_reconcile"
 )
 
 var syncPreflightCheckOrder = []string{
@@ -395,6 +452,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.AddCommand(newSyncPreflightCommand())
+	cmd.AddCommand(newSyncChangesCommand())
 	cmd.AddCommand(newSyncStatusCommand())
 	cmd.AddCommand(newSyncConflictsCommand())
 	cmd.AddCommand(newSyncResetBaselineCommand())
@@ -474,6 +532,119 @@ func newSyncPreflightCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
 	cmd.Flags().StringSliceVar(&onlyChecks, "only", nil, "run only selected checks (doctor|status|conflicts|pull|push)")
 	cmd.Flags().StringSliceVar(&skipChecks, "skip", nil, "skip selected checks (doctor|status|conflicts|pull|push)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
+}
+
+func newSyncChangesCommand() *cobra.Command {
+	var remoteName string
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "changes",
+		Short: "Analyze key-level local/remote changes relative to sync baseline",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, _, err := loadConfig()
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			remote, err := resolveRemote(c, remoteName)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			remoteRev, hasRemote, _, err := remoteRevision(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			vaultPath, err := defaultVaultPath()
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			_, hasLocal, err := localVaultRevision(vaultPath)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			pp, err := resolvePassphrase("", false)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			defer vault.Burn(pp)
+
+			localSnap := syncVaultSnapshot{Hashes: map[string]string{}}
+			if hasLocal {
+				localSnap, err = loadLocalVaultSnapshot(vaultPath, pp, false)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+			}
+			remoteSnap := syncVaultSnapshot{Hashes: map[string]string{}}
+			if hasRemote {
+				remoteSnap, err = loadRemoteVaultSnapshot(remote, pp, false)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+			}
+
+			syncState, hasSyncState := c.Sync[remote.Name]
+			baseline := map[string]string(nil)
+			if hasSyncState {
+				baseline = syncState.BaselineSecretHashes
+			}
+			analysis := analyzeSyncChanges(baseline, localSnap.Hashes, remoteSnap.Hashes)
+			onlyLocal, onlyRemote, different := diffSnapshotsCurrent(localSnap.Hashes, remoteSnap.Hashes)
+			result := syncChangesResult{
+				OK:                    true,
+				Action:                "sync_changes",
+				Remote:                remote.Name,
+				HasBaseline:           analysis.HasBaseline,
+				BaselineRev:           strings.TrimSpace(syncState.LastSeenRev),
+				RemoteRev:             strings.TrimSpace(remoteRev),
+				HasRemote:             hasRemote,
+				HasLocal:              hasLocal,
+				LocalChangedKeys:      analysis.LocalChangedKeys,
+				RemoteChangedKeys:     analysis.RemoteChangedKeys,
+				OverlappingKeys:       analysis.OverlappingKeys,
+				ConflictKeys:          analysis.ConflictKeys,
+				LocalOnlyChangedKeys:  analysis.LocalOnlyChangedKeys,
+				RemoteOnlyChangedKeys: analysis.RemoteOnlyChangedKeys,
+				CurrentOnlyLocalKeys:  onlyLocal,
+				CurrentOnlyRemoteKeys: onlyRemote,
+				CurrentDifferentKeys:  different,
+				CanReconcile:          analysis.HasBaseline && len(analysis.ConflictKeys) == 0,
+			}
+			switch {
+			case !analysis.HasBaseline:
+				result.RecommendedAction = "sync_pull_or_sync_reset_baseline"
+			case len(analysis.ConflictKeys) > 0:
+				result.RecommendedAction = "manual_reconcile"
+			case len(analysis.RemoteChangedKeys) > 0 && len(analysis.LocalChangedKeys) == 0:
+				result.RecommendedAction = "sync_pull"
+			case len(analysis.LocalChangedKeys) > 0 && len(analysis.RemoteChangedKeys) == 0:
+				result.RecommendedAction = "sync_push"
+			case len(analysis.LocalChangedKeys) > 0 || len(analysis.RemoteChangedKeys) > 0:
+				result.RecommendedAction = "sync_pull_reconcile"
+			default:
+				result.RecommendedAction = "none"
+			}
+
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "remote: %s\n", result.Remote)
+			fmt.Fprintf(cmd.OutOrStdout(), "has-baseline: %t\n", result.HasBaseline)
+			fmt.Fprintf(cmd.OutOrStdout(), "can-reconcile: %t\n", result.CanReconcile)
+			fmt.Fprintf(cmd.OutOrStdout(), "local-changed-keys: %d\n", len(result.LocalChangedKeys))
+			fmt.Fprintf(cmd.OutOrStdout(), "remote-changed-keys: %d\n", len(result.RemoteChangedKeys))
+			fmt.Fprintf(cmd.OutOrStdout(), "overlapping-keys: %d\n", len(result.OverlappingKeys))
+			fmt.Fprintf(cmd.OutOrStdout(), "conflict-keys: %d\n", len(result.ConflictKeys))
+			if len(result.ConflictKeys) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "conflict-list: %s\n", strings.Join(result.ConflictKeys, ","))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", result.RecommendedAction)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -1360,13 +1531,22 @@ func newSyncPushCommand() *cobra.Command {
 			if !hasLocal {
 				return syncCommandError(cmd, jsonOut, errors.New("local vault disappeared before baseline update"))
 			}
+			baselineHashes := map[string]string(nil)
+			if pp, ok := resolvePassphraseIfConfigured(); ok {
+				defer vault.Burn(pp)
+				snap, err := loadLocalVaultSnapshot(vaultPath, pp, false)
+				if err == nil {
+					baselineHashes = snap.Hashes
+				}
+			}
 
 			if c.Sync == nil {
 				c.Sync = make(map[string]syncConfig)
 			}
 			c.Sync[remote.Name] = syncConfig{
-				LastSeenRev:  newRev,
-				LastLocalRev: localRev,
+				LastSeenRev:          newRev,
+				LastLocalRev:         localRev,
+				BaselineSecretHashes: baselineHashes,
 			}
 			if _, err := saveConfig(c); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
@@ -1405,6 +1585,7 @@ func newSyncPullCommand() *cobra.Command {
 	var jsonOut bool
 	var noBackup bool
 	var dryRun bool
+	var reconcile bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Pull remote encrypted bundle into local vault",
@@ -1452,6 +1633,38 @@ func newSyncPullCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+
+			pp := []byte(nil)
+			localSnap := syncVaultSnapshot{}
+			remoteSnap := syncVaultSnapshot{}
+			reconcileAnalysis := syncChangeAnalysis{}
+			if reconcile && hasLocal {
+				pp, err = resolvePassphrase("", false)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				defer vault.Burn(pp)
+				localSnap, err = loadLocalVaultSnapshot(vaultPath, pp, true)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				remoteSnap, err = loadRemoteVaultSnapshotFromBundlePath(bundlePath, remote.Identity, pp, true)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				syncState := c.Sync[remote.Name]
+				reconcileAnalysis = analyzeSyncChanges(syncState.BaselineSecretHashes, localSnap.Hashes, remoteSnap.Hashes)
+				if !reconcileAnalysis.HasBaseline {
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "reconcile_baseline_missing",
+						Message:           "cannot reconcile without baseline key hashes; run `kimen sync pull` first",
+						RecommendedAction: "sync_pull",
+					})
+				}
+				if len(reconcileAnalysis.ConflictKeys) > 0 {
+					return syncCommandError(cmd, jsonOut, newSyncOverlappingChangesConflict(reconcileAnalysis.ConflictKeys))
+				}
+			}
 			if dryRun {
 				if err := bundle.ValidateBundleWithIdentity(bundlePath, id); err != nil {
 					return syncCommandError(cmd, jsonOut, err)
@@ -1478,11 +1691,18 @@ func newSyncPullCommand() *cobra.Command {
 						HasRemote:   true,
 						HasLocal:    hasLocal,
 						InSync:      inSync,
+						Reconcile:   reconcile,
+						CanReconcile: !reconcile ||
+							(reconcile && (!hasLocal || (reconcileAnalysis.HasBaseline && len(reconcileAnalysis.ConflictKeys) == 0))),
+						ConflictKeys: reconcileAnalysis.ConflictKeys,
 					})
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: pull %s (rev=%s)\n", remote.Name, remoteRev)
 				fmt.Fprintf(cmd.OutOrStdout(), "would-backup: %t\n", wouldBackup)
 				fmt.Fprintf(cmd.OutOrStdout(), "in-sync: %t\n", inSync)
+				if reconcile {
+					fmt.Fprintf(cmd.OutOrStdout(), "reconcile: true (conflicts=%d)\n", len(reconcileAnalysis.ConflictKeys))
+				}
 				return nil
 			}
 
@@ -1494,8 +1714,25 @@ func newSyncPullCommand() *cobra.Command {
 				}
 			}
 
-			if err := bundle.OpenToVaultFile(bundlePath, vaultPath, id, true); err != nil {
-				return syncCommandError(cmd, jsonOut, err)
+			mergedKeyCount := 0
+			baselineHashes := map[string]string(nil)
+			if reconcile && hasLocal {
+				if err := applyReconcileMerge(vaultPath, pp, localSnap, remoteSnap, reconcileAnalysis); err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				mergedKeyCount = len(reconcileAnalysis.LocalOnlyChangedKeys) + len(reconcileAnalysis.RemoteOnlyChangedKeys)
+				baselineHashes = copyStringMap(remoteSnap.Hashes)
+			} else {
+				if err := bundle.OpenToVaultFile(bundlePath, vaultPath, id, true); err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				if ppOpt, ok := resolvePassphraseIfConfigured(); ok {
+					defer vault.Burn(ppOpt)
+					snap, err := loadLocalVaultSnapshot(vaultPath, ppOpt, false)
+					if err == nil {
+						baselineHashes = snap.Hashes
+					}
+				}
 			}
 			localRev, hasLocal, err := localVaultRevision(vaultPath)
 			if err != nil {
@@ -1509,31 +1746,43 @@ func newSyncPullCommand() *cobra.Command {
 				c.Sync = make(map[string]syncConfig)
 			}
 			c.Sync[remote.Name] = syncConfig{
-				LastSeenRev:  remoteRev,
-				LastLocalRev: localRev,
+				LastSeenRev:          remoteRev,
+				LastLocalRev:         localRev,
+				BaselineSecretHashes: baselineHashes,
 			}
 			if _, err := saveConfig(c); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 
 			if jsonOut {
+				action := "sync_pull"
+				if reconcile {
+					action = "sync_pull_reconcile"
+				}
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(syncResult{
-					OK:          true,
-					Action:      "sync_pull",
-					Remote:      remote.Name,
-					RemoteType:  remote.Type,
-					RemotePath:  remote.Path,
-					BundlePath:  bundleRef,
-					VaultPath:   vaultPath,
-					RemoteRev:   remoteRev,
-					LastSeenRev: remoteRev,
-					BackupPath:  backupPath,
-					HasRemote:   true,
-					HasLocal:    true,
-					InSync:      true,
+					OK:             true,
+					Action:         action,
+					Remote:         remote.Name,
+					RemoteType:     remote.Type,
+					RemotePath:     remote.Path,
+					BundlePath:     bundleRef,
+					VaultPath:      vaultPath,
+					RemoteRev:      remoteRev,
+					LastSeenRev:    remoteRev,
+					BackupPath:     backupPath,
+					HasRemote:      true,
+					HasLocal:       true,
+					InSync:         true,
+					Reconcile:      reconcile,
+					MergedKeyCount: mergedKeyCount,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "pulled %s (rev=%s)\n", remote.Name, remoteRev)
+			if reconcile {
+				fmt.Fprintf(cmd.OutOrStdout(), "reconciled pull %s (rev=%s)\n", remote.Name, remoteRev)
+				fmt.Fprintf(cmd.OutOrStdout(), "merged-keys: %d\n", mergedKeyCount)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "pulled %s (rev=%s)\n", remote.Name, remoteRev)
+			}
 			if backupPath != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "backup: %s\n", backupPath)
 			}
@@ -1544,6 +1793,7 @@ func newSyncPullCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip creating a local vault backup before overwrite")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate pull preconditions without modifying local vault/baseline")
+	cmd.Flags().BoolVar(&reconcile, "reconcile", false, "merge disjoint local/remote key changes instead of replacing local vault")
 	return cmd
 }
 
@@ -2032,6 +2282,330 @@ func syncPreflightCheckName(args []string) string {
 	return strings.Join(args, "_")
 }
 
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func resolvePassphraseIfConfigured() ([]byte, bool) {
+	if p := os.Getenv(envPassphrase); p != "" {
+		return []byte(p), true
+	}
+	c, _, err := loadConfig()
+	if err != nil || c.Unlock == nil {
+		return nil, false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Unlock.Method)) {
+	case "exec":
+		if len(c.Unlock.Exec) == 0 {
+			return nil, false
+		}
+		pp, err := resolvePassphraseFromExec(c.Unlock.Exec)
+		if err != nil {
+			return nil, false
+		}
+		return pp, true
+	default:
+		return nil, false
+	}
+}
+
+func loadLocalVaultSnapshot(vaultPath string, passphrase []byte, includeSecrets bool) (syncVaultSnapshot, error) {
+	return loadVaultSnapshot(vaultPath, passphrase, includeSecrets)
+}
+
+func loadRemoteVaultSnapshot(remote remoteConfig, passphrase []byte, includeSecrets bool) (syncVaultSnapshot, error) {
+	bundlePath, cleanup, err := materializeRemoteBundleForRead(remote)
+	if err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	defer cleanup()
+	return loadRemoteVaultSnapshotFromBundlePath(bundlePath, strings.TrimSpace(remote.Identity), passphrase, includeSecrets)
+}
+
+func loadRemoteVaultSnapshotFromBundlePath(bundlePath, identityPath string, passphrase []byte, includeSecrets bool) (syncVaultSnapshot, error) {
+	id, err := bundle.LoadIdentity(identityPath, false, nil)
+	if err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	tmpDir, err := os.MkdirTemp("", "kimen-sync-snapshot-*")
+	if err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpVaultPath := filepath.Join(tmpDir, "vault.db")
+	if err := bundle.OpenToVaultFile(bundlePath, tmpVaultPath, id, true); err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	return loadVaultSnapshot(tmpVaultPath, passphrase, includeSecrets)
+}
+
+func loadVaultSnapshot(vaultPath string, passphrase []byte, includeSecrets bool) (syncVaultSnapshot, error) {
+	snapshot := syncVaultSnapshot{
+		Hashes: make(map[string]string),
+	}
+	if includeSecrets {
+		snapshot.Secrets = make(map[string]vault.Secret)
+	}
+	v, err := vault.Open(vaultPath, passphrase)
+	if err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	defer v.Close()
+	names, err := v.ListSecretNames(context.Background())
+	if err != nil {
+		return syncVaultSnapshot{}, err
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		sec, err := v.GetSecret(context.Background(), name)
+		if err != nil {
+			return syncVaultSnapshot{}, err
+		}
+		hash := hashSyncSecret(sec)
+		snapshot.Hashes[name] = hash
+		if includeSecrets {
+			valueCopy := append([]byte(nil), sec.Value...)
+			snapshot.Secrets[name] = vault.Secret{
+				Name:  sec.Name,
+				Type:  sec.Type,
+				Value: valueCopy,
+			}
+		}
+		vault.Burn(sec.Value)
+	}
+	return snapshot, nil
+}
+
+func hashSyncSecret(sec vault.Secret) string {
+	sum := sha256.New()
+	_, _ = sum.Write([]byte(sec.Type))
+	_, _ = sum.Write([]byte{0})
+	_, _ = sum.Write(sec.Value)
+	return fmt.Sprintf("%x", sum.Sum(nil))
+}
+
+func analyzeSyncChanges(baseline, local, remote map[string]string) syncChangeAnalysis {
+	analysis := syncChangeAnalysis{
+		HasBaseline: baseline != nil,
+		LocalOps:    make(map[string]syncChangeOp),
+		RemoteOps:   make(map[string]syncChangeOp),
+	}
+	if !analysis.HasBaseline {
+		return analysis
+	}
+	analysis.LocalOps, analysis.LocalChangedKeys = computeSyncChangeOps(baseline, local)
+	analysis.RemoteOps, analysis.RemoteChangedKeys = computeSyncChangeOps(baseline, remote)
+
+	overlap := make([]string, 0)
+	conflicts := make([]string, 0)
+	localOnly := make([]string, 0)
+	remoteOnly := make([]string, 0)
+
+	keySet := make(map[string]struct{}, len(analysis.LocalOps)+len(analysis.RemoteOps))
+	for k := range analysis.LocalOps {
+		keySet[k] = struct{}{}
+	}
+	for k := range analysis.RemoteOps {
+		keySet[k] = struct{}{}
+	}
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		lo, ok := analysis.LocalOps[key]
+		if !ok {
+			lo = syncChangeUnchanged
+		}
+		ro, ok := analysis.RemoteOps[key]
+		if !ok {
+			ro = syncChangeUnchanged
+		}
+		localChanged := lo != syncChangeUnchanged
+		remoteChanged := ro != syncChangeUnchanged
+		switch {
+		case localChanged && remoteChanged:
+			overlap = append(overlap, key)
+			if isSyncConflictChange(lo, ro, local[key], remote[key]) {
+				conflicts = append(conflicts, key)
+			}
+		case localChanged:
+			localOnly = append(localOnly, key)
+		case remoteChanged:
+			remoteOnly = append(remoteOnly, key)
+		}
+	}
+	analysis.OverlappingKeys = overlap
+	analysis.ConflictKeys = conflicts
+	analysis.LocalOnlyChangedKeys = localOnly
+	analysis.RemoteOnlyChangedKeys = remoteOnly
+	return analysis
+}
+
+func computeSyncChangeOps(baseline, current map[string]string) (map[string]syncChangeOp, []string) {
+	ops := make(map[string]syncChangeOp)
+	changed := make([]string, 0)
+	keySet := make(map[string]struct{}, len(baseline)+len(current))
+	for k := range baseline {
+		keySet[k] = struct{}{}
+	}
+	for k := range current {
+		keySet[k] = struct{}{}
+	}
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		baseHash, inBase := baseline[key]
+		curHash, inCur := current[key]
+		switch {
+		case !inBase && inCur:
+			ops[key] = syncChangeAdded
+		case inBase && !inCur:
+			ops[key] = syncChangeRemoved
+		case inBase && inCur && strings.TrimSpace(baseHash) != strings.TrimSpace(curHash):
+			ops[key] = syncChangeModified
+		default:
+			ops[key] = syncChangeUnchanged
+		}
+		if ops[key] != syncChangeUnchanged {
+			changed = append(changed, key)
+		}
+	}
+	return ops, changed
+}
+
+func isSyncConflictChange(localOp, remoteOp syncChangeOp, localHash, remoteHash string) bool {
+	switch {
+	case localOp == syncChangeRemoved && remoteOp == syncChangeRemoved:
+		return false
+	case (localOp == syncChangeAdded || localOp == syncChangeModified) &&
+		(remoteOp == syncChangeAdded || remoteOp == syncChangeModified):
+		return strings.TrimSpace(localHash) != strings.TrimSpace(remoteHash)
+	default:
+		return true
+	}
+}
+
+func diffSnapshotsCurrent(local, remote map[string]string) ([]string, []string, []string) {
+	onlyLocal := make([]string, 0)
+	onlyRemote := make([]string, 0)
+	different := make([]string, 0)
+	for key, localHash := range local {
+		remoteHash, ok := remote[key]
+		if !ok {
+			onlyLocal = append(onlyLocal, key)
+			continue
+		}
+		if strings.TrimSpace(localHash) != strings.TrimSpace(remoteHash) {
+			different = append(different, key)
+		}
+	}
+	for key := range remote {
+		if _, ok := local[key]; !ok {
+			onlyRemote = append(onlyRemote, key)
+		}
+	}
+	sort.Strings(onlyLocal)
+	sort.Strings(onlyRemote)
+	sort.Strings(different)
+	return onlyLocal, onlyRemote, different
+}
+
+func newSyncOverlappingChangesConflict(conflictKeys []string) error {
+	keys := append([]string(nil), conflictKeys...)
+	sort.Strings(keys)
+	msg := "local and remote have overlapping key changes; manual reconciliation required"
+	if len(keys) > 0 {
+		msg = fmt.Sprintf("%s (keys=%s)", msg, strings.Join(keys, ","))
+	}
+	return &syncConflictError{
+		Details: syncConflictDetails{
+			HasConflict: true,
+			Reason:      "overlapping_changes",
+			Message:     msg,
+		},
+	}
+}
+
+func applyReconcileMerge(vaultPath string, passphrase []byte, localSnap, remoteSnap syncVaultSnapshot, analysis syncChangeAnalysis) error {
+	v, err := vault.Open(vaultPath, passphrase)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+
+	keySet := make(map[string]struct{}, len(analysis.LocalOps)+len(analysis.RemoteOps))
+	for k := range analysis.LocalOps {
+		keySet[k] = struct{}{}
+	}
+	for k := range analysis.RemoteOps {
+		keySet[k] = struct{}{}
+	}
+	keys := make([]string, 0, len(keySet))
+	for k := range keySet {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		lo, ok := analysis.LocalOps[key]
+		if !ok {
+			lo = syncChangeUnchanged
+		}
+		ro, ok := analysis.RemoteOps[key]
+		if !ok {
+			ro = syncChangeUnchanged
+		}
+		switch {
+		case lo == syncChangeUnchanged && ro == syncChangeUnchanged:
+			continue
+		case lo != syncChangeUnchanged && ro == syncChangeUnchanged:
+			continue
+		case lo == syncChangeUnchanged && ro != syncChangeUnchanged:
+			if ro == syncChangeRemoved {
+				if err := v.DeleteSecret(context.Background(), key); err != nil && !errors.Is(err, vault.ErrSecretNotFound) {
+					return err
+				}
+				continue
+			}
+			remoteSecret, ok := remoteSnap.Secrets[key]
+			if !ok {
+				return fmt.Errorf("remote secret %q missing during reconcile", key)
+			}
+			if err := v.PutSecret(context.Background(), vault.Secret{
+				Name:  key,
+				Type:  remoteSecret.Type,
+				Value: remoteSecret.Value,
+			}); err != nil {
+				return err
+			}
+		default:
+			if lo == syncChangeRemoved && ro == syncChangeRemoved {
+				if err := v.DeleteSecret(context.Background(), key); err != nil && !errors.Is(err, vault.ErrSecretNotFound) {
+					return err
+				}
+				continue
+			}
+			if isSyncConflictChange(lo, ro, localSnap.Hashes[key], remoteSnap.Hashes[key]) {
+				return newSyncOverlappingChangesConflict([]string{key})
+			}
+		}
+	}
+	return nil
+}
+
 func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 	if err == nil {
 		return nil
@@ -2072,6 +2646,8 @@ func recommendedActionForConflictReason(reason string) string {
 		return "sync_pull"
 	case "remote_disappeared":
 		return "sync_reset_baseline_or_remote_recreate"
+	case "overlapping_changes":
+		return "manual_reconcile"
 	default:
 		return ""
 	}

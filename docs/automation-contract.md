@@ -69,6 +69,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
   - `{"ok":bool,"action":"sync","remote":"...","mode":"apply|dry_run|check","strict":bool,"dry_run":bool,"check":bool,"decision":"noop|push|pull|would_push|would_pull|blocked","exit_code":0|31|32|27|...,"local_changed":bool,"local_change_uncertain":bool,"reason":"...","recommended_action":"...","status":{...},"steps":[{"name":"doctor|sync_status|sync_push|sync_pull|sync_push_dry_run|sync_pull_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
   - input/flag validation failures still use the standard error envelope on `stderr`
 - `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","has_local":bool,"in_sync":bool,"can_push":bool,"needs_pull":bool,"blockers":["..."],"recommended_action":"sync_pull|sync_push|wait_or_sync_unlock|configure_remote_recipient|configure_remote_identity|sync_reset_baseline_or_remote_recreate|vault_init|none",...}`
+- `sync changes` success: `{"ok":true,"action":"sync_changes","remote":"...","has_baseline":bool,"baseline_rev":"...","remote_rev":"...","has_remote":bool,"has_local":bool,"local_changed_keys":["..."],"remote_changed_keys":["..."],"overlapping_keys":["..."],"conflict_keys":["..."],"local_only_changed_keys":["..."],"remote_only_changed_keys":["..."],"current_only_local_keys":["..."],"current_only_remote_keys":["..."],"current_different_keys":["..."],"can_reconcile":bool,"recommended_action":"..."}` (requires passphrase)
 - `sync preflight --json`: emits report on `stdout` for both success and failure:
   - `{"ok":bool,"action":"sync_preflight","remote":"...","strict":bool,"exit_code":0|31|32,"check_count":N,"failed_count":N,"failed_checks":["..."],"failed_check":"...","recommended_action":"...","checks":[{"name":"doctor|sync_status|sync_conflicts|sync_pull_dry_run|sync_push_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
   - strict mode runs doctor/status/conflicts with strict semantics
@@ -83,14 +84,15 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"...","stale_lock_broken":bool}` (`stale_lock_broken` omitted unless stale lock auto-break occurred)
 - `sync push --dry-run` success: `{"ok":true,"action":"sync_push_dry_run","remote":"...","remote_rev":"...","last_seen_rev":"...","dry_run":true,"has_local":true,"can_push":true}` (no remote/config mutation)
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
+- `sync pull --reconcile` success: `{"ok":true,"action":"sync_pull_reconcile","remote":"...","remote_rev":"...","reconcile":true,"merged_key_count":N,"backup_path":"..."}` (disjoint local/remote key changes merged; overlap fails)
 - `sync pull --dry-run` success: `{"ok":true,"action":"sync_pull_dry_run","remote":"...","remote_rev":"...","dry_run":true,"has_local":bool,"would_backup":bool,"in_sync":bool}` (no local vault/config mutation)
 - `sync push` uses a remote lock file (`<bundle>.lock`) for `type=fs`; lock contention failures use sync exit `32`
 - `sync push --dry-run` rejects `--lock-wait` and `--break-stale-lock-after`
 - for `type=git`, lock-related fields are false/empty and lock flags (`--lock-wait`, `--break-stale-lock-after`) are rejected
 - sync conflict errors (exit `31`) include structured fields in the standard envelope:
-  - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
+  - `reason`: `remote_changed|remote_disappeared|no_local_baseline|overlapping_changes`
   - `expected_rev` / `actual_rev` when available
-  - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate`
+  - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate|manual_reconcile`
 - sync precondition errors (exit `32`) may include structured fields:
   - `reason`: e.g. `remote_lock_present`
   - `recommended_action`: e.g. `wait_or_sync_unlock`
