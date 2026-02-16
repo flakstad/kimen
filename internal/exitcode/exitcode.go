@@ -18,6 +18,7 @@ const (
 	CodeRemoteFailed     = 30
 	CodeSyncConflict     = 31
 	CodeSyncFailed       = 32
+	CodeInitFailed       = 33
 )
 
 // Error carries an intended process exit code.

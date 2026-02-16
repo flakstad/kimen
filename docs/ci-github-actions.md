@@ -134,6 +134,12 @@ Template file:
 
 - `.github/workflows/kimen-sync-gate-template.yml`
 
+Fast scaffold option:
+
+```bash
+kimen init ci-sync-gate
+```
+
 Required GitHub secrets:
 
 - `KIMEN_AGE_IDENTITY`

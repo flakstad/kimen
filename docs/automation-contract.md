@@ -26,7 +26,7 @@ Commands that use a standard error envelope emit:
 }
 ```
 
-This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `plan`, `envfile`, `run`, and `render` (when `--json` is set).
+This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `plan`, `envfile`, `run`, `render`, and `init` (when `--json` is set).
 
 ## Command JSON shapes
 
@@ -122,6 +122,11 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - check entries include stable core checks (`config_*`, `passphrase_source`, `vault_*`, `mapping_*`, `bundle_*`) and per-remote checks like `remote_<name>_config|push|pull|transport|fs_dir|git_remote|git_branch|sync_state`
 - no separate error envelope on `stderr`
 
+`init --json`:
+
+- `init ci-sync-gate` success: `{"ok":true,"action":"init_ci_sync_gate","out":"..."}`
+- error: standard error envelope on `stderr`
+
 `version --json`:
 
 - success: `{"version":"...","raw_version":"...","commit":"...","date":"..."}`
@@ -144,6 +149,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `30`: remote command failed
 - `31`: sync conflict (remote changed/deleted or baseline missing)
 - `32`: sync command failed (non-conflict)
+- `33`: init command failed
 
 Notes:
 

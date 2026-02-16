@@ -69,6 +69,45 @@ kimen config unlock set exec -- bw get password kimen-vault
 kimen config unlock set exec -- gcloud secrets versions access latest --secret kimen-vault-passphrase
 ```
 
+## `kimen init …`
+
+Scaffold starter integration files directly from the CLI.
+
+### `kimen init ci-sync-gate`
+
+What it does:
+
+- Writes a strict Team Sync CI gate workflow file (default: `.github/workflows/kimen-sync-gate.yml`).
+- Includes strict readiness checks + no-mutation preflights:
+  - `doctor --strict --json`
+  - `sync status --strict --json`
+  - `sync conflicts --strict --json`
+  - `sync pull --dry-run --json`
+  - `sync push --dry-run --json`
+
+Common flags:
+
+- `--out`: output workflow path (default `.github/workflows/kimen-sync-gate.yml`)
+- `--force`: overwrite existing output file
+- `--remote-type`: default workflow input (`git` or `fs`)
+- `--remote-path`: default workflow input for remote endpoint
+- `--remote-name`, `--remote-branch`, `--remote-bundle-path`, `--local-bundle`, `--profile`, `--stale-threshold`
+
+Examples:
+
+```bash
+kimen init ci-sync-gate
+
+kimen init ci-sync-gate \
+  --remote-type git \
+  --remote-path git@github.com:org/team-secrets.git \
+  --remote-name team \
+  --profile prod \
+  --out .github/workflows/kimen-sync-gate.yml
+
+kimen init ci-sync-gate --force --json
+```
+
 ## `kimen config …`
 
 Kimen config controls local CLI behavior (primarily passphrase unlock defaults). It does not store secret values.

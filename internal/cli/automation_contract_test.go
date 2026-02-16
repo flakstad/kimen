@@ -150,6 +150,187 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_StrictGateSequence(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--strict", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --strict --json (healthy): %v (stderr=%s)", err, errBuf)
+	}
+	doctor := parseJSONMap(t, out)
+	if !jsonBool(doctor, "ok") || !jsonBool(doctor, "strict") {
+		t.Fatalf("expected strict doctor success in healthy state: %#v", doctor)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "status", "--strict", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --strict --json (healthy): %v (stderr=%s)", err, errBuf)
+	}
+	status := parseJSONMap(t, out)
+	requireJSONKeys(t, status, "action", "remote", "can_push", "needs_pull", "recommended_action")
+	if status["action"] != "sync_status" {
+		t.Fatalf("unexpected strict status payload: %#v", status)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--strict", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync conflicts --strict --json (healthy): %v (stderr=%s)", err, errBuf)
+	}
+	conflicts := parseJSONMap(t, out)
+	requireJSONKeys(t, conflicts, "action", "remote", "has_conflict", "recommended_action")
+	if conflicts["action"] != "sync_conflicts" {
+		t.Fatalf("unexpected strict conflicts payload: %#v", conflicts)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "pull", "--dry-run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync pull --dry-run --json (healthy): %v (stderr=%s)", err, errBuf)
+	}
+	pullDry := parseJSONMap(t, out)
+	if pullDry["action"] != "sync_pull_dry_run" || !jsonBool(pullDry, "dry_run") {
+		t.Fatalf("unexpected sync pull dry-run payload: %#v", pullDry)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "push", "--dry-run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync push --dry-run --json (healthy): %v (stderr=%s)", err, errBuf)
+	}
+	pushDry := parseJSONMap(t, out)
+	if pushDry["action"] != "sync_push_dry_run" || !jsonBool(pushDry, "dry_run") {
+		t.Fatalf("unexpected sync push dry-run payload: %#v", pushDry)
+	}
+
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+	_, errOut, err := runCLI([]string{"sync", "status", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict status to fail when lock is present")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	statusErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, statusErr, "exit_code", "reason", "recommended_action")
+	if statusErr["reason"] != "remote_lock_present" || statusErr["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("unexpected strict status lock payload: %#v", statusErr)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "conflicts", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict conflicts to fail when lock is present")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	conflictsErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, conflictsErr, "exit_code", "reason", "recommended_action")
+	if conflictsErr["reason"] != "remote_lock_present" || conflictsErr["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("unexpected strict conflicts lock payload: %#v", conflictsErr)
+	}
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("remove lock file: %v", err)
+	}
+
+	restoreOther := withEnv(map[string]string{envVaultPath: otherVault})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v2"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "status", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict status to fail on remote_changed")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	statusErr = parseJSONMap(t, errOut)
+	requireJSONKeys(t, statusErr, "exit_code", "reason", "recommended_action", "expected_rev", "actual_rev")
+	if statusErr["reason"] != "remote_changed" || statusErr["recommended_action"] != "sync_pull" {
+		t.Fatalf("unexpected strict status conflict payload: %#v", statusErr)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "conflicts", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict conflicts to fail on remote_changed")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	conflictsErr = parseJSONMap(t, errOut)
+	requireJSONKeys(t, conflictsErr, "exit_code", "reason", "recommended_action", "expected_rev", "actual_rev")
+	if conflictsErr["reason"] != "remote_changed" || conflictsErr["recommended_action"] != "sync_pull" {
+		t.Fatalf("unexpected strict conflicts conflict payload: %#v", conflictsErr)
+	}
+
+	out, errBuf, err = runCLI([]string{"doctor", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict doctor failure when remote sync state drift exists")
+	}
+	assertExitCode(t, err, exitcode.CodeDoctorFailed)
+	if errBuf != "" {
+		t.Fatalf("doctor --strict --json should emit report on stdout (stderr=%q)", errBuf)
+	}
+	doctor = parseJSONMap(t, out)
+	if jsonBool(doctor, "ok") {
+		t.Fatalf("expected doctor report ok=false in drift state: %#v", doctor)
+	}
+	check, ok := findDoctorCheckByName(doctor, "remote_origin_sync_state")
+	if !ok {
+		t.Fatalf("expected remote_origin_sync_state check in doctor report: %#v", doctor)
+	}
+	statusValue, _ := check["status"].(string)
+	if statusValue == doctorStatusOK {
+		t.Fatalf("expected non-ok sync_state check under drift, got %#v", check)
+	}
+}
+
 func TestCLI_Contract_DoctorJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
