@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,6 +149,30 @@ type syncUnlockResult struct {
 	Confirmed bool   `json:"confirmed,omitempty"`
 }
 
+type syncPreflightCheckResult struct {
+	Name              string         `json:"name"`
+	Command           string         `json:"command"`
+	OK                bool           `json:"ok"`
+	ExitCode          int            `json:"exit_code"`
+	Error             string         `json:"error,omitempty"`
+	RecommendedAction string         `json:"recommended_action,omitempty"`
+	Payload           map[string]any `json:"payload,omitempty"`
+}
+
+type syncPreflightResult struct {
+	OK                bool                       `json:"ok"`
+	Action            string                     `json:"action"`
+	Remote            string                     `json:"remote,omitempty"`
+	Strict            bool                       `json:"strict"`
+	ExitCode          int                        `json:"exit_code"`
+	CheckCount        int                        `json:"check_count"`
+	FailedCount       int                        `json:"failed_count"`
+	FailedChecks      []string                   `json:"failed_checks,omitempty"`
+	FailedCheck       string                     `json:"failed_check,omitempty"`
+	RecommendedAction string                     `json:"recommended_action,omitempty"`
+	Checks            []syncPreflightCheckResult `json:"checks"`
+}
+
 type pushLockInfo struct {
 	HasLock     bool
 	LockPath    string
@@ -165,6 +190,7 @@ func newSyncCommand() *cobra.Command {
 		Use:   "sync",
 		Short: "Sync vault bundles with configured remotes",
 	}
+	cmd.AddCommand(newSyncPreflightCommand())
 	cmd.AddCommand(newSyncStatusCommand())
 	cmd.AddCommand(newSyncConflictsCommand())
 	cmd.AddCommand(newSyncResetBaselineCommand())
@@ -172,6 +198,59 @@ func newSyncCommand() *cobra.Command {
 	cmd.AddCommand(newSyncRestoreCommand())
 	cmd.AddCommand(newSyncPushCommand())
 	cmd.AddCommand(newSyncPullCommand())
+	return cmd
+}
+
+func newSyncPreflightCommand() *cobra.Command {
+	var remoteName string
+	var profile string
+	var bundleIn string
+	var identity string
+	var staleThreshold time.Duration
+	var strict bool
+	var jsonOut bool
+	var allowMissingVault bool
+
+	cmd := &cobra.Command{
+		Use:   "preflight",
+		Short: "Run a full sync readiness gate (doctor + strict sync checks + dry-runs)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if staleThreshold < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--stale-threshold must be >= 0"))
+			}
+
+			checks := make([]syncPreflightCheckResult, 0, 5)
+			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightDoctorArgs(profile, bundleIn, identity, strict, allowMissingVault)))
+			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightStatusArgs(remoteName, staleThreshold, strict)))
+			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightConflictsArgs(remoteName, staleThreshold, strict)))
+			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightPullArgs(remoteName)))
+			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightPushArgs(remoteName)))
+
+			result := buildSyncPreflightResult(checks, remoteName, strict)
+
+			if jsonOut {
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+					return err
+				}
+			} else {
+				renderSyncPreflightHuman(cmd, result)
+			}
+
+			if result.ExitCode != 0 {
+				return exitcode.New(result.ExitCode, errors.New("sync preflight failed"))
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&profile, "profile", "", "profile name passed to doctor")
+	cmd.Flags().StringVar(&bundleIn, "bundle-in", "", "bundle file passed to doctor")
+	cmd.Flags().StringVar(&identity, "identity", "", "identity file passed to doctor")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "stale lock threshold passed to sync status/conflicts")
+	cmd.Flags().BoolVar(&strict, "strict", false, "use strict doctor/status/conflicts checks")
+	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
@@ -1252,6 +1331,223 @@ func validateSealVaultWithRecipient(vaultPath, recipient string) error {
 	defer os.RemoveAll(tmpDir)
 	tmpPath := filepath.Join(tmpDir, "vault.age")
 	return bundle.SealVaultFile(vaultPath, tmpPath, []string{recipient})
+}
+
+func buildSyncPreflightDoctorArgs(profile, bundleIn, identity string, strict, allowMissingVault bool) []string {
+	args := []string{"doctor", "--json"}
+	if strict {
+		args = append(args, "--strict")
+	}
+	if allowMissingVault {
+		args = append(args, "--allow-missing-vault")
+	}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	if strings.TrimSpace(bundleIn) != "" {
+		args = append(args, "--bundle-in", strings.TrimSpace(bundleIn))
+	}
+	if strings.TrimSpace(identity) != "" {
+		args = append(args, "--identity", strings.TrimSpace(identity))
+	}
+	return args
+}
+
+func buildSyncPreflightStatusArgs(remoteName string, staleThreshold time.Duration, strict bool) []string {
+	args := []string{"sync", "status", "--json"}
+	if strict {
+		args = append(args, "--strict")
+	}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	if staleThreshold > 0 {
+		args = append(args, "--stale-threshold", staleThreshold.String())
+	}
+	return args
+}
+
+func buildSyncPreflightConflictsArgs(remoteName string, staleThreshold time.Duration, strict bool) []string {
+	args := []string{"sync", "conflicts", "--json"}
+	if strict {
+		args = append(args, "--strict")
+	}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	if staleThreshold > 0 {
+		args = append(args, "--stale-threshold", staleThreshold.String())
+	}
+	return args
+}
+
+func buildSyncPreflightPullArgs(remoteName string) []string {
+	args := []string{"sync", "pull", "--dry-run", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
+func buildSyncPreflightPushArgs(remoteName string) []string {
+	args := []string{"sync", "push", "--dry-run", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
+func runSyncPreflightCheck(args []string) syncPreflightCheckResult {
+	name := syncPreflightCheckName(args)
+	out, errOut, err := runRootSubcommand(args)
+	code := 0
+	if err != nil {
+		var ec *exitcode.Error
+		if errors.As(err, &ec) {
+			code = ec.Code
+		} else {
+			code = 1
+		}
+	}
+
+	res := syncPreflightCheckResult{
+		Name:     name,
+		Command:  "kimen " + strings.Join(args, " "),
+		OK:       code == 0,
+		ExitCode: code,
+	}
+
+	payloadRaw := strings.TrimSpace(out)
+	if code != 0 && strings.TrimSpace(errOut) != "" {
+		payloadRaw = strings.TrimSpace(errOut)
+	}
+	if payloadRaw == "" {
+		payloadRaw = strings.TrimSpace(errOut)
+	}
+	if payloadRaw != "" {
+		var payload map[string]any
+		if json.Unmarshal([]byte(payloadRaw), &payload) == nil {
+			res.Payload = payload
+			if code != 0 {
+				if msg, ok := payload["error"].(string); ok && strings.TrimSpace(msg) != "" {
+					res.Error = msg
+				}
+				if rec, ok := payload["recommended_action"].(string); ok {
+					res.RecommendedAction = strings.TrimSpace(rec)
+				}
+			}
+		} else if code != 0 {
+			res.Error = payloadRaw
+		}
+	}
+	if code != 0 && res.Error == "" && err != nil {
+		res.Error = err.Error()
+	}
+	return res
+}
+
+func buildSyncPreflightResult(checks []syncPreflightCheckResult, remoteName string, strict bool) syncPreflightResult {
+	failed := make([]string, 0, len(checks))
+	exitCode := 0
+	recommended := ""
+	failedCheck := ""
+	for _, check := range checks {
+		if check.OK {
+			continue
+		}
+		failed = append(failed, check.Name)
+		if failedCheck == "" {
+			failedCheck = check.Name
+		}
+		if recommended == "" && strings.TrimSpace(check.RecommendedAction) != "" {
+			recommended = strings.TrimSpace(check.RecommendedAction)
+		}
+		switch check.ExitCode {
+		case exitcode.CodeSyncConflict:
+			exitCode = exitcode.CodeSyncConflict
+		case 0:
+			// no-op
+		default:
+			if exitCode == 0 {
+				exitCode = exitcode.CodeSyncFailed
+			}
+		}
+	}
+	return syncPreflightResult{
+		OK:                exitCode == 0,
+		Action:            "sync_preflight",
+		Remote:            strings.TrimSpace(remoteName),
+		Strict:            strict,
+		ExitCode:          exitCode,
+		CheckCount:        len(checks),
+		FailedCount:       len(failed),
+		FailedChecks:      failed,
+		FailedCheck:       failedCheck,
+		RecommendedAction: recommended,
+		Checks:            checks,
+	}
+}
+
+func renderSyncPreflightHuman(cmd *cobra.Command, result syncPreflightResult) {
+	fmt.Fprintf(cmd.OutOrStdout(), "sync preflight (strict=%t)\n", result.Strict)
+	if strings.TrimSpace(result.Remote) != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "remote: %s\n", result.Remote)
+	}
+	for _, check := range result.Checks {
+		if check.OK {
+			fmt.Fprintf(cmd.OutOrStdout(), "[ok] %s\n", check.Name)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "[fail] %s (exit=%d)\n", check.Name, check.ExitCode)
+			if strings.TrimSpace(check.Error) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  error: %s\n", check.Error)
+			}
+			if strings.TrimSpace(check.RecommendedAction) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  recommended-action: %s\n", check.RecommendedAction)
+			}
+		}
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "failed-checks: %d/%d\n", result.FailedCount, result.CheckCount)
+	if strings.TrimSpace(result.RecommendedAction) != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", result.RecommendedAction)
+	}
+	if result.OK {
+		fmt.Fprintln(cmd.OutOrStdout(), "preflight: ok")
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "preflight: failed (exit=%d)\n", result.ExitCode)
+}
+
+func runRootSubcommand(args []string) (string, string, error) {
+	root := NewRootCommand()
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	root.SetArgs(args)
+	err := root.Execute()
+	return out.String(), errBuf.String(), err
+}
+
+func syncPreflightCheckName(args []string) string {
+	if len(args) == 0 {
+		return "unknown"
+	}
+	if args[0] == "doctor" {
+		return "doctor"
+	}
+	if len(args) >= 2 && args[0] == "sync" {
+		switch args[1] {
+		case "status":
+			return "sync_status"
+		case "conflicts":
+			return "sync_conflicts"
+		case "pull":
+			return "sync_pull_dry_run"
+		case "push":
+			return "sync_push_dry_run"
+		}
+	}
+	return strings.Join(args, "_")
 }
 
 func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {

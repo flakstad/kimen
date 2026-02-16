@@ -133,8 +133,9 @@ func TestCLI_InitCISyncGate_JSONWritesWorkflow(t *testing.T) {
 		`default: "secrets/vault.age"`,
 		`default: "prod"`,
 		`default: "15m"`,
-		`kimen sync status --remote "$REMOTE_NAME" --stale-threshold "$STALE_THRESHOLD" --strict --json`,
-		`kimen sync push --remote "$REMOTE_NAME" --dry-run --json`,
+		`./kimen sync preflight \`,
+		`--stale-threshold "$STALE_THRESHOLD" \`,
+		`--json | tee kimen-sync-preflight.json`,
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(content, snippet) {

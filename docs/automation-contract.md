@@ -11,7 +11,10 @@ Use this as the source of truth for CI/CD integrations.
 ## Output channel rules
 
 - Success JSON is emitted on `stdout`.
-- Error JSON envelopes are emitted on `stderr`, except `map lint --json` (see below).
+- Error JSON envelopes are emitted on `stderr`, except:
+  - `map lint --json` (report on `stdout`)
+  - `doctor --json` (report on `stdout`)
+  - `sync preflight --json` (report on `stdout`)
 - Human-mode messages are emitted when `--json` is not set.
 
 ## Error envelope
@@ -63,6 +66,10 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `sync --json`:
 
 - `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","has_local":bool,"in_sync":bool,"can_push":bool,"needs_pull":bool,"blockers":["..."],"recommended_action":"sync_pull|sync_push|wait_or_sync_unlock|configure_remote_recipient|configure_remote_identity|sync_reset_baseline_or_remote_recreate|vault_init|none",...}`
+- `sync preflight --json`: emits report on `stdout` for both success and failure:
+  - `{"ok":bool,"action":"sync_preflight","remote":"...","strict":bool,"exit_code":0|31|32,"check_count":N,"failed_count":N,"failed_checks":["..."],"failed_check":"...","recommended_action":"...","checks":[{"name":"doctor|sync_status|sync_conflicts|sync_pull_dry_run|sync_push_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
+  - strict mode runs doctor/status/conflicts with strict semantics
+  - exit `31` when any strict sync conflict check fails; otherwise exit `32` when any check fails for non-conflict reasons
 - `sync status --strict`: exits `31` for sync conflicts, exits `32` for non-conflict blockers (e.g. lock or missing config), otherwise succeeds with normal `sync_status` payload
 - `sync conflicts` success: `{"ok":true,"action":"sync_conflicts","remote":"...","has_conflict":bool,"reason":"remote_changed|remote_disappeared|no_local_baseline","has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","blockers":["..."],"recommended_action":"sync_pull|wait_or_sync_unlock|sync_reset_baseline_or_remote_recreate|none",...}`
 - `sync conflicts --strict`: exits `31` for sync conflicts, exits `32` for lock-only blockers, otherwise succeeds with normal `sync_conflicts` payload
@@ -83,7 +90,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - sync precondition errors (exit `32`) may include structured fields:
   - `reason`: e.g. `remote_lock_present`
   - `recommended_action`: e.g. `wait_or_sync_unlock`
-- error: standard error envelope on `stderr`
+- error: standard error envelope on `stderr` (except `sync preflight --json`, which reports failures on `stdout`)
 
 `plan --json` and `project plan --json`:
 

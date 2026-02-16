@@ -151,17 +151,14 @@ Required GitHub secrets:
 
 Template gates include:
 
-- `kimen doctor --strict --json`
-- `kimen sync status --strict --json`
-- `kimen sync conflicts --strict --json`
-- `kimen sync pull --dry-run --json`
-- `kimen sync push --dry-run --json`
+- `kimen sync preflight --strict --json`
+  - includes doctor + strict status/conflicts + pull/push dry-runs
 
 Typical usage:
 
 1. Set remote inputs (`remote_type`, `remote_path`, and git-specific branch/path when relevant).
 2. Run the workflow via `workflow_dispatch`.
-3. Inspect uploaded `kimen-*.json` artifacts for root-cause details.
+3. Inspect uploaded `kimen-sync-preflight.json` (plus remote/bundle artifacts) for root-cause details.
 
 ## Minimal bundle-open step (reference)
 

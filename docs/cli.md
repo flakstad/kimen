@@ -839,6 +839,31 @@ Automation notes:
 
 Sync uses a local baseline (`last_seen_rev`) to detect remote changes before push.
 
+### `kimen sync preflight`
+
+What it does:
+
+- Runs a full sync readiness gate in one command:
+  - `doctor` (strict optional)
+  - `sync status` (strict optional)
+  - `sync conflicts` (strict optional)
+  - `sync pull --dry-run`
+  - `sync push --dry-run`
+- Produces one aggregated JSON report for CI automation.
+
+Exit behavior:
+
+- exits `31` if any strict sync conflict check fails
+- exits `32` for non-conflict failures (lock/config/preconditions, doctor strict failures, dry-run failures)
+- with `--json`, emits report on `stdout` for both success and failure
+
+Examples:
+
+```bash
+kimen sync preflight --remote team --strict --json
+kimen sync preflight --remote team --strict --stale-threshold 30m --profile prod --json
+```
+
 ### `kimen sync status`
 
 What it does:

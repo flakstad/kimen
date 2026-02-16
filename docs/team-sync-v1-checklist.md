@@ -26,6 +26,7 @@ Reference: `docs/team-sync-v1.md`
 - [x] `kimen sync pull --dry-run` implemented (no mutation)
 - [x] `kimen sync push --dry-run` implemented (no mutation)
 - [x] `kimen sync conflicts --strict` implemented for fail-fast gating
+- [x] `kimen sync preflight --strict --json` implemented as one-command strict gate
 
 ## 4) End-to-End Confidence
 

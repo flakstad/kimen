@@ -331,6 +331,171 @@ func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncPreflightJSONShape(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "preflight", "--strict", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync preflight --strict --json: %v (stderr=%s)", err, errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "action", "strict", "exit_code", "check_count", "failed_count", "checks")
+	if report["action"] != "sync_preflight" {
+		t.Fatalf("unexpected preflight action: %#v", report)
+	}
+	if !jsonBool(report, "ok") || !jsonBool(report, "strict") {
+		t.Fatalf("expected strict preflight success: %#v", report)
+	}
+	if report["exit_code"] != float64(0) || report["failed_count"] != float64(0) {
+		t.Fatalf("unexpected strict preflight success codes: %#v", report)
+	}
+	checks, _ := report["checks"].([]any)
+	if len(checks) != 5 {
+		t.Fatalf("expected 5 preflight checks, got %d (%#v)", len(checks), report)
+	}
+}
+
+func TestCLI_Contract_SyncPreflightStrictFailureCodes(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+	out, errBuf, err := runCLI([]string{"sync", "preflight", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync preflight strict failure with lock")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	if strings.TrimSpace(errBuf) != "" {
+		t.Fatalf("expected preflight failure report on stdout only, got stderr=%q", errBuf)
+	}
+	lockReport := parseJSONMap(t, out)
+	requireJSONKeys(t, lockReport, "ok", "action", "exit_code", "failed_check", "recommended_action", "failed_checks", "checks")
+	if lockReport["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected preflight lock exit code: %#v", lockReport)
+	}
+	if lockReport["failed_check"] != "sync_status" || lockReport["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("unexpected lock preflight summary fields: %#v", lockReport)
+	}
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("remove lock file: %v", err)
+	}
+
+	restoreOther := withEnv(map[string]string{envVaultPath: otherVault})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v2"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "preflight", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync preflight strict conflict failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	if strings.TrimSpace(errBuf) != "" {
+		t.Fatalf("expected preflight conflict report on stdout only, got stderr=%q", errBuf)
+	}
+	conflictReport := parseJSONMap(t, out)
+	requireJSONKeys(t, conflictReport, "ok", "action", "exit_code", "failed_check", "recommended_action", "failed_checks", "checks")
+	if conflictReport["exit_code"] != float64(exitcode.CodeSyncConflict) {
+		t.Fatalf("unexpected preflight conflict exit code: %#v", conflictReport)
+	}
+	if conflictReport["recommended_action"] != "sync_pull" {
+		t.Fatalf("unexpected conflict preflight recommended action: %#v", conflictReport)
+	}
+	failedChecks := jsonStringSlice(conflictReport, "failed_checks")
+	if !containsString(failedChecks, "sync_status") {
+		t.Fatalf("expected sync_status in failed checks for conflict preflight: %#v", conflictReport)
+	}
+}
+
 func TestCLI_Contract_DoctorJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

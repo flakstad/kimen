@@ -35,9 +35,9 @@ Use `kimen-deploy-template.yml` when you want:
 
 Use `kimen-sync-gate-template.yml` when you want:
 
-- strict Team Sync readiness checks (`doctor --strict`)
-- fail-fast remote gating (`sync status --strict`, `sync conflicts --strict`)
-- no-mutation pull/push preflight (`sync pull --dry-run`, `sync push --dry-run`)
+- one-command strict Team Sync gate (`sync preflight --strict --json`)
+- fail-fast remote gating with aggregated report + typed exit code (`0|31|32`)
+- no-mutation pull/push preflight checks (included inside `sync preflight`)
 - machine-readable sync artifacts for investigation
 
 ## Required edits before enabling
@@ -66,8 +66,8 @@ All templates include a fail-fast checklist step before the main work:
 The sync template includes additional gates:
 
 - remote input validation (`remote_type`, `remote_path`)
-- strict doctor + sync checks in one consolidated gate step
-- dry-run pull/push checks without remote mutation
+- strict doctor + sync checks in one consolidated preflight step
+- dry-run pull/push checks without remote mutation (inside preflight)
 
 Keep these checks strict in CI. They prevent partial runs with ambiguous failures.
 

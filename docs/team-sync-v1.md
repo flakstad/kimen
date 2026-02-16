@@ -35,8 +35,14 @@ This document defines the Team Sync v1 product surface for Kimen.
 ### Preflight Before Deploy
 
 ```bash
+kimen sync preflight --remote team --strict --json
+```
+
+Equivalent expanded sequence:
+
+```bash
 kimen doctor --strict --json
-kimen sync status --remote team --json
+kimen sync status --remote team --strict --json
 kimen sync conflicts --remote team --strict --json
 kimen sync pull --remote team --dry-run --json
 kimen sync push --remote team --dry-run --json
@@ -78,9 +84,7 @@ kimen sync unlock --remote team --yes
 Use strict commands so CI can gate on exit codes without custom JSON parsing:
 
 ```bash
-kimen doctor --strict --json
-kimen sync conflicts --remote team --strict --json
-kimen sync push --remote team --dry-run --json
+kimen sync preflight --remote team --strict --json
 ```
 
 Interpretation:

@@ -153,40 +153,26 @@ jobs:
             --overwrite \
             --json | tee kimen-bundle-open.json
 
-      - name: Strict sync gate
+      - name: Sync preflight gate
         shell: bash
         env:
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           REMOTE_NAME="${{ inputs.remote_name }}"
           PROFILE="${{ inputs.profile }}"
           STALE_THRESHOLD="${{ inputs.stale_threshold }}"
-          overall_rc=0
-
-          run_check() {
-            local name="$1"
-            shift
-            "$@" | tee "kimen-${name}.json"
-            local rc=${PIPESTATUS[0]}
-            if [[ "$rc" -ne 0 ]]; then
-              echo "::error::${name} failed with exit code ${rc}"
-              if [[ "$overall_rc" -eq 0 ]]; then
-                overall_rc="$rc"
-              fi
-            fi
-          }
-
+          PROFILE_FLAG=()
           if [[ -n "$PROFILE" ]]; then
-            run_check doctor ./kimen doctor --profile "$PROFILE" --strict --json
-          else
-            run_check doctor ./kimen doctor --strict --json
+            PROFILE_FLAG=( --profile "$PROFILE" )
           fi
-          run_check sync-status ./kimen sync status --remote "$REMOTE_NAME" --stale-threshold "$STALE_THRESHOLD" --strict --json
-          run_check sync-conflicts ./kimen sync conflicts --remote "$REMOTE_NAME" --stale-threshold "$STALE_THRESHOLD" --strict --json
-          run_check sync-pull-dry-run ./kimen sync pull --remote "$REMOTE_NAME" --dry-run --json
-          run_check sync-push-dry-run ./kimen sync push --remote "$REMOTE_NAME" --dry-run --json
-          exit "$overall_rc"
+
+          ./kimen sync preflight \
+            --remote "$REMOTE_NAME" \
+            --strict \
+            --stale-threshold "$STALE_THRESHOLD" \
+            "${PROFILE_FLAG[@]}" \
+            --json | tee kimen-sync-preflight.json
 
       - name: Upload Kimen artifacts
         if: always()
@@ -197,8 +183,4 @@ jobs:
           path: |
             kimen-remote-add.json
             kimen-bundle-open.json
-            kimen-doctor.json
-            kimen-sync-status.json
-            kimen-sync-conflicts.json
-            kimen-sync-pull-dry-run.json
-            kimen-sync-push-dry-run.json
+            kimen-sync-preflight.json
