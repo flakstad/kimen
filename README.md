@@ -125,9 +125,11 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 ## Docs
 
 - `docs/cli.md`: full CLI/API reference with use-cases and how it works
+- `docs/automation-contract.md`: canonical JSON output + exit-code contract for automation
 - `docs/projections.md`: the projection model (why `run`/`render` exist)
 - `docs/ci-github-actions.md`: CI pattern using bundles + projections
 - `docs/ci-workflow-templates.md`: choose and adapt workflow templates in `.github/workflows/`
+- `docs/recommended-paths.md`: recommended default paths for dev, CI, and systemd usage
 - `docs/maps.md`: map files and profiles (`--map` / `--profile`)
 - `docs/plan-1-2-3.md`: next implementation plan (maps/profiles, plan, envfile)
 - `docs/when-to-use.md`: guidance on when Kimen fits (and when it doesn’t)

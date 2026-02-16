@@ -14,6 +14,7 @@ This document describes what each command does, how it works, and the typical us
   - interactive terminal prompt (when available)
 - Kimen tries hard to avoid printing secret values by default.
 - Many commands accept `--map` / `--profile` to avoid repeating long mapping lists (see `docs/maps.md`).
+- For machine integrations, see the canonical contract in `docs/automation-contract.md`.
 
 ## Environment variables
 
