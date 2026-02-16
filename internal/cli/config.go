@@ -32,11 +32,13 @@ type unlockConfig struct {
 }
 
 type remoteConfig struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Path      string `json:"path"`
-	Recipient string `json:"recipient,omitempty"`
-	Identity  string `json:"identity,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Path       string `json:"path"`
+	Recipient  string `json:"recipient,omitempty"`
+	Identity   string `json:"identity,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	BundlePath string `json:"bundle_path,omitempty"`
 }
 
 type syncConfig struct {

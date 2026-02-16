@@ -192,17 +192,16 @@ func newSyncStatusCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
-			}
-
-			remoteRev, hasRemote, bundlePath, err := remoteRevision(remote)
+			remoteRev, hasRemote, bundleRef, err := remoteRevision(remote)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			lockInfo, err := readRemotePushLockInfo(bundlePath)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
+			lockInfo := pushLockInfo{}
+			if remoteSupportsPushLock(remote) {
+				lockInfo, err = readRemotePushLockInfo(bundleRef)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
 			}
 			vaultPath, err := defaultVaultPath()
 			if err != nil {
@@ -289,7 +288,7 @@ func newSyncStatusCommand() *cobra.Command {
 				Remote:            remote.Name,
 				RemoteType:        remote.Type,
 				RemotePath:        remote.Path,
-				BundlePath:        bundlePath,
+				BundlePath:        bundleRef,
 				VaultPath:         vaultPath,
 				RemoteRev:         remoteRev,
 				LastSeenRev:       lastSeen,
@@ -392,17 +391,16 @@ func newSyncConflictsCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
-			}
-
-			remoteRev, hasRemote, bundlePath, err := remoteRevision(remote)
+			remoteRev, hasRemote, bundleRef, err := remoteRevision(remote)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			lockInfo, err := readRemotePushLockInfo(bundlePath)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
+			lockInfo := pushLockInfo{}
+			if remoteSupportsPushLock(remote) {
+				lockInfo, err = readRemotePushLockInfo(bundleRef)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
 			}
 			lastSeen := ""
 			if c.Sync != nil {
@@ -436,7 +434,7 @@ func newSyncConflictsCommand() *cobra.Command {
 				Remote:            remote.Name,
 				RemoteType:        remote.Type,
 				RemotePath:        remote.Path,
-				BundlePath:        bundlePath,
+				BundlePath:        bundleRef,
 				RemoteRev:         remoteRev,
 				LastSeenRev:       lastSeen,
 				HasRemote:         hasRemote,
@@ -586,9 +584,6 @@ func newSyncResetBaselineCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
-			}
 
 			oldRev := ""
 			if c.Sync != nil {
@@ -678,8 +673,8 @@ func newSyncUnlockCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
+			if !remoteSupportsPushLock(remote) {
+				return syncCommandError(cmd, jsonOut, errors.New("sync unlock is only supported for fs remotes"))
 			}
 			bundlePath, err := remoteBundlePath(remote)
 			if err != nil {
@@ -841,11 +836,11 @@ func newSyncPushCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
-			}
 			if strings.TrimSpace(remote.Recipient) == "" {
 				return syncCommandError(cmd, jsonOut, errors.New("remote recipient is not configured (set --recipient on `remote add`)"))
+			}
+			if !remoteSupportsPushLock(remote) && (lockWait > 0 || breakStaleLockAfter > 0) {
+				return syncCommandError(cmd, jsonOut, errors.New("--lock-wait/--break-stale-lock-after are only supported for fs remotes"))
 			}
 
 			vaultPath, err := defaultVaultPath()
@@ -859,13 +854,17 @@ func newSyncPushCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 
-			bundlePath, err := remoteBundlePath(remote)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
-			}
-			releaseLock, staleLockBroken, err := acquireRemotePushLock(bundlePath, lockWait, breakStaleLockAfter)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
+			releaseLock := func() {}
+			staleLockBroken := false
+			if remoteSupportsPushLock(remote) {
+				bundlePath, err := remoteBundlePath(remote)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				releaseLock, staleLockBroken, err = acquireRemotePushLock(bundlePath, lockWait, breakStaleLockAfter)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
 			}
 			defer releaseLock()
 
@@ -882,14 +881,40 @@ func newSyncPushCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 
-			if err := sealVaultToRemoteAtomic(vaultPath, bundlePath, remote.Recipient); err != nil {
-				return syncCommandError(cmd, jsonOut, err)
+			bundleRef := ""
+			newRev := ""
+			switch remoteType(remote) {
+			case "fs":
+				bundlePath, err := remoteBundlePath(remote)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				if err := sealVaultToRemoteAtomic(vaultPath, bundlePath, remote.Recipient); err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				newRev, _, err = fileRevision(bundlePath)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				bundleRef = bundlePath
+			case "git":
+				newRev, bundleRef, err = sealVaultToGitRemote(vaultPath, remote.Recipient, remote)
+				if err != nil {
+					if errors.Is(err, errGitPushRejected) {
+						currentRev, currentHasRemote, _, revErr := remoteRevision(remote)
+						if revErr == nil {
+							details := detectSyncConflict(strings.TrimSpace(remoteRev), currentRev, currentHasRemote)
+							if details.HasConflict {
+								return syncCommandError(cmd, jsonOut, &syncConflictError{Details: details})
+							}
+						}
+					}
+					return syncCommandError(cmd, jsonOut, err)
+				}
+			default:
+				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
 			}
 
-			newRev, _, err := fileRevision(bundlePath)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
-			}
 			if c.Sync == nil {
 				c.Sync = make(map[string]syncConfig)
 			}
@@ -905,7 +930,7 @@ func newSyncPushCommand() *cobra.Command {
 					Remote:          remote.Name,
 					RemoteType:      remote.Type,
 					RemotePath:      remote.Path,
-					BundlePath:      bundlePath,
+					BundlePath:      bundleRef,
 					RemoteRev:       newRev,
 					HasRemote:       true,
 					StaleLockBroken: staleLockBroken,
@@ -941,20 +966,22 @@ func newSyncPullCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			if remote.Type != "fs" {
-				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
-			}
 			if strings.TrimSpace(remote.Identity) == "" {
 				return syncCommandError(cmd, jsonOut, errors.New("remote identity is not configured (set --identity on `remote add`)"))
 			}
 
-			remoteRev, hasRemote, bundlePath, err := remoteRevision(remote)
+			remoteRev, hasRemote, bundleRef, err := remoteRevision(remote)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 			if !hasRemote {
 				return syncCommandError(cmd, jsonOut, errors.New("remote bundle is missing"))
 			}
+			bundlePath, cleanupBundle, err := materializeRemoteBundleForRead(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			defer cleanupBundle()
 
 			vaultPath, err := defaultVaultPath()
 			if err != nil {
@@ -998,7 +1025,7 @@ func newSyncPullCommand() *cobra.Command {
 					Remote:      remote.Name,
 					RemoteType:  remote.Type,
 					RemotePath:  remote.Path,
-					BundlePath:  bundlePath,
+					BundlePath:  bundleRef,
 					VaultPath:   vaultPath,
 					RemoteRev:   remoteRev,
 					LastSeenRev: remoteRev,

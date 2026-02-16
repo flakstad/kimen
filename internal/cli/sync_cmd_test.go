@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +89,50 @@ func TestCLI_RemoteLifecycle_JSONAndSyncCleanup(t *testing.T) {
 	}
 	if _, ok := cfg.Sync["origin"]; ok {
 		t.Fatalf("expected sync baseline to be removed for origin: %#v", cfg.Sync)
+	}
+}
+
+func TestCLI_RemoteGitDefaultsAndFieldValidation(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", "/tmp/example.git",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add git: %v", err)
+	}
+	cfg := readConfig(t)
+	if len(cfg.Remotes) != 1 {
+		t.Fatalf("expected one remote, got %#v", cfg.Remotes)
+	}
+	r := cfg.Remotes[0]
+	if r.Type != "git" || r.Branch != "main" || r.BundlePath != "vault.age" {
+		t.Fatalf("unexpected git defaults in remote config: %#v", r)
+	}
+
+	_, errOut, err := runCLI([]string{
+		"remote", "add", "fsbad",
+		"--type", "fs",
+		"--path", filepath.Join(dir, "remote"),
+		"--branch", "main",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add fs with --branch to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeRemoteFailed) {
+		t.Fatalf("unexpected remote add validation error response: %#v", errResp)
 	}
 }
 
@@ -1350,6 +1395,249 @@ func TestCLI_SyncRestore_FromBackupAndNoBackup(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncGitRemote_PushPullRoundTrip(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	identityPath := filepath.Join(dir, "sync.agekey")
+	recipient := generateRecipient(t, identityPath)
+
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("team-v1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add git (actor A): %v", err)
+	}
+	out, errBuf, err := runCLI([]string{"sync", "push", "--json"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("sync push git (actor A): %v (stderr=%s)", err, errBuf)
+	}
+	pushResp := parseJSONMap(t, out)
+	if pushResp["action"] != "sync_push" || pushResp["remote_type"] != "git" {
+		t.Fatalf("unexpected sync push git response: %#v", pushResp)
+	}
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add git (actor B): %v", err)
+	}
+	_, errBuf, err = runCLI([]string{"sync", "pull", "--json"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("sync pull git (actor B): %v (stderr=%s)", err, errBuf)
+	}
+	value, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("secret get api_key (actor B): %v", err)
+	}
+	if value != "team-v1" {
+		t.Fatalf("expected team-v1 after git pull, got %q", value)
+	}
+}
+
+func TestCLI_SyncGitRemote_PushConflictWhenRemoteChanged(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	identityPath := filepath.Join(dir, "sync.agekey")
+	recipient := generateRecipient(t, identityPath)
+
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set a1 (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add git (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("initial sync push git (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a2"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set a2 (actor A): %v", err)
+	}
+	restoreA()
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add git (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("sync pull git (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("b2"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("secret set b2 (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("sync push git (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, errOut, err := runCLI([]string{"sync", "push", "--json"}, nil)
+	restoreA()
+	if err == nil {
+		t.Fatalf("expected sync push conflict for git remote after remote changed")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "remote_changed" {
+		t.Fatalf("expected reason=remote_changed for git sync push conflict: %#v", errResp)
+	}
+	if errResp["recommended_action"] != "sync_pull" {
+		t.Fatalf("expected recommended_action=sync_pull for git sync push conflict: %#v", errResp)
+	}
+}
+
+func TestCLI_SyncGitRemote_RejectsLockFlags(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	recipient := generateRecipient(t, identityPath)
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add git: %v", err)
+	}
+	_, errOut, err := runCLI([]string{"sync", "push", "--lock-wait", "1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push with lock flags to fail for git remote")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync push lock-flag error payload: %#v", errResp)
+	}
+}
+
 func generateRecipient(t *testing.T, identityPath string) string {
 	t.Helper()
 	out, errBuf, err := runCLI([]string{"bundle", "keygen", "--out", identityPath, "--json"}, nil)
@@ -1427,4 +1715,24 @@ func readConfig(t *testing.T) config {
 		t.Fatalf("config json parse: %v (raw=%q)", err, out)
 	}
 	return c
+}
+
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available in PATH")
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = sanitizedGitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v (output=%s)", strings.Join(args, " "), err, out)
+	}
 }

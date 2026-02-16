@@ -104,6 +104,9 @@ func detectSyncConflict(lastSeen, remoteRev string, hasRemote bool) syncConflict
 }
 
 func remoteBundlePath(r remoteConfig) (string, error) {
+	if remoteType(r) != "fs" {
+		return "", fmt.Errorf("remote type %q does not expose a filesystem bundle path", remoteType(r))
+	}
 	path := strings.TrimSpace(r.Path)
 	if path == "" {
 		return "", errors.New("remote path is empty")
@@ -123,15 +126,22 @@ func localVaultRevision(vaultPath string) (string, bool, error) {
 }
 
 func remoteRevision(r remoteConfig) (string, bool, string, error) {
-	bundlePath, err := remoteBundlePath(r)
-	if err != nil {
-		return "", false, "", err
+	switch remoteType(r) {
+	case "fs":
+		bundlePath, err := remoteBundlePath(r)
+		if err != nil {
+			return "", false, "", err
+		}
+		rev, ok, err := fileRevision(bundlePath)
+		if err != nil {
+			return "", false, bundlePath, err
+		}
+		return rev, ok, bundlePath, nil
+	case "git":
+		return gitRemoteRevision(r)
+	default:
+		return "", false, "", fmt.Errorf("unsupported remote type %q", remoteType(r))
 	}
-	rev, ok, err := fileRevision(bundlePath)
-	if err != nil {
-		return "", false, bundlePath, err
-	}
-	return rev, ok, bundlePath, nil
 }
 
 func fileRevision(path string) (string, bool, error) {
@@ -149,4 +159,16 @@ func fileRevision(path string) (string, bool, error) {
 		return "", false, err
 	}
 	return hex.EncodeToString(h.Sum(nil)), true, nil
+}
+
+func remoteType(r remoteConfig) string {
+	t := strings.ToLower(strings.TrimSpace(r.Type))
+	if t == "" {
+		return "fs"
+	}
+	return t
+}
+
+func remoteSupportsPushLock(r remoteConfig) bool {
+	return remoteType(r) == "fs"
 }

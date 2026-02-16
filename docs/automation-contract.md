@@ -54,7 +54,10 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `remote --json`:
 
 - success (`add|get|set|list|rm`): `{"ok":true,"action":"remote_add|remote_get|remote_set|remote_list|remote_rm",...}`
-- `remote set` may include `baseline_reset=true` when endpoint fields changed (`--type`/`--path`)
+- remote objects support:
+  - `type=fs`: `path` is a directory/`.age` file path
+  - `type=git`: `path` is repo URL/path, with `branch` and `bundle_path`
+- `remote set` may include `baseline_reset=true` when endpoint fields changed (`--type`/`--path`/`--branch`/`--bundle-path`)
 - error: standard error envelope on `stderr`
 
 `sync --json`:
@@ -66,7 +69,8 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync restore` success: `{"ok":true,"action":"sync_restore","vault_path":"...","source_backup_path":"...","current_backup_path":"..."}`
 - `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"...","stale_lock_broken":bool}` (`stale_lock_broken` omitted unless stale lock auto-break occurred)
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
-- `sync push` uses a remote lock file (`<bundle>.lock`); lock contention failures use sync exit `32`
+- `sync push` uses a remote lock file (`<bundle>.lock`) for `type=fs`; lock contention failures use sync exit `32`
+- for `type=git`, lock-related fields are false/empty and lock flags (`--lock-wait`, `--break-stale-lock-after`) are rejected
 - sync conflict errors (exit `31`) include structured fields in the standard envelope:
   - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
   - `expected_rev` / `actual_rev` when available

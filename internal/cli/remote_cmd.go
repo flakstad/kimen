@@ -64,6 +64,7 @@ func newRemoteGetCommand() *cobra.Command {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("remote %q not found", name))
 			}
 			r := c.Remotes[i]
+			applyRemoteDefaults(&r)
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(remoteResult{
 					OK:     true,
@@ -75,6 +76,18 @@ func newRemoteGetCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "name: %s\n", r.Name)
 			fmt.Fprintf(cmd.OutOrStdout(), "type: %s\n", r.Type)
 			fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", r.Path)
+			if remoteType(r) == "git" {
+				branch := strings.TrimSpace(r.Branch)
+				if branch == "" {
+					branch = "main"
+				}
+				bundlePath := strings.TrimSpace(r.BundlePath)
+				if bundlePath == "" {
+					bundlePath = "vault.age"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "branch: %s\n", branch)
+				fmt.Fprintf(cmd.OutOrStdout(), "bundle_path: %s\n", bundlePath)
+			}
 			if r.Recipient == "" {
 				fmt.Fprintln(cmd.OutOrStdout(), "recipient: (none)")
 			} else {
@@ -93,10 +106,12 @@ func newRemoteGetCommand() *cobra.Command {
 }
 
 func newRemoteSetCommand() *cobra.Command {
-	var remoteType string
+	var remoteTypeFlag string
 	var path string
 	var recipient string
 	var identity string
+	var branch string
+	var bundlePath string
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -112,8 +127,10 @@ func newRemoteSetCommand() *cobra.Command {
 			pathChanged := cmd.Flags().Changed("path")
 			recipientChanged := cmd.Flags().Changed("recipient")
 			identityChanged := cmd.Flags().Changed("identity")
-			if !typeChanged && !pathChanged && !recipientChanged && !identityChanged {
-				return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity"))
+			branchChanged := cmd.Flags().Changed("branch")
+			bundlePathChanged := cmd.Flags().Changed("bundle-path")
+			if !typeChanged && !pathChanged && !recipientChanged && !identityChanged && !branchChanged && !bundlePathChanged {
+				return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity, --branch, --bundle-path"))
 			}
 
 			c, _, err := loadConfig()
@@ -126,12 +143,9 @@ func newRemoteSetCommand() *cobra.Command {
 			}
 			r := c.Remotes[i]
 			if typeChanged {
-				newType := strings.ToLower(strings.TrimSpace(remoteType))
-				if newType == "" {
-					newType = "fs"
-				}
-				if newType != "fs" {
-					return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs)", newType))
+				newType := normalizeRemoteType(remoteTypeFlag)
+				if newType != "fs" && newType != "git" {
+					return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs or git)", newType))
 				}
 				r.Type = newType
 			}
@@ -148,9 +162,22 @@ func newRemoteSetCommand() *cobra.Command {
 			if identityChanged {
 				r.Identity = strings.TrimSpace(identity)
 			}
+			if branchChanged {
+				r.Branch = strings.TrimSpace(branch)
+			}
+			if bundlePathChanged {
+				r.BundlePath = strings.TrimSpace(bundlePath)
+			}
+			if remoteType(r) != "git" && (branchChanged || bundlePathChanged) {
+				return remoteCommandError(cmd, jsonOut, errors.New("--branch/--bundle-path are only valid for --type git"))
+			}
+			applyRemoteDefaults(&r)
+			if err := validateRemoteConfig(r); err != nil {
+				return remoteCommandError(cmd, jsonOut, err)
+			}
 
 			baselineReset := false
-			if c.Sync != nil && (typeChanged || pathChanged) {
+			if c.Sync != nil && (typeChanged || pathChanged || branchChanged || bundlePathChanged) {
 				if _, ok := c.Sync[name]; ok {
 					delete(c.Sync, name)
 					baselineReset = true
@@ -182,19 +209,23 @@ func newRemoteSetCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&remoteType, "type", "", "remote type (currently: fs)")
-	cmd.Flags().StringVar(&path, "path", "", "remote path (directory or .age file)")
+	cmd.Flags().StringVar(&remoteTypeFlag, "type", "", "remote type (fs or git)")
+	cmd.Flags().StringVar(&path, "path", "", "remote path (fs dir/.age path or git repo URL/path)")
 	cmd.Flags().StringVar(&recipient, "recipient", "", "age recipient used for sync push (set empty string to clear)")
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull (set empty string to clear)")
+	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (set empty string for default)")
+	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (set empty string for default)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
 func newRemoteAddCommand() *cobra.Command {
-	var remoteType string
+	var remoteTypeFlag string
 	var path string
 	var recipient string
 	var identity string
+	var branch string
+	var bundlePath string
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -209,12 +240,14 @@ func newRemoteAddCommand() *cobra.Command {
 			if !remoteNameRE.MatchString(name) {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("invalid remote name %q", name))
 			}
-			remoteType = strings.ToLower(strings.TrimSpace(remoteType))
-			if remoteType == "" {
-				remoteType = "fs"
+			remoteTypeFlag = normalizeRemoteType(remoteTypeFlag)
+			if remoteTypeFlag != "fs" && remoteTypeFlag != "git" {
+				return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs or git)", remoteTypeFlag))
 			}
-			if remoteType != "fs" {
-				return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs)", remoteType))
+			branchChanged := cmd.Flags().Changed("branch")
+			bundlePathChanged := cmd.Flags().Changed("bundle-path")
+			if remoteTypeFlag != "git" && (branchChanged || bundlePathChanged) {
+				return remoteCommandError(cmd, jsonOut, errors.New("--branch/--bundle-path are only valid for --type git"))
 			}
 			path = strings.TrimSpace(path)
 			if path == "" {
@@ -230,11 +263,17 @@ func newRemoteAddCommand() *cobra.Command {
 			}
 
 			r := remoteConfig{
-				Name:      name,
-				Type:      remoteType,
-				Path:      path,
-				Recipient: strings.TrimSpace(recipient),
-				Identity:  strings.TrimSpace(identity),
+				Name:       name,
+				Type:       remoteTypeFlag,
+				Path:       path,
+				Recipient:  strings.TrimSpace(recipient),
+				Identity:   strings.TrimSpace(identity),
+				Branch:     strings.TrimSpace(branch),
+				BundlePath: strings.TrimSpace(bundlePath),
+			}
+			applyRemoteDefaults(&r)
+			if err := validateRemoteConfig(r); err != nil {
+				return remoteCommandError(cmd, jsonOut, err)
 			}
 			c.Remotes = append(c.Remotes, r)
 			sort.Slice(c.Remotes, func(i, j int) bool { return c.Remotes[i].Name < c.Remotes[j].Name })
@@ -255,10 +294,12 @@ func newRemoteAddCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&remoteType, "type", "fs", "remote type (currently: fs)")
-	cmd.Flags().StringVar(&path, "path", "", "remote path (directory or .age file)")
+	cmd.Flags().StringVar(&remoteTypeFlag, "type", "fs", "remote type (fs or git)")
+	cmd.Flags().StringVar(&path, "path", "", "remote path (fs dir/.age path or git repo URL/path)")
 	cmd.Flags().StringVar(&recipient, "recipient", "", "age recipient used for sync push")
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull")
+	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (default: main)")
+	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (default: vault.age)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -275,6 +316,9 @@ func newRemoteListCommand() *cobra.Command {
 			}
 			remotes := append([]remoteConfig(nil), c.Remotes...)
 			sort.Slice(remotes, func(i, j int) bool { return remotes[i].Name < remotes[j].Name })
+			for i := range remotes {
+				applyRemoteDefaults(&remotes[i])
+			}
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(remoteResult{
 					OK:      true,
@@ -284,7 +328,20 @@ func newRemoteListCommand() *cobra.Command {
 				})
 			}
 			for _, r := range remotes {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", r.Name, r.Type, r.Path)
+				t := remoteType(r)
+				if t == "git" {
+					branch := strings.TrimSpace(r.Branch)
+					if branch == "" {
+						branch = "main"
+					}
+					bundlePath := strings.TrimSpace(r.BundlePath)
+					if bundlePath == "" {
+						bundlePath = "vault.age"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s@%s:%s\n", r.Name, t, r.Path, branch, bundlePath)
+					continue
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", r.Name, t, r.Path)
 			}
 			return nil
 		},
@@ -352,4 +409,50 @@ func remoteCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeRemoteFailed, err)
+}
+
+func normalizeRemoteType(raw string) string {
+	t := strings.ToLower(strings.TrimSpace(raw))
+	if t == "" {
+		return "fs"
+	}
+	return t
+}
+
+func applyRemoteDefaults(r *remoteConfig) {
+	if r == nil {
+		return
+	}
+	r.Type = normalizeRemoteType(r.Type)
+	if r.Type != "git" {
+		r.Branch = ""
+		r.BundlePath = ""
+		return
+	}
+	if strings.TrimSpace(r.Branch) == "" {
+		r.Branch = "main"
+	}
+	if strings.TrimSpace(r.BundlePath) == "" {
+		r.BundlePath = "vault.age"
+	}
+}
+
+func validateRemoteConfig(r remoteConfig) error {
+	if strings.TrimSpace(r.Path) == "" {
+		return errors.New("--path is required")
+	}
+	switch remoteType(r) {
+	case "fs":
+		if strings.TrimSpace(r.Branch) != "" || strings.TrimSpace(r.BundlePath) != "" {
+			return errors.New("--branch/--bundle-path are only valid for --type git")
+		}
+		return nil
+	case "git":
+		if _, _, _, err := gitRemoteRef(r); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported remote type %q (expected fs or git)", r.Type)
+	}
 }

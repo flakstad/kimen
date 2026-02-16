@@ -656,6 +656,7 @@ Remotes define where encrypted vault bundles are synchronized.
 Current support:
 
 - `type=fs` (filesystem path; either a directory containing `vault.age` or a direct `.age` file path)
+- `type=git` (Git repo URL/path + branch + bundle path inside the repo)
 
 ### `kimen remote add <name>`
 
@@ -676,6 +677,15 @@ kimen remote add team \
 
 # Direct bundle file path:
 kimen remote add team --type fs --path /srv/kimen/team-vault.age --recipient age1... --identity ~/.config/kimen/team.agekey
+
+# Git remote:
+kimen remote add team \
+  --type git \
+  --path git@github.com:org/team-secrets.git \
+  --branch main \
+  --bundle-path vault.age \
+  --recipient age1... \
+  --identity ~/.config/kimen/team.agekey
 ```
 
 ### `kimen remote get <name>`
@@ -696,13 +706,14 @@ kimen remote get team --json
 What it does:
 
 - Updates an existing remote without removing/re-adding it.
-- Accepts partial updates for `--type`, `--path`, `--recipient`, `--identity`.
-- If `--type` or `--path` changes, sync baseline for that remote is cleared to avoid stale revision assumptions.
+- Accepts partial updates for `--type`, `--path`, `--recipient`, `--identity`, `--branch`, `--bundle-path`.
+- If endpoint fields change (`--type`, `--path`, `--branch`, `--bundle-path`), sync baseline for that remote is cleared to avoid stale revision assumptions.
 
 Examples:
 
 ```bash
 kimen remote set team --path /srv/kimen/new-team-vault
+kimen remote set team --type git --path git@github.com:org/new-secrets.git --branch main --bundle-path vault.age
 kimen remote set team --recipient age1new...
 kimen remote set team --path /srv/kimen/new-team-vault --json
 ```
@@ -786,7 +797,8 @@ Requirements:
 - remote must have `recipient` configured
 - local vault file must exist
 - remote baseline check must pass
-- push lock must be available (or waited for via `--lock-wait`)
+- for `type=fs`: push lock must be available (or waited for via `--lock-wait`)
+- for `type=git`: push lock flags are not used
 
 Automation notes (`--json` errors):
 
