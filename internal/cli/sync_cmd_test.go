@@ -540,7 +540,7 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
 		t.Fatalf("mkdir remote dir: %v", err)
 	}
-	if err := os.WriteFile(lockPath, []byte("pid=4242\ncreated_at=2026-01-01T00:00:00Z\n"), 0o600); err != nil {
+	if err := os.WriteFile(lockPath, []byte("pid=4242\ncreated_at=2026-01-01T00:00:00Z\nhost=ci-runner\nuser=agent\n"), 0o600); err != nil {
 		t.Fatalf("write lock file: %v", err)
 	}
 
@@ -560,6 +560,12 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	}
 	if statusResp["lock_created"] != "2026-01-01T00:00:00Z" {
 		t.Fatalf("unexpected lock_created in sync status: %#v", statusResp)
+	}
+	if statusResp["lock_host"] != "ci-runner" {
+		t.Fatalf("unexpected lock_host in sync status: %#v", statusResp)
+	}
+	if statusResp["lock_user"] != "agent" {
+		t.Fatalf("unexpected lock_user in sync status: %#v", statusResp)
 	}
 
 	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--remote", "origin", "--json"}, nil)

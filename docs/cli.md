@@ -754,7 +754,7 @@ Key fields (`--json`):
 
 - `has_remote`: remote bundle exists
 - `has_lock`: remote push lock file exists
-- `lock_path`, `lock_age`: lock metadata when present
+- `lock_path`, `lock_age`, `lock_pid`, `lock_host`, `lock_user`: lock metadata when present
 - `last_seen_rev`: last remote revision observed by local machine
 - `in_sync`: local baseline matches current remote revision
 - `can_push`: push is allowed without conflict

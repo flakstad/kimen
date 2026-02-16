@@ -36,6 +36,8 @@ type syncResult struct {
 	LockPath    string `json:"lock_path,omitempty"`
 	LockAge     string `json:"lock_age,omitempty"`
 	LockPID     string `json:"lock_pid,omitempty"`
+	LockHost    string `json:"lock_host,omitempty"`
+	LockUser    string `json:"lock_user,omitempty"`
 	LockCreated string `json:"lock_created,omitempty"`
 	LockError   string `json:"lock_error,omitempty"`
 }
@@ -65,6 +67,8 @@ type syncConflictResult struct {
 	LockPath    string `json:"lock_path,omitempty"`
 	LockAge     string `json:"lock_age,omitempty"`
 	LockPID     string `json:"lock_pid,omitempty"`
+	LockHost    string `json:"lock_host,omitempty"`
+	LockUser    string `json:"lock_user,omitempty"`
 	LockCreated string `json:"lock_created,omitempty"`
 	LockError   string `json:"lock_error,omitempty"`
 }
@@ -102,6 +106,8 @@ type pushLockInfo struct {
 	LockPath    string
 	LockAge     string
 	LockPID     string
+	LockHost    string
+	LockUser    string
 	LockCreated string
 	LockError   string
 }
@@ -196,6 +202,8 @@ func newSyncStatusCommand() *cobra.Command {
 				LockPath:    lockInfo.LockPath,
 				LockAge:     lockInfo.LockAge,
 				LockPID:     lockInfo.LockPID,
+				LockHost:    lockInfo.LockHost,
+				LockUser:    lockInfo.LockUser,
 				LockCreated: lockInfo.LockCreated,
 				LockError:   lockInfo.LockError,
 			}
@@ -225,6 +233,12 @@ func newSyncStatusCommand() *cobra.Command {
 				}
 				if lockInfo.LockPID != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-pid: %s\n", lockInfo.LockPID)
+				}
+				if lockInfo.LockHost != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-host: %s\n", lockInfo.LockHost)
+				}
+				if lockInfo.LockUser != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-user: %s\n", lockInfo.LockUser)
 				}
 				if lockInfo.LockCreated != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-created: %s\n", lockInfo.LockCreated)
@@ -294,6 +308,8 @@ func newSyncConflictsCommand() *cobra.Command {
 				LockPath:    lockInfo.LockPath,
 				LockAge:     lockInfo.LockAge,
 				LockPID:     lockInfo.LockPID,
+				LockHost:    lockInfo.LockHost,
+				LockUser:    lockInfo.LockUser,
 				LockCreated: lockInfo.LockCreated,
 				LockError:   lockInfo.LockError,
 			}
@@ -322,6 +338,15 @@ func newSyncConflictsCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
 				if lockInfo.LockAge != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-age: %s\n", lockInfo.LockAge)
+				}
+				if lockInfo.LockPID != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-pid: %s\n", lockInfo.LockPID)
+				}
+				if lockInfo.LockHost != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-host: %s\n", lockInfo.LockHost)
+				}
+				if lockInfo.LockUser != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-user: %s\n", lockInfo.LockUser)
 				}
 			} else {
 				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
@@ -917,7 +942,19 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			_, _ = fmt.Fprintf(f, "pid=%d\ncreated_at=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+			host, _ := os.Hostname()
+			user := os.Getenv("USER")
+			if strings.TrimSpace(user) == "" {
+				user = os.Getenv("USERNAME")
+			}
+			_, _ = fmt.Fprintf(
+				f,
+				"pid=%d\ncreated_at=%s\nhost=%s\nuser=%s\n",
+				os.Getpid(),
+				time.Now().UTC().Format(time.RFC3339Nano),
+				host,
+				user,
+			)
 			if closeErr := f.Close(); closeErr != nil {
 				_ = os.Remove(lockPath)
 				return nil, closeErr
@@ -983,6 +1020,10 @@ func readRemotePushLockInfo(bundlePath string) (pushLockInfo, error) {
 			if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
 				info.LockAge = time.Since(ts).Truncate(time.Second).String()
 			}
+		case "host":
+			info.LockHost = v
+		case "user":
+			info.LockUser = v
 		}
 	}
 	return info, nil
