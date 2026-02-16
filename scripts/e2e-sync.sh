@@ -65,7 +65,8 @@ require_exit_code 32 "$BIN" sync unlock --remote team
 
 printf 'held\n' > "$REMOTE_DIR/vault.age.lock"
 touch -t 200001010000 "$REMOTE_DIR/vault.age.lock"
-"$BIN" sync push --remote team --break-stale-lock-after 30m >/dev/null
+STALE_BREAK_JSON="$("$BIN" sync push --remote team --break-stale-lock-after 30m --json)"
+assert_contains "$STALE_BREAK_JSON" '"stale_lock_broken":true'
 
 printf 'held\n' > "$REMOTE_DIR/vault.age.lock"
 ( sleep 0.2; rm -f "$REMOTE_DIR/vault.age.lock" ) &
