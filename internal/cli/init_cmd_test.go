@@ -9,6 +9,88 @@ import (
 	"kimen/internal/exitcode"
 )
 
+func TestCLI_InitCIPrSafety_JSONWritesWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, ".github", "workflows", "kimen-pr-safety.yml")
+
+	out, errBuf, err := runCLI([]string{
+		"init", "ci-pr-safety",
+		"--out", outPath,
+		"--profile", "qa",
+		"--command", "echo lint-check",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("init ci-pr-safety --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "init_ci_pr_safety" {
+		t.Fatalf("unexpected init action: %#v", resp)
+	}
+	if resp["out"] != outPath {
+		t.Fatalf("unexpected output path in init response: %#v", resp)
+	}
+
+	b, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read scaffolded workflow: %v", err)
+	}
+	content := string(b)
+	wantSnippets := []string{
+		"name: kimen-pr-safety",
+		`default: "qa"`,
+		`default: "echo lint-check"`,
+		`./kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json`,
+		`./kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json`,
+	}
+	for _, snippet := range wantSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("expected workflow to contain %q\ncontent:\n%s", snippet, content)
+		}
+	}
+}
+
+func TestCLI_InitCIDeploy_JSONWritesWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, ".github", "workflows", "kimen-deploy.yml")
+
+	out, errBuf, err := runCLI([]string{
+		"init", "ci-deploy",
+		"--out", outPath,
+		"--profile", "stage",
+		"--deploy-command", "./scripts/release.sh --dry-run",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("init ci-deploy --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "init_ci_deploy" {
+		t.Fatalf("unexpected init action: %#v", resp)
+	}
+	if resp["out"] != outPath {
+		t.Fatalf("unexpected output path in init response: %#v", resp)
+	}
+
+	b, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read scaffolded workflow: %v", err)
+	}
+	content := string(b)
+	wantSnippets := []string{
+		"name: kimen-deploy",
+		`default: "stage"`,
+		`default: "./scripts/release.sh --dry-run"`,
+		`--in vault.age \`,
+		`./kimen project run --profile "${{ inputs.profile }}" -- "${DEPLOY_CMD[@]}"`,
+	}
+	for _, snippet := range wantSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("expected workflow to contain %q\ncontent:\n%s", snippet, content)
+		}
+	}
+}
+
 func TestCLI_InitCISyncGate_JSONWritesWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, ".github", "workflows", "kimen-sync-gate.yml")
@@ -129,6 +211,34 @@ func TestCLI_InitCISyncGate_InvalidRemoteType(t *testing.T) {
 	errResp := parseJSONMap(t, errOut)
 	if errResp["exit_code"] != float64(exitcode.CodeInitFailed) {
 		t.Fatalf("unexpected init error payload: %#v", errResp)
+	}
+}
+
+func TestCLI_InitCIPrSafety_TemplateMatchesCheckedInWorkflow(t *testing.T) {
+	workflowPath := filepath.Clean(filepath.Join("..", "..", ".github", "workflows", "kimen-pr-safety-template.yml"))
+	b, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("read checked-in workflow template: %v", err)
+	}
+
+	want := normalizeNewlines(string(b))
+	got := normalizeNewlines(renderDefaultCIPrSafetyTemplateWorkflow())
+	if got != want {
+		t.Fatalf("pr-safety template drift detected between canonical scaffold and %s", workflowPath)
+	}
+}
+
+func TestCLI_InitCIDeploy_TemplateMatchesCheckedInWorkflow(t *testing.T) {
+	workflowPath := filepath.Clean(filepath.Join("..", "..", ".github", "workflows", "kimen-deploy-template.yml"))
+	b, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("read checked-in workflow template: %v", err)
+	}
+
+	want := normalizeNewlines(string(b))
+	got := normalizeNewlines(renderDefaultCIDeployTemplateWorkflow())
+	if got != want {
+		t.Fatalf("deploy template drift detected between canonical scaffold and %s", workflowPath)
 	}
 }
 

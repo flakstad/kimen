@@ -73,6 +73,46 @@ kimen config unlock set exec -- gcloud secrets versions access latest --secret k
 
 Scaffold starter integration files directly from the CLI.
 
+### `kimen init ci-pr-safety`
+
+What it does:
+
+- Writes a PR safety workflow file (default: `.github/workflows/kimen-pr-safety.yml`).
+- Includes strict map lint + projection plan checks.
+
+Common flags:
+
+- `--out`: output workflow path (default `.github/workflows/kimen-pr-safety.yml`)
+- `--force`: overwrite existing output file
+- `--profile`: default profile workflow input
+- `--command`: default plan command workflow input
+
+Example:
+
+```bash
+kimen init ci-pr-safety --profile ci --command "echo ci-check"
+```
+
+### `kimen init ci-deploy`
+
+What it does:
+
+- Writes a deploy workflow file (default: `.github/workflows/kimen-deploy.yml`).
+- Includes bundle open + doctor + envfile + `project run` deployment flow.
+
+Common flags:
+
+- `--out`: output workflow path (default `.github/workflows/kimen-deploy.yml`)
+- `--force`: overwrite existing output file
+- `--profile`: default profile workflow input
+- `--deploy-command`: default deploy command workflow input
+
+Example:
+
+```bash
+kimen init ci-deploy --profile prod --deploy-command "./scripts/deploy.sh"
+```
+
 ### `kimen init ci-sync-gate`
 
 What it does:

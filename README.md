@@ -57,7 +57,7 @@ In practice, most projections read bytes from the local vault by secret name. Ki
 - Preflight checks: `kimen doctor` (human/JSON, strict mode)
 - Build metadata: `kimen version` (`--json` supported)
 - Safe planning: `kimen plan` (no secret values)
-- CI scaffolding: `kimen init ci-sync-gate` (generate strict Team Sync gate workflow)
+- CI scaffolding: `kimen init ci-pr-safety|ci-deploy|ci-sync-gate` (generate workflow starters)
 - CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
 - Local remote sync: `kimen remote add/get/set/list/rm` + `kimen sync status/conflicts/push/pull/reset-baseline/unlock/restore` for `fs` and `git` remotes (push lock files apply to shared fs remotes)
 

@@ -8,9 +8,11 @@ This repo includes three starter workflow templates in `.github/workflows/`:
 
 These are intentionally `workflow_dispatch` templates so they do not auto-run until you adapt them.
 
-You can scaffold the sync gate template directly:
+You can scaffold workflow files directly:
 
 ```bash
+kimen init ci-pr-safety
+kimen init ci-deploy
 kimen init ci-sync-gate
 ```
 

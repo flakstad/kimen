@@ -70,6 +70,7 @@ Notes:
 
 - `map lint` fails with exit code `20` on errors.
 - `project plan` never outputs secret values; safe to archive as artifact.
+- Scaffold command: `kimen init ci-pr-safety`
 
 ## Template B: Deploy with bundle open + projections
 
@@ -125,6 +126,8 @@ jobs:
             --profile linje-prod \
             -- ./scripts/deploy.sh
 ```
+
+Scaffold command: `kimen init ci-deploy`
 
 ## Template C: Team Sync strict gate (status/conflicts + dry-runs)
 
