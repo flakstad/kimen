@@ -858,7 +858,7 @@ Common flags:
 Notes:
 
 - On orchestration failure with `--json`, Kimen emits a report on `stdout` (similar to `sync preflight`).
-- Existing explicit subcommands (`sync push/pull/status/conflicts/...`) remain available for expert/debug workflows.
+- Existing explicit subcommands (`sync push/pull/changes/resolve/status/conflicts/...`) remain available for expert/debug workflows.
 
 Examples:
 
@@ -993,6 +993,31 @@ kimen sync changes --remote team --json
 kimen sync changes --json
 ```
 
+### `kimen sync resolve`
+
+What it does:
+
+- Resolves overlapping key conflicts by selecting one side for specific conflict keys.
+- `--take remote`: overwrite selected local keys with the current remote values.
+- `--take local`: keep selected local values.
+- For selected keys, baseline hashes are advanced to current remote key hashes, so those keys no longer block `sync pull --reconcile`.
+
+Notes:
+
+- Requires passphrase access (it decrypts local and remote snapshots).
+- `--key` is optional:
+  - if omitted, all current `conflict_keys` are resolved
+  - if provided, every key must be a current conflict key
+- When all remaining remote key deltas are reconciled, `last_seen_rev` is advanced to current `remote_rev` to unblock push flow.
+
+Examples:
+
+```bash
+kimen sync resolve --remote team --take remote --key api_key --json
+kimen sync resolve --remote team --take local --key api_key --json
+kimen sync resolve --remote team --take remote --json
+```
+
 ### `kimen sync conflicts`
 
 What it does:
@@ -1096,6 +1121,7 @@ Common conflict cases:
 - remote changed since your last sync
 - remote bundle was deleted since your last sync
 - remote already has data, but your local machine has no baseline yet
+- overlapping key edits where both sides changed the same key differently (`overlapping_changes`)
 
 Concrete recovery flow:
 
@@ -1111,6 +1137,18 @@ kimen secret set api_key --stdin
 
 # 4) push again
 kimen sync push --remote team
+```
+
+If `sync pull --reconcile` reports `overlapping_changes`, resolve specific keys first:
+
+```bash
+# choose remote value for one key
+kimen sync resolve --remote team --take remote --key api_key --json
+
+# or keep local value
+kimen sync resolve --remote team --take local --key api_key --json
+
+# then continue reconcile/push flow as indicated by recommended_action
 ```
 
 Automation notes:

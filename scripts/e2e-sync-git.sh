@@ -159,6 +159,26 @@ if [[ "$NOTE_LOCAL_AFTER_RECONCILE" != "a-only" || "$NOTE_REMOTE_AFTER_RECONCILE
   exit 1
 fi
 
+echo "[e2e-sync-git] Resolve overlapping conflict by taking remote value"
+printf 'a-overlap' | "$BIN" secret set api_key --stdin >/dev/null
+
+as_actor_b
+"$BIN" sync pull --remote team >/dev/null
+printf 'b-overlap' | "$BIN" secret set api_key --stdin >/dev/null
+"$BIN" sync push --remote team >/dev/null
+
+as_actor_a
+require_exit_code 31 "$BIN" sync pull --remote team --reconcile --json
+RESOLVE_JSON="$("$BIN" sync resolve --remote team --take remote --key api_key --json)"
+assert_contains "$RESOLVE_JSON" '"action":"sync_resolve"'
+assert_contains "$RESOLVE_JSON" '"remaining_conflict_count":0'
+"$BIN" sync pull --remote team --reconcile --json >/dev/null
+API_AFTER_RESOLVE="$("$BIN" secret get api_key --unsafe-stdout)"
+if [[ "$API_AFTER_RESOLVE" != "b-overlap" ]]; then
+  echo "error: expected api_key=b-overlap after resolve+reconcile, got '$API_AFTER_RESOLVE'" >&2
+  exit 1
+fi
+
 echo "[e2e-sync-git] Git-specific behavior checks"
 require_exit_code 32 "$BIN" sync push --remote team --lock-wait 1s
 require_exit_code 32 "$BIN" sync push --remote team --dry-run --lock-wait 1s

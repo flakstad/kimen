@@ -3166,6 +3166,229 @@ func TestCLI_SyncPullReconcile_DisjointMergeAndConflictFailure(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncResolve_RemoteThenLocalTake(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set api_key a1 (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("set db_pw p1 (actor A): %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("initial push (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a2-local"))
+	restoreA()
+	if err != nil {
+		t.Fatalf("set api_key a2-local (actor A): %v", err)
+	}
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("vault init (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a3-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set api_key a3-remote (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p2-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set db_pw p2-remote (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push overlap + remote-only update (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err := runCLI([]string{"sync", "resolve", "--take", "remote", "--key", "api_key", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync resolve --take remote --json: %v (stderr=%s)", err, errBuf)
+	}
+	resolveResp := parseJSONMap(t, out)
+	if resolveResp["action"] != "sync_resolve" || resolveResp["take"] != "remote" {
+		restoreA()
+		t.Fatalf("unexpected resolve payload (remote take): %#v", resolveResp)
+	}
+	resolvedCount, okResolved := jsonInt(resolveResp, "resolved_count")
+	remainingConflictCount, okRemaining := jsonInt(resolveResp, "remaining_conflict_count")
+	if !okResolved || !okRemaining || resolvedCount != 1 || remainingConflictCount != 0 {
+		restoreA()
+		t.Fatalf("unexpected resolve counts (remote take): %#v", resolveResp)
+	}
+	if resolveResp["recommended_action"] != "sync_pull" {
+		restoreA()
+		t.Fatalf("expected recommended_action=sync_pull after remote take, got %#v", resolveResp)
+	}
+	if !containsString(jsonStringSlice(resolveResp, "keys"), "api_key") {
+		restoreA()
+		t.Fatalf("expected api_key in resolved keys: %#v", resolveResp)
+	}
+	_, _, err = runCLI([]string{"sync", "pull", "--reconcile", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync pull --reconcile after resolve remote: %v", err)
+	}
+	apiVal, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret get api_key after resolve remote: %v", err)
+	}
+	dbVal, _, err := runCLI([]string{"secret", "get", "db_pw", "--unsafe-stdout"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("secret get db_pw after resolve remote: %v", err)
+	}
+	if apiVal != "a3-remote" || dbVal != "p2-remote" {
+		t.Fatalf("expected remote values after resolve+reconcile pull, got api_key=%q db_pw=%q", apiVal, dbVal)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a4-local"))
+	restoreA()
+	if err != nil {
+		t.Fatalf("set api_key a4-local (actor A): %v", err)
+	}
+
+	restoreB = withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("pull before second overlap (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a4-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("set api_key a4-remote (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("push second overlap (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err = runCLI([]string{"sync", "resolve", "--take", "local", "--key", "api_key", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync resolve --take local --json: %v (stderr=%s)", err, errBuf)
+	}
+	resolveLocal := parseJSONMap(t, out)
+	if resolveLocal["action"] != "sync_resolve" || resolveLocal["take"] != "local" {
+		restoreA()
+		t.Fatalf("unexpected resolve payload (local take): %#v", resolveLocal)
+	}
+	if resolveLocal["recommended_action"] != "sync_push" {
+		restoreA()
+		t.Fatalf("expected recommended_action=sync_push after local take, got %#v", resolveLocal)
+	}
+	remoteRev, _ := resolveLocal["remote_rev"].(string)
+	lastSeen, _ := resolveLocal["last_seen_rev"].(string)
+	if strings.TrimSpace(remoteRev) == "" || remoteRev != lastSeen {
+		restoreA()
+		t.Fatalf("expected last_seen_rev to advance to remote_rev for local take, got remote_rev=%q last_seen_rev=%q payload=%#v", remoteRev, lastSeen, resolveLocal)
+	}
+	_, _, err = runCLI([]string{"sync", "push", "--json"}, nil)
+	restoreA()
+	if err != nil {
+		t.Fatalf("sync push after local resolve: %v", err)
+	}
+
+	restoreB = withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("sync pull after local resolve push (actor B): %v", err)
+	}
+	finalVal, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("secret get api_key after local resolve push: %v", err)
+	}
+	if finalVal != "a4-local" {
+		t.Fatalf("expected actor B to receive local-taken value a4-local, got %q", finalVal)
+	}
+}
+
 func generateRecipient(t *testing.T, identityPath string) string {
 	t.Helper()
 	out, errBuf, err := runCLI([]string{"bundle", "keygen", "--out", identityPath, "--json"}, nil)
@@ -3196,6 +3419,21 @@ func jsonBool(payload map[string]any, key string) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
+}
+
+func jsonInt(payload map[string]any, key string) (int, bool) {
+	v, ok := payload[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 func jsonStringSlice(payload map[string]any, key string) []string {

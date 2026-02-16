@@ -70,6 +70,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
   - input/flag validation failures still use the standard error envelope on `stderr`
 - `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","has_local":bool,"in_sync":bool,"can_push":bool,"needs_pull":bool,"blockers":["..."],"recommended_action":"sync_pull|sync_push|wait_or_sync_unlock|configure_remote_recipient|configure_remote_identity|sync_reset_baseline_or_remote_recreate|vault_init|none",...}`
 - `sync changes` success: `{"ok":true,"action":"sync_changes","remote":"...","has_baseline":bool,"baseline_rev":"...","remote_rev":"...","has_remote":bool,"has_local":bool,"local_changed_keys":["..."],"remote_changed_keys":["..."],"overlapping_keys":["..."],"conflict_keys":["..."],"local_only_changed_keys":["..."],"remote_only_changed_keys":["..."],"current_only_local_keys":["..."],"current_only_remote_keys":["..."],"current_different_keys":["..."],"can_reconcile":bool,"recommended_action":"..."}` (requires passphrase)
+- `sync resolve` success: `{"ok":true,"action":"sync_resolve","remote":"...","remote_rev":"...","last_seen_rev":"...","take":"local|remote","keys":["..."],"resolved_count":N,"remaining_conflict_keys":["..."],"remaining_conflict_count":N,"recommended_action":"manual_reconcile|sync_pull|sync_pull_reconcile|sync_push|none"}` (requires passphrase; updates baseline hashes for selected conflict keys)
 - `sync preflight --json`: emits report on `stdout` for both success and failure:
   - `{"ok":bool,"action":"sync_preflight","remote":"...","strict":bool,"exit_code":0|31|32,"check_count":N,"failed_count":N,"failed_checks":["..."],"failed_check":"...","recommended_action":"...","checks":[{"name":"doctor|sync_status|sync_conflicts|sync_pull_dry_run|sync_push_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
   - strict mode runs doctor/status/conflicts with strict semantics
@@ -94,8 +95,8 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
   - `expected_rev` / `actual_rev` when available
   - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate|manual_reconcile`
 - sync precondition errors (exit `32`) may include structured fields:
-  - `reason`: e.g. `remote_lock_present`
-  - `recommended_action`: e.g. `wait_or_sync_unlock`
+  - `reason`: e.g. `remote_lock_present|remote_missing|local_vault_missing|reconcile_baseline_missing|no_overlapping_conflicts|resolve_key_not_conflict`
+  - `recommended_action`: e.g. `wait_or_sync_unlock|sync_pull|manual_reconcile|sync_reset_baseline_or_remote_recreate|none`
 - error: standard error envelope on `stderr` (except `sync --json` orchestration failures and `sync preflight --json`, which report failures on `stdout`)
 
 `plan --json` and `project plan --json`:

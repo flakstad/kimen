@@ -88,7 +88,7 @@ Goal:
 
 - explain *what* changed, not just that a conflict exists
 
-Status: implemented initial version.
+Status: implemented.
 
 Additions:
 
@@ -106,18 +106,19 @@ Goal:
 
 - reduce manual conflict handling where it is safe
 
-Status: implemented initial version.
+Status: implemented.
 
 Additions:
 
 - reconcile mode that auto-merges disjoint local/remote changes (`sync pull --reconcile`)
 - overlapping key changes fail with explicit conflict reason (`overlapping_changes`)
+- explicit key resolution command (`sync resolve --take local|remote --key ...`) to clear overlapping conflicts without force-resetting baselines
 
 Acceptance gates:
 
 - no silent data loss
 - backup/restore invariants preserved
-- e2e covers disjoint vs overlapping edits
+- tests cover disjoint vs overlapping edits and explicit resolution flow
 
 ## v2.4: Hardening and ergonomics polish
 
