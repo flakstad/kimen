@@ -276,6 +276,8 @@ func newSyncStatusCommand() *cobra.Command {
 				recommended = "sync_pull"
 			case missingRecipient && !needsPull:
 				recommended = "configure_remote_recipient"
+			case conflictDetails.HasConflict && conflictDetails.Reason == "remote_disappeared":
+				recommended = "sync_reset_baseline_or_remote_recreate"
 			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != "remote_disappeared"):
 				recommended = "sync_pull"
 			case lockBlocksPush:

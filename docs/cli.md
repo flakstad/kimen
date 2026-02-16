@@ -775,7 +775,7 @@ Key fields (`--json`):
 - `lock_age_seconds`: numeric lock age for automation
 - `likely_stale`: set when `--stale-threshold` is provided and lock age meets/exceeds it
 - `blockers`: machine-readable blockers such as `local_vault_missing`, `remote_lock_present`, `remote_recipient_missing`, `remote_identity_missing`, or conflict reasons
-- `recommended_action`: next step hint (`sync_pull`, `sync_push`, `wait_or_sync_unlock`, `configure_remote_recipient`, `configure_remote_identity`, `vault_init`, `none`)
+- `recommended_action`: next step hint (`sync_pull`, `sync_push`, `wait_or_sync_unlock`, `configure_remote_recipient`, `configure_remote_identity`, `sync_reset_baseline_or_remote_recreate`, `vault_init`, `none`)
 - `last_seen_rev`: last remote revision observed by local machine
 - `in_sync`: local baseline matches current remote revision
 - `can_push`: push is allowed without conflict

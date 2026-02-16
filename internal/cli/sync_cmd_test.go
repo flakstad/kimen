@@ -269,6 +269,60 @@ func TestCLI_SyncPushConflictWhenRemoteDisappeared(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncStatusRecommendedActionWhenRemoteDisappeared(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	if err := os.Remove(remoteBundle); err != nil {
+		t.Fatalf("remove remote bundle: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["recommended_action"] != "sync_reset_baseline_or_remote_recreate" {
+		t.Fatalf("expected remote_disappeared recommended_action in sync status: %#v", resp)
+	}
+	if blockers := jsonStringSlice(resp, "blockers"); !containsString(blockers, "remote_disappeared") {
+		t.Fatalf("expected remote_disappeared blocker in sync status: %#v", resp)
+	}
+}
+
 func TestCLI_SyncPullRequiredForExistingRemote(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
