@@ -138,3 +138,5 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/team-sync-roadmap.md`: team sync roadmap (directional)
 - `docs/threat-model.md`: what Kimen does and does not protect against
 - `docs/stability.md`: early-stage stability and upgrade expectations
+- `docs/release-v0.1-checklist.md`: milestone release checklist
+- `docs/feedback-template.md`: structured early-adopter feedback template
