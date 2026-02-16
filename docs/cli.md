@@ -761,6 +761,7 @@ kimen sync push --remote team --json
 What it does:
 
 - Decrypts the remote bundle into the local vault file (overwrite).
+- Creates a timestamped local vault backup before overwrite (default).
 - Updates `last_seen_rev` to the pulled remote revision.
 
 Requirements:
@@ -772,6 +773,7 @@ Examples:
 
 ```bash
 kimen sync pull --remote team
+kimen sync pull --remote team --no-backup
 kimen sync pull --remote team --json
 ```
 

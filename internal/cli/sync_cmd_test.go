@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -225,6 +226,24 @@ func TestCLI_SyncPullRequiredForExistingRemote(t *testing.T) {
 	if pullResp["action"] != "sync_pull" || pullResp["remote"] != "origin" {
 		t.Fatalf("unexpected sync pull response: %#v", pullResp)
 	}
+	backupPath, _ := pullResp["backup_path"].(string)
+	if backupPath == "" {
+		t.Fatalf("expected backup_path in sync pull response: %#v", pullResp)
+	}
+	if _, err := os.Stat(backupPath); err != nil {
+		t.Fatalf("expected backup file to exist at %q: %v", backupPath, err)
+	}
+	restoreBackupVault := withEnv(map[string]string{
+		envVaultPath: backupPath,
+	})
+	backupValue, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	restoreBackupVault()
+	if err != nil {
+		t.Fatalf("secret get from backup vault: %v", err)
+	}
+	if backupValue != "local-new" {
+		t.Fatalf("expected backup vault to contain pre-pull local value, got %q", backupValue)
+	}
 
 	out, _, err = runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
 	if err != nil {
@@ -241,6 +260,73 @@ func TestCLI_SyncPullRequiredForExistingRemote(t *testing.T) {
 	statusResp = parseJSONMap(t, out)
 	if !jsonBool(statusResp, "in_sync") || !jsonBool(statusResp, "can_push") || jsonBool(statusResp, "needs_pull") {
 		t.Fatalf("unexpected sync status after pull: %#v", statusResp)
+	}
+}
+
+func TestCLI_RemoteAndSync_NonJSONErrorsWriteStderr(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	_, errBuf, err := runCLI([]string{"remote", "add", "origin", "--path", remoteDir}, nil)
+	if err == nil {
+		t.Fatalf("expected remote duplicate add failure")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	if !strings.Contains(errBuf, "already exists") {
+		t.Fatalf("expected duplicate-remote human error in stderr, got %q", errBuf)
+	}
+
+	_, _, err = runCLI([]string{"sync", "push", "--remote", "origin"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", vaultPath,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+	_, errBuf, err = runCLI([]string{"sync", "push", "--remote", "origin"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync conflict")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	if !strings.Contains(errBuf, "remote changed") {
+		t.Fatalf("expected sync conflict human error in stderr, got %q", errBuf)
 	}
 }
 

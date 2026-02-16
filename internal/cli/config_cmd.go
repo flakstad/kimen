@@ -236,6 +236,8 @@ func configCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeConfigFailed,
 		})
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeConfigFailed, err)
 }

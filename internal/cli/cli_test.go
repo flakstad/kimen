@@ -675,6 +675,55 @@ func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	}
 }
 
+func TestCLI_HumanModeErrors_WriteStderr(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, errBuf, err := runCLI([]string{"vault", "info"}, nil)
+	if err == nil {
+		t.Fatalf("expected vault info failure before init")
+	}
+	assertExitCode(t, err, exitcode.CodeVaultNotFound)
+	if !strings.Contains(errBuf, "vault not found") {
+		t.Fatalf("expected human error on stderr for vault info, got %q", errBuf)
+	}
+
+	_, errBuf, err = runCLI([]string{"bundle", "open"}, nil)
+	if err == nil {
+		t.Fatalf("expected bundle open usage failure")
+	}
+	assertExitCode(t, err, exitcode.CodeBundleFailed)
+	if !strings.Contains(errBuf, "--in is required") {
+		t.Fatalf("expected human error on stderr for bundle open, got %q", errBuf)
+	}
+
+	_, errBuf, err = runCLI([]string{"config", "unlock", "set", "bogus"}, nil)
+	if err == nil {
+		t.Fatalf("expected config unlock set failure")
+	}
+	assertExitCode(t, err, exitcode.CodeConfigFailed)
+	if !strings.Contains(errBuf, "unknown unlock method") {
+		t.Fatalf("expected human error on stderr for config unlock set, got %q", errBuf)
+	}
+
+	_, errBuf, err = runCLI([]string{"render", "--file", "cfg.txt=missing"}, nil)
+	if err == nil {
+		t.Fatalf("expected render failure without --dir")
+	}
+	assertExitCode(t, err, exitcode.CodeProjectionFailed)
+	if !strings.Contains(errBuf, "--dir is required") {
+		t.Fatalf("expected human error on stderr for render, got %q", errBuf)
+	}
+}
+
 func TestHelperPassphraseCommand(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROC") != "1" {
 		return

@@ -238,6 +238,8 @@ func bundleCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeBundleFailed,
 		})
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeBundleFailed, err)
 }

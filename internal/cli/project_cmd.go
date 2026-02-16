@@ -321,6 +321,8 @@ func projectionCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			Error:    err.Error(),
 			ExitCode: code,
 		})
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(code, err)
 }

@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +26,7 @@ type syncResult struct {
 	VaultPath   string `json:"vault_path,omitempty"`
 	RemoteRev   string `json:"remote_rev,omitempty"`
 	LastSeenRev string `json:"last_seen_rev,omitempty"`
+	BackupPath  string `json:"backup_path,omitempty"`
 	HasRemote   bool   `json:"has_remote"`
 	HasLocal    bool   `json:"has_local,omitempty"`
 	InSync      bool   `json:"in_sync,omitempty"`
@@ -228,6 +231,7 @@ func newSyncPushCommand() *cobra.Command {
 func newSyncPullCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var noBackup bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Pull remote encrypted bundle into local vault",
@@ -262,6 +266,17 @@ func newSyncPullCommand() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(vaultPath), 0o700); err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+			backupPath := ""
+			if !noBackup {
+				if _, err := os.Stat(vaultPath); err == nil {
+					backupPath, err = backupExistingVault(vaultPath)
+					if err != nil {
+						return syncCommandError(cmd, jsonOut, err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+			}
 
 			id, err := bundle.LoadIdentity(remote.Identity, false, nil)
 			if err != nil {
@@ -290,17 +305,22 @@ func newSyncPullCommand() *cobra.Command {
 					VaultPath:   vaultPath,
 					RemoteRev:   remoteRev,
 					LastSeenRev: remoteRev,
+					BackupPath:  backupPath,
 					HasRemote:   true,
 					HasLocal:    true,
 					InSync:      true,
 				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "pulled %s (rev=%s)\n", remote.Name, remoteRev)
+			if backupPath != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "backup: %s\n", backupPath)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip creating a local vault backup before overwrite")
 	return cmd
 }
 
@@ -346,6 +366,8 @@ func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			Error:    err.Error(),
 			ExitCode: code,
 		})
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(code, err)
 }
@@ -355,4 +377,32 @@ func syncExitCode(err error) int {
 		return exitcode.CodeSyncConflict
 	}
 	return exitcode.CodeSyncFailed
+}
+
+func backupExistingVault(vaultPath string) (string, error) {
+	in, err := os.Open(vaultPath)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+
+	backupPath := fmt.Sprintf("%s.bak.%d", vaultPath, time.Now().UnixNano())
+	out, err := os.OpenFile(backupPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(backupPath)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(backupPath)
+		return "", err
+	}
+	if err := os.Chmod(backupPath, 0o600); err != nil {
+		_ = os.Remove(backupPath)
+		return "", err
+	}
+	return backupPath, nil
 }
