@@ -380,6 +380,7 @@ func newSyncConflictsCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
 	var staleThreshold time.Duration
+	var strict bool
 	cmd := &cobra.Command{
 		Use:   "conflicts",
 		Short: "Inspect whether push is currently blocked by a sync conflict",
@@ -460,6 +461,18 @@ func newSyncConflictsCommand() *cobra.Command {
 				LockAgeSeconds:    int64(lockInfo.LockAgeDur.Seconds()),
 				Blockers:          blockers,
 				RecommendedAction: recommended,
+			}
+			if strict {
+				if details.HasConflict {
+					return syncCommandError(cmd, jsonOut, &syncConflictError{Details: details})
+				}
+				if lockBlocksPush {
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "remote_lock_present",
+						Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress)", lockInfo.LockPath),
+						RecommendedAction: "wait_or_sync_unlock",
+					})
+				}
 			}
 
 			if jsonOut {
@@ -548,6 +561,7 @@ func newSyncConflictsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
+	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when conflicts or lock blockers are present")
 	return cmd
 }
 

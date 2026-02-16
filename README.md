@@ -17,6 +17,21 @@ That’s what projections are for: `kimen run` scopes secrets to a single proces
 Kimen is early-stage and evolving. The CLI and on-disk formats may change.
 Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 
+## Team Sync v1
+
+Team Sync v1 is now implemented for `fs` and `git` remotes, including:
+
+- `sync status/conflicts/push/pull/reset-baseline/unlock/restore`
+- strict CI gating via `sync conflicts --strict`
+- no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`
+- remote readiness + sync-state checks in `kimen doctor`
+
+See:
+
+- `docs/team-sync-v1.md`
+- `docs/team-sync-v1-checklist.md`
+- `docs/automation-contract.md`
+
 ## Mental model
 
 - **Secrets** are encrypted, inert source material.
@@ -170,6 +185,8 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/alternatives.md`: adjacent tools and comparisons
 - `docs/team-sync.md`: team collaboration models and future direction
 - `docs/team-sync-roadmap.md`: team sync roadmap (directional)
+- `docs/team-sync-v1.md`: Team Sync v1 guarantees, operating models, and runbooks
+- `docs/team-sync-v1-checklist.md`: Team Sync v1 exit checklist
 - `docs/threat-model.md`: what Kimen does and does not protect against
 - `docs/stability.md`: early-stage stability and upgrade expectations
 - `docs/release-v0.1-checklist.md`: milestone release checklist

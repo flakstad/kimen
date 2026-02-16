@@ -836,12 +836,14 @@ What it does:
 - Returns conflict details (`reason`, expected/actual rev) without mutating state.
 - Also reports lock state (`has_lock`, lock metadata), useful when contention and conflict happen together.
 - Includes `blockers` and `recommended_action` for automation decisioning.
+- `--strict` exits non-zero when push is currently blocked by either conflict or lock.
 
 Examples:
 
 ```bash
 kimen sync conflicts --remote team
 kimen sync conflicts --remote team --stale-threshold 30m
+kimen sync conflicts --remote team --strict --json
 kimen sync conflicts --remote team --json
 ```
 
