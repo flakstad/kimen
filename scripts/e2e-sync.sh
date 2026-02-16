@@ -59,7 +59,12 @@ echo "[e2e-sync] Push lock behavior"
 mkdir -p "$REMOTE_DIR"
 printf 'held\n' > "$REMOTE_DIR/vault.age.lock"
 require_exit_code 32 "$BIN" sync push --remote team
-rm -f "$REMOTE_DIR/vault.age.lock"
+require_exit_code 32 "$BIN" sync unlock --remote team
+"$BIN" sync unlock --remote team --yes >/dev/null
+"$BIN" sync push --remote team >/dev/null
+
+printf 'held\n' > "$REMOTE_DIR/vault.age.lock"
+( sleep 0.2; rm -f "$REMOTE_DIR/vault.age.lock" ) &
 "$BIN" sync push --remote team --lock-wait 1s >/dev/null
 
 echo "[e2e-sync] Actor B: mutate remote"

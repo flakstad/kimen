@@ -504,6 +504,88 @@ func TestCLI_SyncPushLockWaitSucceedsAfterRelease(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncUnlock_RemovesLockWithSafetyChecks(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "unlock", "--remote", "origin", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync unlock to require --yes")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync unlock error payload: %#v", errResp)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "unlock", "--remote", "origin", "--if-older-than", "5m", "--yes", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync unlock age guard failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp = parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync unlock age-guard payload: %#v", errResp)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "unlock", "--remote", "origin", "--yes", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync unlock --yes --json: %v (stderr=%s)", err, errBuf)
+	}
+	unlockResp := parseJSONMap(t, out)
+	if unlockResp["action"] != "sync_unlock" || unlockResp["removed"] != true {
+		t.Fatalf("unexpected sync unlock response: %#v", unlockResp)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected lock file removed by sync unlock, stat err=%v", err)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "unlock", "--remote", "origin", "--yes", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync unlock missing lock --json: %v (stderr=%s)", err, errBuf)
+	}
+	unlockResp = parseJSONMap(t, out)
+	if unlockResp["removed"] != false || unlockResp["reason"] != "lock_missing" {
+		t.Fatalf("unexpected sync unlock missing-lock response: %#v", unlockResp)
+	}
+}
+
 func TestCLI_RemoteGetAndSet_JSON(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

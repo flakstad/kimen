@@ -858,6 +858,21 @@ kimen sync restore --backup ~/.config/kimen/vault.db.bak.123456789
 kimen sync restore --backup ~/.config/kimen/vault.db.bak.123456789 --no-backup --json
 ```
 
+### `kimen sync unlock` (emergency)
+
+What it does:
+
+- Removes a remote push lock file (`<bundle>.lock`) when a lock is orphaned.
+- Requires `--yes` before removing an existing lock.
+- Optional age guard with `--if-older-than`.
+
+Examples:
+
+```bash
+kimen sync unlock --remote team --yes
+kimen sync unlock --remote team --if-older-than 10m --yes --json
+```
+
 ### Sync conflicts and what to do
 
 When `sync push` returns conflict exit code `31`, it means your local baseline does not match the remote state.

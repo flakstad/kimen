@@ -74,6 +74,17 @@ type syncRestoreResult struct {
 	CurrentBackupPath string `json:"current_backup_path,omitempty"`
 }
 
+type syncUnlockResult struct {
+	OK        bool   `json:"ok"`
+	Action    string `json:"action"`
+	Remote    string `json:"remote"`
+	LockPath  string `json:"lock_path"`
+	Removed   bool   `json:"removed"`
+	LockAge   string `json:"lock_age,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Confirmed bool   `json:"confirmed,omitempty"`
+}
+
 func newSyncCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -82,6 +93,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.AddCommand(newSyncStatusCommand())
 	cmd.AddCommand(newSyncConflictsCommand())
 	cmd.AddCommand(newSyncResetBaselineCommand())
+	cmd.AddCommand(newSyncUnlockCommand())
 	cmd.AddCommand(newSyncRestoreCommand())
 	cmd.AddCommand(newSyncPushCommand())
 	cmd.AddCommand(newSyncPullCommand())
@@ -362,6 +374,99 @@ func newSyncResetBaselineCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&clear, "clear", false, "clear the stored baseline")
 	cmd.Flags().StringVar(&rev, "rev", "", "set baseline to an explicit revision")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm that you want to bypass normal conflict checks")
+	return cmd
+}
+
+func newSyncUnlockCommand() *cobra.Command {
+	var remoteName string
+	var jsonOut bool
+	var yes bool
+	var ifOlderThan time.Duration
+	cmd := &cobra.Command{
+		Use:   "unlock",
+		Short: "Remove a remote push lock file (emergency use)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if ifOlderThan < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--if-older-than must be >= 0"))
+			}
+			c, _, err := loadConfig()
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			remote, err := resolveRemote(c, remoteName)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			if remote.Type != "fs" {
+				return syncCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q", remote.Type))
+			}
+			bundlePath, err := remoteBundlePath(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			lockPath := bundlePath + ".lock"
+			st, err := os.Stat(lockPath)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					if jsonOut {
+						return json.NewEncoder(cmd.OutOrStdout()).Encode(syncUnlockResult{
+							OK:       true,
+							Action:   "sync_unlock",
+							Remote:   remote.Name,
+							LockPath: lockPath,
+							Removed:  false,
+							Reason:   "lock_missing",
+						})
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "no lock file found for remote %s\n", remote.Name)
+					return nil
+				}
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			lockAge := time.Since(st.ModTime())
+			if ifOlderThan > 0 && lockAge < ifOlderThan {
+				return syncCommandError(cmd, jsonOut, fmt.Errorf("refusing to unlock %s: lock is only %s old (requires >= %s)", lockPath, lockAge.Truncate(time.Second), ifOlderThan))
+			}
+			if !yes {
+				return syncCommandError(cmd, jsonOut, errors.New("refusing to remove lock without --yes"))
+			}
+			if err := os.Remove(lockPath); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					if jsonOut {
+						return json.NewEncoder(cmd.OutOrStdout()).Encode(syncUnlockResult{
+							OK:       true,
+							Action:   "sync_unlock",
+							Remote:   remote.Name,
+							LockPath: lockPath,
+							Removed:  false,
+							Reason:   "lock_missing",
+						})
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "no lock file found for remote %s\n", remote.Name)
+					return nil
+				}
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			ageStr := lockAge.Truncate(time.Second).String()
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(syncUnlockResult{
+					OK:        true,
+					Action:    "sync_unlock",
+					Remote:    remote.Name,
+					LockPath:  lockPath,
+					Removed:   true,
+					LockAge:   ageStr,
+					Confirmed: true,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "removed lock for remote %s: %s (age=%s)\n", remote.Name, lockPath, ageStr)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm that you want to remove the lock file")
+	cmd.Flags().DurationVar(&ifOlderThan, "if-older-than", 0, "only unlock if lock file is at least this old (e.g. 5m)")
 	return cmd
 }
 
