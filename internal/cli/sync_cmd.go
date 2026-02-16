@@ -173,6 +173,22 @@ type syncPreflightResult struct {
 	Checks            []syncPreflightCheckResult `json:"checks"`
 }
 
+const (
+	syncPreflightCheckDoctor     = "doctor"
+	syncPreflightCheckStatus     = "sync_status"
+	syncPreflightCheckConflicts  = "sync_conflicts"
+	syncPreflightCheckPullDryRun = "sync_pull_dry_run"
+	syncPreflightCheckPushDryRun = "sync_push_dry_run"
+)
+
+var syncPreflightCheckOrder = []string{
+	syncPreflightCheckDoctor,
+	syncPreflightCheckStatus,
+	syncPreflightCheckConflicts,
+	syncPreflightCheckPullDryRun,
+	syncPreflightCheckPushDryRun,
+}
+
 type pushLockInfo struct {
 	HasLock     bool
 	LockPath    string
@@ -210,6 +226,8 @@ func newSyncPreflightCommand() *cobra.Command {
 	var strict bool
 	var jsonOut bool
 	var allowMissingVault bool
+	var onlyChecks []string
+	var skipChecks []string
 
 	cmd := &cobra.Command{
 		Use:   "preflight",
@@ -219,12 +237,28 @@ func newSyncPreflightCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, errors.New("--stale-threshold must be >= 0"))
 			}
 
-			checks := make([]syncPreflightCheckResult, 0, 5)
-			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightDoctorArgs(profile, bundleIn, identity, strict, allowMissingVault)))
-			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightStatusArgs(remoteName, staleThreshold, strict)))
-			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightConflictsArgs(remoteName, staleThreshold, strict)))
-			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightPullArgs(remoteName)))
-			checks = append(checks, runSyncPreflightCheck(buildSyncPreflightPushArgs(remoteName)))
+			selectedChecks, err := resolveSyncPreflightChecks(onlyChecks, skipChecks)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+
+			checks := make([]syncPreflightCheckResult, 0, len(selectedChecks))
+			for _, checkName := range selectedChecks {
+				checkArgs, err := buildSyncPreflightArgs(
+					checkName,
+					remoteName,
+					profile,
+					bundleIn,
+					identity,
+					staleThreshold,
+					strict,
+					allowMissingVault,
+				)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, err)
+				}
+				checks = append(checks, runSyncPreflightCheck(checkName, checkArgs))
+			}
 
 			result := buildSyncPreflightResult(checks, remoteName, strict)
 
@@ -250,6 +284,8 @@ func newSyncPreflightCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "stale lock threshold passed to sync status/conflicts")
 	cmd.Flags().BoolVar(&strict, "strict", false, "use strict doctor/status/conflicts checks")
 	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
+	cmd.Flags().StringSliceVar(&onlyChecks, "only", nil, "run only selected checks (doctor|status|conflicts|pull|push)")
+	cmd.Flags().StringSliceVar(&skipChecks, "skip", nil, "skip selected checks (doctor|status|conflicts|pull|push)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -1397,8 +1433,27 @@ func buildSyncPreflightPushArgs(remoteName string) []string {
 	return args
 }
 
-func runSyncPreflightCheck(args []string) syncPreflightCheckResult {
-	name := syncPreflightCheckName(args)
+func buildSyncPreflightArgs(checkName, remoteName, profile, bundleIn, identity string, staleThreshold time.Duration, strict, allowMissingVault bool) ([]string, error) {
+	switch checkName {
+	case syncPreflightCheckDoctor:
+		return buildSyncPreflightDoctorArgs(profile, bundleIn, identity, strict, allowMissingVault), nil
+	case syncPreflightCheckStatus:
+		return buildSyncPreflightStatusArgs(remoteName, staleThreshold, strict), nil
+	case syncPreflightCheckConflicts:
+		return buildSyncPreflightConflictsArgs(remoteName, staleThreshold, strict), nil
+	case syncPreflightCheckPullDryRun:
+		return buildSyncPreflightPullArgs(remoteName), nil
+	case syncPreflightCheckPushDryRun:
+		return buildSyncPreflightPushArgs(remoteName), nil
+	default:
+		return nil, fmt.Errorf("unsupported preflight check %q", checkName)
+	}
+}
+
+func runSyncPreflightCheck(name string, args []string) syncPreflightCheckResult {
+	if strings.TrimSpace(name) == "" {
+		name = syncPreflightCheckName(args)
+	}
 	out, errOut, err := runRootSubcommand(args)
 	code := 0
 	if err != nil {
@@ -1444,6 +1499,59 @@ func runSyncPreflightCheck(args []string) syncPreflightCheckResult {
 		res.Error = err.Error()
 	}
 	return res
+}
+
+func resolveSyncPreflightChecks(onlyRaw, skipRaw []string) ([]string, error) {
+	selected := make(map[string]bool, len(syncPreflightCheckOrder))
+	if len(onlyRaw) == 0 {
+		for _, checkName := range syncPreflightCheckOrder {
+			selected[checkName] = true
+		}
+	} else {
+		for _, raw := range onlyRaw {
+			checkName, err := normalizeSyncPreflightCheckName(raw)
+			if err != nil {
+				return nil, err
+			}
+			selected[checkName] = true
+		}
+	}
+	for _, raw := range skipRaw {
+		checkName, err := normalizeSyncPreflightCheckName(raw)
+		if err != nil {
+			return nil, err
+		}
+		selected[checkName] = false
+	}
+
+	out := make([]string, 0, len(syncPreflightCheckOrder))
+	for _, checkName := range syncPreflightCheckOrder {
+		if selected[checkName] {
+			out = append(out, checkName)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no preflight checks selected (available: %s)", strings.Join(syncPreflightCheckOrder, ", "))
+	}
+	return out, nil
+}
+
+func normalizeSyncPreflightCheckName(raw string) (string, error) {
+	token := strings.TrimSpace(strings.ToLower(raw))
+	switch token {
+	case "doctor":
+		return syncPreflightCheckDoctor, nil
+	case "status", "sync_status", "sync-status":
+		return syncPreflightCheckStatus, nil
+	case "conflicts", "sync_conflicts", "sync-conflicts":
+		return syncPreflightCheckConflicts, nil
+	case "pull", "sync_pull_dry_run", "sync-pull-dry-run":
+		return syncPreflightCheckPullDryRun, nil
+	case "push", "sync_push_dry_run", "sync-push-dry-run":
+		return syncPreflightCheckPushDryRun, nil
+	default:
+		return "", fmt.Errorf("unknown preflight check %q (available: doctor, status, conflicts, pull, push)", raw)
+	}
 }
 
 func buildSyncPreflightResult(checks []syncPreflightCheckResult, remoteName string, strict bool) syncPreflightResult {

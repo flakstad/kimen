@@ -69,6 +69,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync preflight --json`: emits report on `stdout` for both success and failure:
   - `{"ok":bool,"action":"sync_preflight","remote":"...","strict":bool,"exit_code":0|31|32,"check_count":N,"failed_count":N,"failed_checks":["..."],"failed_check":"...","recommended_action":"...","checks":[{"name":"doctor|sync_status|sync_conflicts|sync_pull_dry_run|sync_push_dry_run","command":"kimen ...","ok":bool,"exit_code":N,"error":"...","recommended_action":"...","payload":{...}}]}`
   - strict mode runs doctor/status/conflicts with strict semantics
+  - `--only`/`--skip` can restrict the executed checks (`doctor|status|conflicts|pull|push` aliases)
   - exit `31` when any strict sync conflict check fails; otherwise exit `32` when any check fails for non-conflict reasons
 - `sync status --strict`: exits `31` for sync conflicts, exits `32` for non-conflict blockers (e.g. lock or missing config), otherwise succeeds with normal `sync_status` payload
 - `sync conflicts` success: `{"ok":true,"action":"sync_conflicts","remote":"...","has_conflict":bool,"reason":"remote_changed|remote_disappeared|no_local_baseline","has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","blockers":["..."],"recommended_action":"sync_pull|wait_or_sync_unlock|sync_reset_baseline_or_remote_recreate|none",...}`

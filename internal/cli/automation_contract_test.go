@@ -496,6 +496,116 @@ func TestCLI_Contract_SyncPreflightStrictFailureCodes(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncPreflightCheckSelection(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "preflight", "--strict", "--json", "--only", "doctor"}, nil)
+	if err != nil {
+		t.Fatalf("sync preflight only doctor: %v (stderr=%s)", err, errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "check_count", "checks")
+	if report["check_count"] != float64(1) {
+		t.Fatalf("expected one check for only doctor, got %#v", report)
+	}
+	checkNames := preflightCheckNames(report)
+	if len(checkNames) != 1 || checkNames[0] != "doctor" {
+		t.Fatalf("unexpected only doctor checks: %#v", checkNames)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "preflight", "--strict", "--json", "--only", "status"}, nil)
+	if err != nil {
+		t.Fatalf("sync preflight only status alias: %v (stderr=%s)", err, errBuf)
+	}
+	report = parseJSONMap(t, out)
+	if report["check_count"] != float64(1) {
+		t.Fatalf("expected one check for only status, got %#v", report)
+	}
+	checkNames = preflightCheckNames(report)
+	if len(checkNames) != 1 || checkNames[0] != "sync_status" {
+		t.Fatalf("unexpected only status checks: %#v", checkNames)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "preflight", "--strict", "--json", "--skip", "doctor", "--skip", "push"}, nil)
+	if err != nil {
+		t.Fatalf("sync preflight skip doctor/push: %v (stderr=%s)", err, errBuf)
+	}
+	report = parseJSONMap(t, out)
+	if report["check_count"] != float64(3) {
+		t.Fatalf("expected three checks when skipping doctor/push, got %#v", report)
+	}
+	checkNames = preflightCheckNames(report)
+	if containsString(checkNames, "doctor") || containsString(checkNames, "sync_push_dry_run") {
+		t.Fatalf("expected doctor/push to be skipped, got %#v", checkNames)
+	}
+}
+
+func TestCLI_Contract_SyncPreflightCheckSelectionValidation(t *testing.T) {
+	out, errOut, err := runCLI([]string{"sync", "preflight", "--json", "--only", "nope"}, nil)
+	if err == nil {
+		t.Fatalf("expected selection validation error for unknown check")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("expected no stdout for selection validation failure, got %q", out)
+	}
+	errPayload := parseJSONMap(t, errOut)
+	requireJSONKeys(t, errPayload, "ok", "error", "exit_code")
+	msg, _ := errPayload["error"].(string)
+	if !strings.Contains(msg, "unknown preflight check") {
+		t.Fatalf("unexpected unknown-check error payload: %#v", errPayload)
+	}
+
+	out, errOut, err = runCLI([]string{"sync", "preflight", "--json", "--only", "doctor", "--skip", "doctor"}, nil)
+	if err == nil {
+		t.Fatalf("expected selection validation error for empty check set")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("expected no stdout for empty-selection validation failure, got %q", out)
+	}
+	errPayload = parseJSONMap(t, errOut)
+	requireJSONKeys(t, errPayload, "ok", "error", "exit_code")
+	msg, _ = errPayload["error"].(string)
+	if !strings.Contains(msg, "no preflight checks selected") {
+		t.Fatalf("unexpected empty-selection error payload: %#v", errPayload)
+	}
+}
+
 func TestCLI_Contract_DoctorJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
@@ -570,4 +680,17 @@ func findDoctorCheckByName(report map[string]any, name string) (map[string]any, 
 		}
 	}
 	return nil, false
+}
+
+func preflightCheckNames(report map[string]any) []string {
+	checks, _ := report["checks"].([]any)
+	names := make([]string, 0, len(checks))
+	for _, raw := range checks {
+		check, _ := raw.(map[string]any)
+		name, _ := check["name"].(string)
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }

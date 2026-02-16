@@ -118,12 +118,8 @@ kimen init ci-deploy --profile prod --deploy-command "./scripts/deploy.sh"
 What it does:
 
 - Writes a strict Team Sync CI gate workflow file (default: `.github/workflows/kimen-sync-gate.yml`).
-- Includes strict readiness checks + no-mutation preflights:
-  - `doctor --strict --json`
-  - `sync status --strict --json`
-  - `sync conflicts --strict --json`
-  - `sync pull --dry-run --json`
-  - `sync push --dry-run --json`
+- Includes strict readiness checks via a single command:
+  - `sync preflight --strict --json`
 
 Common flags:
 
@@ -850,6 +846,9 @@ What it does:
   - `sync pull --dry-run`
   - `sync push --dry-run`
 - Produces one aggregated JSON report for CI automation.
+- Supports check selection for targeted debugging:
+  - `--only doctor|status|conflicts|pull|push`
+  - `--skip doctor|status|conflicts|pull|push`
 
 Exit behavior:
 
@@ -862,6 +861,8 @@ Examples:
 ```bash
 kimen sync preflight --remote team --strict --json
 kimen sync preflight --remote team --strict --stale-threshold 30m --profile prod --json
+kimen sync preflight --strict --json --only status --only conflicts
+kimen sync preflight --strict --json --skip doctor --skip push
 ```
 
 ### `kimen sync status`

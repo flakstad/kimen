@@ -82,6 +82,7 @@ assert_contains "$STATUS_JSON" '"can_push":true'
 PUSH_DRY_JSON="$("$BIN" sync push --remote team --dry-run --json)"
 assert_contains "$PUSH_DRY_JSON" '"action":"sync_push_dry_run"'
 "$BIN" sync push --remote team >/dev/null
+require_exit_code 0 "$BIN" sync preflight --remote team --strict --json
 
 echo "[e2e-sync-git] Actor B: pull + mutate + push"
 as_actor_b
@@ -105,6 +106,7 @@ echo "[e2e-sync-git] Actor A: detect conflict + recover"
 as_actor_a
 require_exit_code 31 "$BIN" sync push --remote team
 require_exit_code 31 "$BIN" sync push --remote team --dry-run
+require_exit_code 31 "$BIN" sync preflight --remote team --strict --json
 CONFLICTS_JSON="$("$BIN" sync conflicts --remote team --json)"
 assert_contains "$CONFLICTS_JSON" '"has_conflict":true'
 assert_contains "$CONFLICTS_JSON" '"reason":"remote_changed"'
@@ -128,6 +130,7 @@ if [[ "$VALUE_AFTER_PULL" != "remote-v2" ]]; then
   echo "error: expected remote-v2 after pull, got '$VALUE_AFTER_PULL'" >&2
   exit 1
 fi
+require_exit_code 0 "$BIN" sync preflight --remote team --strict --json
 "$BIN" sync restore --backup "$BACKUP_PATH" >/dev/null
 VALUE_AFTER_RESTORE="$("$BIN" secret get api_key --unsafe-stdout)"
 if [[ "$VALUE_AFTER_RESTORE" != "local-v1" ]]; then
