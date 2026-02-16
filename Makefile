@@ -1,6 +1,6 @@
 BINARY_NAME=kimen
 
-.PHONY: prep-cache build run install tidy fmt vet test release-check release-snapshot
+.PHONY: prep-cache build run install tidy fmt vet test sync-e2e release-check release-snapshot
 
 # Go caches:
 # - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
@@ -66,6 +66,9 @@ test: prep-cache
 		fi; \
 	fi
 	go test ./...
+
+sync-e2e: build
+	./scripts/e2e-sync.sh
 
 install: prep-cache test build
 	go install -ldflags "$(LDFLAGS)" ./cmd/kimen

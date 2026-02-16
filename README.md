@@ -82,6 +82,14 @@ git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
+### Sync E2E Smoke Test
+
+Run the end-to-end sync/conflict/recovery harness:
+
+```bash
+make sync-e2e
+```
+
 Set a vault location (optional) and initialize:
 
 ```bash
