@@ -814,6 +814,9 @@ Automation notes (`--json` errors):
   - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
   - `expected_rev` / `actual_rev` when available
   - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate`
+- Lock-blocked failures (exit `32`) include:
+  - `reason`: `remote_lock_present`
+  - `recommended_action`: `wait_or_sync_unlock`
 
 Examples:
 

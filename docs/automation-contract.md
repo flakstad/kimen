@@ -78,6 +78,9 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
   - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
   - `expected_rev` / `actual_rev` when available
   - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate`
+- sync precondition errors (exit `32`) may include structured fields:
+  - `reason`: e.g. `remote_lock_present`
+  - `recommended_action`: e.g. `wait_or_sync_unlock`
 - error: standard error envelope on `stderr`
 
 `plan --json` and `project plan --json`:

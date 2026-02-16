@@ -888,7 +888,11 @@ func newSyncPushCommand() *cobra.Command {
 						return syncCommandError(cmd, jsonOut, err)
 					}
 					if lockInfo.HasLock {
-						return syncCommandError(cmd, jsonOut, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; dry-run cannot acquire locks)", lockInfo.LockPath))
+						return syncCommandError(cmd, jsonOut, &syncConditionError{
+							Reason:            "remote_lock_present",
+							Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress; dry-run cannot acquire locks)", lockInfo.LockPath),
+							RecommendedAction: "wait_or_sync_unlock",
+						})
 					}
 				}
 				if jsonOut {
@@ -942,6 +946,13 @@ func newSyncPushCommand() *cobra.Command {
 				}
 				releaseLock, staleLockBroken, err = acquireRemotePushLock(bundlePath, lockWait, breakStaleLockAfter)
 				if err != nil {
+					if errors.Is(err, errRemotePushLockExists) {
+						return syncCommandError(cmd, jsonOut, &syncConditionError{
+							Reason:            "remote_lock_present",
+							Message:           err.Error(),
+							RecommendedAction: "wait_or_sync_unlock",
+						})
+					}
 					return syncCommandError(cmd, jsonOut, err)
 				}
 			}
@@ -1203,6 +1214,9 @@ func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			resp.ExpectedRev = details.ExpectedRev
 			resp.ActualRev = details.ActualRev
 			resp.RecommendedAction = recommendedActionForConflictReason(details.Reason)
+		} else if details, ok := syncConditionDetailsFromError(err); ok {
+			resp.Reason = details.Reason
+			resp.RecommendedAction = details.RecommendedAction
 		}
 		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(resp)
 	} else {
@@ -1342,7 +1356,7 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration, breakStaleAfte
 			}
 		}
 		if wait == 0 || !time.Now().Before(deadline) {
-			return nil, false, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; use --lock-wait to wait)", lockPath)
+			return nil, false, fmt.Errorf("%w: %s (another sync push may be in progress; use --lock-wait to wait)", errRemotePushLockExists, lockPath)
 		}
 		sleep := 250 * time.Millisecond
 		remaining := time.Until(deadline)
@@ -1350,7 +1364,7 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration, breakStaleAfte
 			sleep = remaining
 		}
 		if sleep <= 0 {
-			return nil, false, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress)", lockPath)
+			return nil, false, fmt.Errorf("%w: %s (another sync push may be in progress)", errRemotePushLockExists, lockPath)
 		}
 		time.Sleep(sleep)
 	}

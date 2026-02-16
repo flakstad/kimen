@@ -703,6 +703,12 @@ func TestCLI_SyncPushFailsWhenRemoteLocked(t *testing.T) {
 	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
 		t.Fatalf("unexpected sync push lock error payload: %#v", errResp)
 	}
+	if errResp["reason"] != "remote_lock_present" {
+		t.Fatalf("expected reason=remote_lock_present in sync push lock payload: %#v", errResp)
+	}
+	if errResp["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("expected recommended_action=wait_or_sync_unlock in sync push lock payload: %#v", errResp)
+	}
 	if !strings.Contains(errResp["error"].(string), "remote push lock exists") {
 		t.Fatalf("expected lock error message, got %#v", errResp)
 	}
@@ -1060,6 +1066,12 @@ func TestCLI_SyncPushDryRun_FailsWhenLockPresent(t *testing.T) {
 	}
 	assertExitCode(t, err, exitcode.CodeSyncFailed)
 	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "remote_lock_present" {
+		t.Fatalf("expected reason=remote_lock_present in sync push dry-run lock payload: %#v", errResp)
+	}
+	if errResp["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("expected recommended_action=wait_or_sync_unlock in sync push dry-run lock payload: %#v", errResp)
+	}
 	msg, _ := errResp["error"].(string)
 	if !strings.Contains(msg, "remote push lock exists") {
 		t.Fatalf("expected lock failure message in push dry-run payload: %#v", errResp)

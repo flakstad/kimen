@@ -12,6 +12,7 @@ import (
 )
 
 var errSyncConflict = errors.New("sync conflict")
+var errRemotePushLockExists = errors.New("remote push lock exists")
 
 type syncConflictDetails struct {
 	HasConflict bool
@@ -43,6 +44,28 @@ func syncConflictDetailsFromError(err error) (syncConflictDetails, bool) {
 		return conflictErr.Details, true
 	}
 	return syncConflictDetails{}, false
+}
+
+type syncConditionError struct {
+	Reason            string
+	Message           string
+	RecommendedAction string
+}
+
+func (e *syncConditionError) Error() string {
+	msg := strings.TrimSpace(e.Message)
+	if msg == "" {
+		msg = "sync precondition failed"
+	}
+	return msg
+}
+
+func syncConditionDetailsFromError(err error) (syncConditionError, bool) {
+	var condErr *syncConditionError
+	if errors.As(err, &condErr) {
+		return *condErr, true
+	}
+	return syncConditionError{}, false
 }
 
 func resolveRemote(c config, name string) (remoteConfig, error) {
