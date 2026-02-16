@@ -644,7 +644,7 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 		t.Fatalf("write lock file: %v", err)
 	}
 
-	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--stale-threshold", "1h", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
 	}
@@ -654,6 +654,12 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	}
 	if !jsonBool(statusResp, "lock_blocks_push") {
 		t.Fatalf("expected lock_blocks_push=true in sync status: %#v", statusResp)
+	}
+	if !jsonBool(statusResp, "likely_stale") {
+		t.Fatalf("expected likely_stale=true in sync status: %#v", statusResp)
+	}
+	if _, ok := statusResp["lock_age_seconds"]; !ok {
+		t.Fatalf("expected lock_age_seconds in sync status: %#v", statusResp)
 	}
 	if jsonBool(statusResp, "can_push") {
 		t.Fatalf("expected can_push=false while lock is present: %#v", statusResp)
@@ -674,7 +680,7 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 		t.Fatalf("unexpected lock_user in sync status: %#v", statusResp)
 	}
 
-	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--remote", "origin", "--json"}, nil)
+	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--remote", "origin", "--stale-threshold", "1h", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
 	}
@@ -685,6 +691,9 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if !jsonBool(conflictsResp, "lock_blocks_push") {
 		t.Fatalf("expected lock_blocks_push=true in sync conflicts: %#v", conflictsResp)
 	}
+	if !jsonBool(conflictsResp, "likely_stale") {
+		t.Fatalf("expected likely_stale=true in sync conflicts: %#v", conflictsResp)
+	}
 	if conflictsResp["lock_path"] != lockPath {
 		t.Fatalf("unexpected lock_path in sync conflicts: %#v", conflictsResp)
 	}
@@ -692,7 +701,7 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if err := os.Remove(lockPath); err != nil {
 		t.Fatalf("remove lock file: %v", err)
 	}
-	out, errBuf, err = runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	out, errBuf, err = runCLI([]string{"sync", "status", "--remote", "origin", "--stale-threshold", "1h", "--json"}, nil)
 	if err != nil {
 		t.Fatalf("sync status --json after lock remove: %v (stderr=%s)", err, errBuf)
 	}
@@ -703,8 +712,41 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if jsonBool(statusResp, "lock_blocks_push") {
 		t.Fatalf("expected lock_blocks_push=false after lock removal: %#v", statusResp)
 	}
+	if jsonBool(statusResp, "likely_stale") {
+		t.Fatalf("expected likely_stale=false after lock removal: %#v", statusResp)
+	}
 	if !jsonBool(statusResp, "can_push") {
 		t.Fatalf("expected can_push=true once lock is removed: %#v", statusResp)
+	}
+}
+
+func TestCLI_SyncStatusAndConflicts_RejectNegativeStaleThreshold(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	_, errOut, err := runCLI([]string{"sync", "status", "--stale-threshold", "-1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync status failure for negative --stale-threshold")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if !strings.Contains(errResp["error"].(string), "--stale-threshold") {
+		t.Fatalf("expected stale-threshold error in status response: %#v", errResp)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "conflicts", "--stale-threshold", "-1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync conflicts failure for negative --stale-threshold")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp = parseJSONMap(t, errOut)
+	if !strings.Contains(errResp["error"].(string), "--stale-threshold") {
+		t.Fatalf("expected stale-threshold error in conflicts response: %#v", errResp)
 	}
 }
 

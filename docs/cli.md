@@ -756,6 +756,8 @@ Key fields (`--json`):
 - `has_lock`: remote push lock file exists
 - `lock_path`, `lock_age`, `lock_pid`, `lock_host`, `lock_user`: lock metadata when present
 - `lock_blocks_push`: whether current lock state blocks an immediate push
+- `lock_age_seconds`: numeric lock age for automation
+- `likely_stale`: set when `--stale-threshold` is provided and lock age meets/exceeds it
 - `last_seen_rev`: last remote revision observed by local machine
 - `in_sync`: local baseline matches current remote revision
 - `can_push`: push is allowed without conflict
@@ -765,6 +767,7 @@ Examples:
 
 ```bash
 kimen sync status --remote team
+kimen sync status --remote team --stale-threshold 30m
 kimen sync status --remote team --json
 ```
 
@@ -804,6 +807,7 @@ Examples:
 
 ```bash
 kimen sync conflicts --remote team
+kimen sync conflicts --remote team --stale-threshold 30m
 kimen sync conflicts --remote team --json
 ```
 

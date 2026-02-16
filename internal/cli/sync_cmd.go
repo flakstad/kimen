@@ -42,6 +42,8 @@ type syncResult struct {
 	LockError       string `json:"lock_error,omitempty"`
 	StaleLockBroken bool   `json:"stale_lock_broken,omitempty"`
 	LockBlocksPush  bool   `json:"lock_blocks_push,omitempty"`
+	LikelyStale     bool   `json:"likely_stale,omitempty"`
+	LockAgeSeconds  int64  `json:"lock_age_seconds,omitempty"`
 }
 
 type syncErrorResult struct {
@@ -74,6 +76,8 @@ type syncConflictResult struct {
 	LockCreated    string `json:"lock_created,omitempty"`
 	LockError      string `json:"lock_error,omitempty"`
 	LockBlocksPush bool   `json:"lock_blocks_push,omitempty"`
+	LikelyStale    bool   `json:"likely_stale,omitempty"`
+	LockAgeSeconds int64  `json:"lock_age_seconds,omitempty"`
 }
 
 type syncResetBaselineResult struct {
@@ -134,10 +138,14 @@ func newSyncCommand() *cobra.Command {
 func newSyncStatusCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var staleThreshold time.Duration
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show local sync state against a remote",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if staleThreshold < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--stale-threshold must be >= 0"))
+			}
 			c, _, err := loadConfig()
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
@@ -190,6 +198,10 @@ func newSyncStatusCommand() *cobra.Command {
 			if lockBlocksPush {
 				canPush = false
 			}
+			likelyStale := false
+			if lockInfo.HasLock && staleThreshold > 0 && lockInfo.LockAgeDur >= staleThreshold {
+				likelyStale = true
+			}
 
 			res := syncResult{
 				OK:             true,
@@ -215,6 +227,8 @@ func newSyncStatusCommand() *cobra.Command {
 				LockCreated:    lockInfo.LockCreated,
 				LockError:      lockInfo.LockError,
 				LockBlocksPush: lockBlocksPush,
+				LikelyStale:    likelyStale,
+				LockAgeSeconds: int64(lockInfo.LockAgeDur.Seconds()),
 			}
 
 			if jsonOut {
@@ -236,6 +250,9 @@ func newSyncStatusCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "can-push: %t\n", canPush)
 			fmt.Fprintf(cmd.OutOrStdout(), "needs-pull: %t\n", needsPull)
 			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+			if lockInfo.HasLock && staleThreshold > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
+			}
 			if lockInfo.HasLock {
 				fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
 				if lockInfo.LockAge != "" {
@@ -264,16 +281,21 @@ func newSyncStatusCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
 	return cmd
 }
 
 func newSyncConflictsCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var staleThreshold time.Duration
 	cmd := &cobra.Command{
 		Use:   "conflicts",
 		Short: "Inspect whether push is currently blocked by a sync conflict",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if staleThreshold < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--stale-threshold must be >= 0"))
+			}
 			c, _, err := loadConfig()
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
@@ -300,6 +322,10 @@ func newSyncConflictsCommand() *cobra.Command {
 			}
 			details := detectSyncConflict(lastSeen, remoteRev, hasRemote)
 			lockBlocksPush := lockInfo.HasLock
+			likelyStale := false
+			if lockInfo.HasLock && staleThreshold > 0 && lockInfo.LockAgeDur >= staleThreshold {
+				likelyStale = true
+			}
 			res := syncConflictResult{
 				OK:             true,
 				Action:         "sync_conflicts",
@@ -324,6 +350,8 @@ func newSyncConflictsCommand() *cobra.Command {
 				LockCreated:    lockInfo.LockCreated,
 				LockError:      lockInfo.LockError,
 				LockBlocksPush: lockBlocksPush,
+				LikelyStale:    likelyStale,
+				LockAgeSeconds: int64(lockInfo.LockAgeDur.Seconds()),
 			}
 
 			if jsonOut {
@@ -349,6 +377,9 @@ func newSyncConflictsCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+				if lockInfo.HasLock && staleThreshold > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
+				}
 				if lockInfo.LockError != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
 				}
@@ -385,6 +416,9 @@ func newSyncConflictsCommand() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+			if lockInfo.HasLock && staleThreshold > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
+			}
 			if lockInfo.LockError != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
 			}
@@ -393,6 +427,7 @@ func newSyncConflictsCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
 	return cmd
 }
 
