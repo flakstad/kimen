@@ -120,6 +120,20 @@ kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity path/to/a
 
 See also `docs/ci-github-actions.md`.
 
+## Release (CalVer)
+
+Kimen releases use CalVer tags: `vYYYY.M.PATCH` (example: `v2026.2.1`).
+
+Recommended release flow:
+
+```bash
+make release-check
+git tag -a v2026.2.1 -m "Release v2026.2.1"
+git push origin v2026.2.1
+```
+
+Pushing a matching tag triggers `.github/workflows/release.yml`, which runs GoReleaser using `.goreleaser.yaml` and publishes release artifacts.
+
 ## Roadmap
 
 Ideas and possible future projection types live in `docs/roadmap.md`.
