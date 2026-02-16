@@ -766,6 +766,7 @@ What it does:
 
 - Compares local baseline state to the remote bundle revision.
 - Reports whether pushing is safe or pulling is required.
+- `--strict` exits non-zero when push is currently blocked.
 
 Key fields (`--json`):
 
@@ -787,6 +788,7 @@ Examples:
 ```bash
 kimen sync status --remote team
 kimen sync status --remote team --stale-threshold 30m
+kimen sync status --remote team --strict --json
 kimen sync status --remote team --json
 ```
 

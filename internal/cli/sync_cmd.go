@@ -179,6 +179,7 @@ func newSyncStatusCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
 	var staleThreshold time.Duration
+	var strict bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show local sync state against a remote",
@@ -315,6 +316,46 @@ func newSyncStatusCommand() *cobra.Command {
 				Blockers:          blockers,
 				RecommendedAction: recommended,
 			}
+			if strict {
+				switch {
+				case conflictDetails.HasConflict:
+					return syncCommandError(cmd, jsonOut, &syncConflictError{Details: conflictDetails})
+				case lockBlocksPush:
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "remote_lock_present",
+						Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress)", lockInfo.LockPath),
+						RecommendedAction: "wait_or_sync_unlock",
+					})
+				case !hasLocal:
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "local_vault_missing",
+						Message:           "local vault file not found",
+						RecommendedAction: recommended,
+					})
+				case missingRecipient:
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "remote_recipient_missing",
+						Message:           "remote recipient is not configured (set --recipient on `remote add`)",
+						RecommendedAction: recommended,
+					})
+				case needsPull && missingIdentity:
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            "remote_identity_missing",
+						Message:           "remote identity is not configured (set --identity on `remote add`)",
+						RecommendedAction: recommended,
+					})
+				case !canPush:
+					reason := "push_blocked"
+					if len(blockers) > 0 {
+						reason = blockers[0]
+					}
+					return syncCommandError(cmd, jsonOut, &syncConditionError{
+						Reason:            reason,
+						Message:           fmt.Sprintf("sync status indicates push is blocked (blockers=%s)", strings.Join(blockers, ",")),
+						RecommendedAction: recommended,
+					})
+				}
+			}
 
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(res)
@@ -373,6 +414,7 @@ func newSyncStatusCommand() *cobra.Command {
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
+	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when push is currently blocked")
 	return cmd
 }
 
