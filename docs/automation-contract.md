@@ -68,9 +68,11 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync unlock` success: `{"ok":true,"action":"sync_unlock","remote":"...","lock_path":"...","removed":bool,"reason":"lock_missing|..."}` (requires `--yes` when a lock exists)
 - `sync restore` success: `{"ok":true,"action":"sync_restore","vault_path":"...","source_backup_path":"...","current_backup_path":"..."}`
 - `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"...","stale_lock_broken":bool}` (`stale_lock_broken` omitted unless stale lock auto-break occurred)
+- `sync push --dry-run` success: `{"ok":true,"action":"sync_push_dry_run","remote":"...","remote_rev":"...","last_seen_rev":"...","dry_run":true,"has_local":true,"can_push":true}` (no remote/config mutation)
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
 - `sync pull --dry-run` success: `{"ok":true,"action":"sync_pull_dry_run","remote":"...","remote_rev":"...","dry_run":true,"has_local":bool,"would_backup":bool,"in_sync":bool}` (no local vault/config mutation)
 - `sync push` uses a remote lock file (`<bundle>.lock`) for `type=fs`; lock contention failures use sync exit `32`
+- `sync push --dry-run` rejects `--lock-wait` and `--break-stale-lock-after`
 - for `type=git`, lock-related fields are false/empty and lock flags (`--lock-wait`, `--break-stale-lock-after`) are rejected
 - sync conflict errors (exit `31`) include structured fields in the standard envelope:
   - `reason`: `remote_changed|remote_disappeared|no_local_baseline`

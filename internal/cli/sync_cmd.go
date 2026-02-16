@@ -821,6 +821,7 @@ func newSyncPushCommand() *cobra.Command {
 	var jsonOut bool
 	var lockWait time.Duration
 	var breakStaleLockAfter time.Duration
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Push local vault to remote as encrypted bundle",
@@ -830,6 +831,9 @@ func newSyncPushCommand() *cobra.Command {
 			}
 			if breakStaleLockAfter < 0 {
 				return syncCommandError(cmd, jsonOut, errors.New("--break-stale-lock-after must be >= 0"))
+			}
+			if dryRun && (lockWait > 0 || breakStaleLockAfter > 0) {
+				return syncCommandError(cmd, jsonOut, errors.New("--dry-run cannot be combined with --lock-wait/--break-stale-lock-after"))
 			}
 
 			c, _, err := loadConfig()
@@ -858,6 +862,77 @@ func newSyncPushCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, err)
 			}
 
+			remoteRev, hasRemote, bundleRef, err := remoteRevision(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			lastSeen := ""
+			if c.Sync != nil {
+				lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
+			}
+			if err := validatePushBaseline(lastSeen, remoteRev, hasRemote); err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			if err := validateSealVaultWithRecipient(vaultPath, remote.Recipient); err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			if dryRun {
+				lockInfo := pushLockInfo{}
+				if remoteSupportsPushLock(remote) {
+					bundlePath, err := remoteBundlePath(remote)
+					if err != nil {
+						return syncCommandError(cmd, jsonOut, err)
+					}
+					lockInfo, err = readRemotePushLockInfo(bundlePath)
+					if err != nil {
+						return syncCommandError(cmd, jsonOut, err)
+					}
+					if lockInfo.HasLock {
+						return syncCommandError(cmd, jsonOut, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; dry-run cannot acquire locks)", lockInfo.LockPath))
+					}
+				}
+				if jsonOut {
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(syncResult{
+						OK:             true,
+						Action:         "sync_push_dry_run",
+						Remote:         remote.Name,
+						RemoteType:     remote.Type,
+						RemotePath:     remote.Path,
+						BundlePath:     bundleRef,
+						RemoteRev:      remoteRev,
+						LastSeenRev:    lastSeen,
+						DryRun:         true,
+						HasRemote:      hasRemote,
+						HasLock:        lockInfo.HasLock,
+						HasLocal:       true,
+						CanPush:        true,
+						LockPath:       lockInfo.LockPath,
+						LockAge:        lockInfo.LockAge,
+						LockPID:        lockInfo.LockPID,
+						LockHost:       lockInfo.LockHost,
+						LockUser:       lockInfo.LockUser,
+						LockCreated:    lockInfo.LockCreated,
+						LockError:      lockInfo.LockError,
+						LockBlocksPush: lockInfo.HasLock,
+						LikelyStale:    false,
+						LockAgeSeconds: int64(lockInfo.LockAgeDur.Seconds()),
+					})
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: push %s\n", remote.Name)
+				if strings.TrimSpace(remoteRev) == "" {
+					fmt.Fprintln(cmd.OutOrStdout(), "remote-rev: (missing)")
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "remote-rev: %s\n", remoteRev)
+				}
+				if strings.TrimSpace(lastSeen) == "" {
+					fmt.Fprintln(cmd.OutOrStdout(), "last-seen-rev: (none)")
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "last-seen-rev: %s\n", lastSeen)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "can-push: true")
+				return nil
+			}
+
 			releaseLock := func() {}
 			staleLockBroken := false
 			if remoteSupportsPushLock(remote) {
@@ -872,20 +947,6 @@ func newSyncPushCommand() *cobra.Command {
 			}
 			defer releaseLock()
 
-			remoteRev, hasRemote, _, err := remoteRevision(remote)
-			if err != nil {
-				return syncCommandError(cmd, jsonOut, err)
-			}
-
-			lastSeen := ""
-			if c.Sync != nil {
-				lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
-			}
-			if err := validatePushBaseline(lastSeen, remoteRev, hasRemote); err != nil {
-				return syncCommandError(cmd, jsonOut, err)
-			}
-
-			bundleRef := ""
 			newRev := ""
 			switch remoteType(remote) {
 			case "fs":
@@ -951,6 +1012,7 @@ func newSyncPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().DurationVar(&lockWait, "lock-wait", 0, "how long to wait for remote push lock (e.g. 10s, 1m); default is fail-fast")
 	cmd.Flags().DurationVar(&breakStaleLockAfter, "break-stale-lock-after", 0, "break remote push lock when it is older than this duration")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate push preconditions without modifying remote/baseline")
 	return cmd
 }
 
@@ -1113,6 +1175,16 @@ func sealVaultToRemoteAtomic(vaultPath, bundlePath, recipient string) error {
 		return err
 	}
 	return renameOver(tmp, bundlePath)
+}
+
+func validateSealVaultWithRecipient(vaultPath, recipient string) error {
+	tmpDir, err := os.MkdirTemp("", "kimen-sync-push-dry-run-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpPath := filepath.Join(tmpDir, "vault.age")
+	return bundle.SealVaultFile(vaultPath, tmpPath, []string{recipient})
 }
 
 func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {

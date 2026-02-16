@@ -796,6 +796,7 @@ What it does:
 - Encrypts the local vault to the remote bundle path.
 - Updates `last_seen_rev` on success.
 - Uses a lock file (`<bundle>.lock`) to avoid concurrent `sync push` writes on the same remote path.
+- `--dry-run` validates push preconditions (recipient/local vault/conflict/lock/sealability) without writing remote data or updating baseline.
 
 Requirements:
 
@@ -804,6 +805,7 @@ Requirements:
 - remote baseline check must pass
 - for `type=fs`: push lock must be available (or waited for via `--lock-wait`)
 - for `type=git`: push lock flags are not used
+- `--dry-run` cannot be combined with `--lock-wait`/`--break-stale-lock-after`
 
 Automation notes (`--json` errors):
 
@@ -816,6 +818,7 @@ Examples:
 
 ```bash
 kimen sync push --remote team
+kimen sync push --remote team --dry-run --json
 kimen sync push --remote team --lock-wait 15s
 kimen sync push --remote team --break-stale-lock-after 30m
 kimen sync push --remote team --json

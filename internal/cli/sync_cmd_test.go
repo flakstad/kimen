@@ -866,6 +866,219 @@ func TestCLI_SyncPushRejectsNegativeLockDurations(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncPushDryRun_DoesNotMutateBaselineOrRemote(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	cfg := readConfig(t)
+	baseline := cfg.Sync["origin"].LastSeenRev
+	if baseline == "" {
+		t.Fatalf("expected baseline after initial push: %#v", cfg.Sync)
+	}
+
+	statusOut, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status before dry-run: %v (stderr=%s)", err, errBuf)
+	}
+	statusBefore := parseJSONMap(t, statusOut)
+	remoteRevBefore, _ := statusBefore["remote_rev"].(string)
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v2"))
+	if err != nil {
+		t.Fatalf("secret set v2: %v", err)
+	}
+	out, errBuf, err := runCLI([]string{"sync", "push", "--dry-run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync push --dry-run --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_push_dry_run" || !jsonBool(resp, "dry_run") {
+		t.Fatalf("unexpected sync push dry-run response: %#v", resp)
+	}
+	if !jsonBool(resp, "can_push") || !jsonBool(resp, "has_local") {
+		t.Fatalf("expected can_push=true and has_local=true in push dry-run: %#v", resp)
+	}
+	if got, _ := resp["last_seen_rev"].(string); got != baseline {
+		t.Fatalf("expected dry-run last_seen_rev=%q, got %#v", baseline, resp)
+	}
+
+	cfg = readConfig(t)
+	if got := cfg.Sync["origin"].LastSeenRev; got != baseline {
+		t.Fatalf("expected baseline unchanged after push dry-run, got %q want %q", got, baseline)
+	}
+	statusOut, errBuf, err = runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status after dry-run: %v (stderr=%s)", err, errBuf)
+	}
+	statusAfter := parseJSONMap(t, statusOut)
+	remoteRevAfter, _ := statusAfter["remote_rev"].(string)
+	if remoteRevAfter != remoteRevBefore {
+		t.Fatalf("expected remote rev unchanged after push dry-run, before=%q after=%q", remoteRevBefore, remoteRevAfter)
+	}
+	value, _, err := runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	if err != nil {
+		t.Fatalf("secret get after push dry-run: %v", err)
+	}
+	if value != "v2" {
+		t.Fatalf("expected local vault unchanged after push dry-run, got %q", value)
+	}
+}
+
+func TestCLI_SyncPushDryRun_FailsOnConflict(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", vaultPath,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "push", "--dry-run", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push dry-run conflict")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "remote_changed" {
+		t.Fatalf("expected reason=remote_changed for push dry-run conflict: %#v", errResp)
+	}
+}
+
+func TestCLI_SyncPushDryRun_FailsWhenLockPresent(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("pid=42\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "push", "--dry-run", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push dry-run lock failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	msg, _ := errResp["error"].(string)
+	if !strings.Contains(msg, "remote push lock exists") {
+		t.Fatalf("expected lock failure message in push dry-run payload: %#v", errResp)
+	}
+}
+
+func TestCLI_SyncPushDryRunRejectsLockFlags(t *testing.T) {
+	_, errOut, err := runCLI([]string{"sync", "push", "--dry-run", "--lock-wait", "1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push dry-run to reject lock flags")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	msg, _ := errResp["error"].(string)
+	if !strings.Contains(msg, "--dry-run cannot be combined") {
+		t.Fatalf("unexpected push dry-run lock-flags payload: %#v", errResp)
+	}
+}
+
 func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
@@ -1716,6 +1929,92 @@ func TestCLI_SyncGitRemote_PullDryRun_NoMutation(t *testing.T) {
 	restoreB()
 	if _, ok := cfg.Sync["origin"]; ok {
 		t.Fatalf("expected no baseline mutation on git pull dry-run: %#v", cfg.Sync)
+	}
+}
+
+func TestCLI_SyncGitRemote_PushDryRun_NoMutation(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	identityPath := filepath.Join(dir, "sync.agekey")
+	recipient := generateRecipient(t, identityPath)
+
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set v1: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add git: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push git: %v", err)
+	}
+
+	cfg := readConfig(t)
+	baseline := cfg.Sync["origin"].LastSeenRev
+	if baseline == "" {
+		t.Fatalf("expected baseline after git push: %#v", cfg.Sync)
+	}
+	statusOut, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status before git push dry-run: %v (stderr=%s)", err, errBuf)
+	}
+	statusBefore := parseJSONMap(t, statusOut)
+	remoteRevBefore, _ := statusBefore["remote_rev"].(string)
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v2"))
+	if err != nil {
+		t.Fatalf("secret set v2: %v", err)
+	}
+	out, errBuf, err := runCLI([]string{"sync", "push", "--dry-run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync push git --dry-run --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_push_dry_run" || !jsonBool(resp, "dry_run") {
+		t.Fatalf("unexpected sync push dry-run response for git remote: %#v", resp)
+	}
+	if !jsonBool(resp, "can_push") || !jsonBool(resp, "has_local") {
+		t.Fatalf("expected can_push=true and has_local=true for git push dry-run: %#v", resp)
+	}
+	cfg = readConfig(t)
+	if got := cfg.Sync["origin"].LastSeenRev; got != baseline {
+		t.Fatalf("expected baseline unchanged after git push dry-run, got %q want %q", got, baseline)
+	}
+	statusOut, errBuf, err = runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status after git push dry-run: %v (stderr=%s)", err, errBuf)
+	}
+	statusAfter := parseJSONMap(t, statusOut)
+	remoteRevAfter, _ := statusAfter["remote_rev"].(string)
+	if remoteRevAfter != remoteRevBefore {
+		t.Fatalf("expected remote rev unchanged after git push dry-run, before=%q after=%q", remoteRevBefore, remoteRevAfter)
 	}
 }
 
