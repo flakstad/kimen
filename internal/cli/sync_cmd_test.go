@@ -504,6 +504,70 @@ func TestCLI_SyncPushLockWaitSucceedsAfterRelease(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncPushBreaksStaleLockWhenRequested(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatalf("chtimes lock file: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{
+		"sync", "push", "--remote", "origin",
+		"--break-stale-lock-after", "1m",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("sync push with stale lock break --json: %v (stderr=%s)", err, errBuf)
+	}
+	pushResp := parseJSONMap(t, out)
+	if pushResp["action"] != "sync_push" || pushResp["remote"] != "origin" {
+		t.Fatalf("unexpected sync push response: %#v", pushResp)
+	}
+	if pushResp["stale_lock_broken"] != true {
+		t.Fatalf("expected stale_lock_broken=true in response: %#v", pushResp)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no lock file after push, stat err=%v", err)
+	}
+}
+
 func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

@@ -17,29 +17,30 @@ import (
 )
 
 type syncResult struct {
-	OK          bool   `json:"ok"`
-	Action      string `json:"action"`
-	Remote      string `json:"remote"`
-	RemoteType  string `json:"remote_type,omitempty"`
-	RemotePath  string `json:"remote_path,omitempty"`
-	BundlePath  string `json:"bundle_path,omitempty"`
-	VaultPath   string `json:"vault_path,omitempty"`
-	RemoteRev   string `json:"remote_rev,omitempty"`
-	LastSeenRev string `json:"last_seen_rev,omitempty"`
-	BackupPath  string `json:"backup_path,omitempty"`
-	HasRemote   bool   `json:"has_remote"`
-	HasLock     bool   `json:"has_lock"`
-	HasLocal    bool   `json:"has_local,omitempty"`
-	InSync      bool   `json:"in_sync,omitempty"`
-	CanPush     bool   `json:"can_push,omitempty"`
-	NeedsPull   bool   `json:"needs_pull,omitempty"`
-	LockPath    string `json:"lock_path,omitempty"`
-	LockAge     string `json:"lock_age,omitempty"`
-	LockPID     string `json:"lock_pid,omitempty"`
-	LockHost    string `json:"lock_host,omitempty"`
-	LockUser    string `json:"lock_user,omitempty"`
-	LockCreated string `json:"lock_created,omitempty"`
-	LockError   string `json:"lock_error,omitempty"`
+	OK              bool   `json:"ok"`
+	Action          string `json:"action"`
+	Remote          string `json:"remote"`
+	RemoteType      string `json:"remote_type,omitempty"`
+	RemotePath      string `json:"remote_path,omitempty"`
+	BundlePath      string `json:"bundle_path,omitempty"`
+	VaultPath       string `json:"vault_path,omitempty"`
+	RemoteRev       string `json:"remote_rev,omitempty"`
+	LastSeenRev     string `json:"last_seen_rev,omitempty"`
+	BackupPath      string `json:"backup_path,omitempty"`
+	HasRemote       bool   `json:"has_remote"`
+	HasLock         bool   `json:"has_lock"`
+	HasLocal        bool   `json:"has_local,omitempty"`
+	InSync          bool   `json:"in_sync,omitempty"`
+	CanPush         bool   `json:"can_push,omitempty"`
+	NeedsPull       bool   `json:"needs_pull,omitempty"`
+	LockPath        string `json:"lock_path,omitempty"`
+	LockAge         string `json:"lock_age,omitempty"`
+	LockPID         string `json:"lock_pid,omitempty"`
+	LockHost        string `json:"lock_host,omitempty"`
+	LockUser        string `json:"lock_user,omitempty"`
+	LockCreated     string `json:"lock_created,omitempty"`
+	LockError       string `json:"lock_error,omitempty"`
+	StaleLockBroken bool   `json:"stale_lock_broken,omitempty"`
 }
 
 type syncErrorResult struct {
@@ -105,6 +106,7 @@ type pushLockInfo struct {
 	HasLock     bool
 	LockPath    string
 	LockAge     string
+	LockAgeDur  time.Duration
 	LockPID     string
 	LockHost    string
 	LockUser    string
@@ -634,6 +636,7 @@ func newSyncPushCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
 	var lockWait time.Duration
+	var breakStaleLockAfter time.Duration
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Push local vault to remote as encrypted bundle",
@@ -668,7 +671,7 @@ func newSyncPushCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			releaseLock, err := acquireRemotePushLock(bundlePath, lockWait)
+			releaseLock, staleLockBroken, err := acquireRemotePushLock(bundlePath, lockWait, breakStaleLockAfter)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -705,23 +708,28 @@ func newSyncPushCommand() *cobra.Command {
 
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(syncResult{
-					OK:         true,
-					Action:     "sync_push",
-					Remote:     remote.Name,
-					RemoteType: remote.Type,
-					RemotePath: remote.Path,
-					BundlePath: bundlePath,
-					RemoteRev:  newRev,
-					HasRemote:  true,
+					OK:              true,
+					Action:          "sync_push",
+					Remote:          remote.Name,
+					RemoteType:      remote.Type,
+					RemotePath:      remote.Path,
+					BundlePath:      bundlePath,
+					RemoteRev:       newRev,
+					HasRemote:       true,
+					StaleLockBroken: staleLockBroken,
 				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "pushed %s (rev=%s)\n", remote.Name, newRev)
+			if staleLockBroken {
+				fmt.Fprintln(cmd.OutOrStdout(), "warning: broke stale remote push lock")
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().DurationVar(&lockWait, "lock-wait", 0, "how long to wait for remote push lock (e.g. 10s, 1m); default is fail-fast")
+	cmd.Flags().DurationVar(&breakStaleLockAfter, "break-stale-lock-after", 0, "break remote push lock when it is older than this duration")
 	return cmd
 }
 
@@ -929,15 +937,19 @@ func copyFileAtomic(srcPath, dstPath string, mode os.FileMode) error {
 	return nil
 }
 
-func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error) {
+func acquireRemotePushLock(bundlePath string, wait time.Duration, breakStaleAfter time.Duration) (func(), bool, error) {
 	lockPath := remotePushLockPath(bundlePath)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if wait < 0 {
 		wait = 0
 	}
+	if breakStaleAfter < 0 {
+		breakStaleAfter = 0
+	}
 	deadline := time.Now().Add(wait)
+	brokeStaleLock := false
 
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -957,15 +969,28 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error
 			)
 			if closeErr := f.Close(); closeErr != nil {
 				_ = os.Remove(lockPath)
-				return nil, closeErr
+				return nil, false, closeErr
 			}
-			return func() { _ = os.Remove(lockPath) }, nil
+			return func() { _ = os.Remove(lockPath) }, brokeStaleLock, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
-			return nil, err
+			return nil, false, err
+		}
+		if breakStaleAfter > 0 {
+			info, infoErr := readRemotePushLockInfo(bundlePath)
+			if infoErr != nil {
+				return nil, false, infoErr
+			}
+			if info.HasLock && info.LockAgeDur >= breakStaleAfter {
+				if rmErr := os.Remove(lockPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+					return nil, false, rmErr
+				}
+				brokeStaleLock = true
+				continue
+			}
 		}
 		if wait == 0 || !time.Now().Before(deadline) {
-			return nil, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; use --lock-wait to wait)", lockPath)
+			return nil, false, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress; use --lock-wait to wait)", lockPath)
 		}
 		sleep := 250 * time.Millisecond
 		remaining := time.Until(deadline)
@@ -973,7 +998,7 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error
 			sleep = remaining
 		}
 		if sleep <= 0 {
-			return nil, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress)", lockPath)
+			return nil, false, fmt.Errorf("remote push lock exists: %s (another sync push may be in progress)", lockPath)
 		}
 		time.Sleep(sleep)
 	}
@@ -994,7 +1019,8 @@ func readRemotePushLockInfo(bundlePath string) (pushLockInfo, error) {
 		return info, err
 	}
 	info.HasLock = true
-	info.LockAge = time.Since(st.ModTime()).Truncate(time.Second).String()
+	info.LockAgeDur = time.Since(st.ModTime())
+	info.LockAge = info.LockAgeDur.Truncate(time.Second).String()
 
 	raw, err := os.ReadFile(lockPath)
 	if err != nil {
@@ -1018,7 +1044,8 @@ func readRemotePushLockInfo(bundlePath string) (pushLockInfo, error) {
 		case "created_at":
 			info.LockCreated = v
 			if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
-				info.LockAge = time.Since(ts).Truncate(time.Second).String()
+				info.LockAgeDur = time.Since(ts)
+				info.LockAge = info.LockAgeDur.Truncate(time.Second).String()
 			}
 		case "host":
 			info.LockHost = v

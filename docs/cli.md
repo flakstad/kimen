@@ -787,6 +787,7 @@ Examples:
 ```bash
 kimen sync push --remote team
 kimen sync push --remote team --lock-wait 15s
+kimen sync push --remote team --break-stale-lock-after 30m
 kimen sync push --remote team --json
 ```
 

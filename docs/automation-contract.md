@@ -64,7 +64,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync reset-baseline` success: `{"ok":true,"action":"sync_reset_baseline","remote":"...","mode":"to_remote|clear|rev","previous_rev":"...","new_rev":"..."}`
 - `sync unlock` success: `{"ok":true,"action":"sync_unlock","remote":"...","lock_path":"...","removed":bool,"reason":"lock_missing|..."}` (requires `--yes` when a lock exists)
 - `sync restore` success: `{"ok":true,"action":"sync_restore","vault_path":"...","source_backup_path":"...","current_backup_path":"..."}`
-- `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"..."}`
+- `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"...","stale_lock_broken":bool}` (`stale_lock_broken` omitted unless stale lock auto-break occurred)
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
 - `sync push` uses a remote lock file (`<bundle>.lock`); lock contention failures use sync exit `32`
 - error: standard error envelope on `stderr`
