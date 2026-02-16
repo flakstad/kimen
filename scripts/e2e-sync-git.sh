@@ -109,6 +109,13 @@ CONFLICTS_JSON="$("$BIN" sync conflicts --remote team --json)"
 assert_contains "$CONFLICTS_JSON" '"has_conflict":true'
 assert_contains "$CONFLICTS_JSON" '"reason":"remote_changed"'
 assert_contains "$CONFLICTS_JSON" '"recommended_action":"sync_pull"'
+PULL_DRY_JSON="$("$BIN" sync pull --remote team --dry-run --json)"
+assert_contains "$PULL_DRY_JSON" '"action":"sync_pull_dry_run"'
+VALUE_AFTER_PULL_DRY="$("$BIN" secret get api_key --unsafe-stdout)"
+if [[ "$VALUE_AFTER_PULL_DRY" != "local-v1" ]]; then
+  echo "error: expected local-v1 after pull dry-run, got '$VALUE_AFTER_PULL_DRY'" >&2
+  exit 1
+fi
 PULL_JSON="$("$BIN" sync pull --remote team --json)"
 BACKUP_PATH="$(printf '%s' "$PULL_JSON" | sed -n 's/.*"backup_path":"\([^"]*\)".*/\1/p')"
 if [[ -z "$BACKUP_PATH" || ! -f "$BACKUP_PATH" ]]; then
