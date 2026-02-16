@@ -55,31 +55,33 @@ type syncErrorResult struct {
 }
 
 type syncConflictResult struct {
-	OK             bool   `json:"ok"`
-	Action         string `json:"action"`
-	Remote         string `json:"remote"`
-	RemoteType     string `json:"remote_type,omitempty"`
-	RemotePath     string `json:"remote_path,omitempty"`
-	BundlePath     string `json:"bundle_path,omitempty"`
-	RemoteRev      string `json:"remote_rev,omitempty"`
-	LastSeenRev    string `json:"last_seen_rev,omitempty"`
-	HasRemote      bool   `json:"has_remote"`
-	HasLock        bool   `json:"has_lock"`
-	HasConflict    bool   `json:"has_conflict"`
-	Reason         string `json:"reason,omitempty"`
-	ExpectedRev    string `json:"expected_rev,omitempty"`
-	ActualRev      string `json:"actual_rev,omitempty"`
-	Message        string `json:"message,omitempty"`
-	LockPath       string `json:"lock_path,omitempty"`
-	LockAge        string `json:"lock_age,omitempty"`
-	LockPID        string `json:"lock_pid,omitempty"`
-	LockHost       string `json:"lock_host,omitempty"`
-	LockUser       string `json:"lock_user,omitempty"`
-	LockCreated    string `json:"lock_created,omitempty"`
-	LockError      string `json:"lock_error,omitempty"`
-	LockBlocksPush bool   `json:"lock_blocks_push,omitempty"`
-	LikelyStale    bool   `json:"likely_stale,omitempty"`
-	LockAgeSeconds int64  `json:"lock_age_seconds,omitempty"`
+	OK                bool     `json:"ok"`
+	Action            string   `json:"action"`
+	Remote            string   `json:"remote"`
+	RemoteType        string   `json:"remote_type,omitempty"`
+	RemotePath        string   `json:"remote_path,omitempty"`
+	BundlePath        string   `json:"bundle_path,omitempty"`
+	RemoteRev         string   `json:"remote_rev,omitempty"`
+	LastSeenRev       string   `json:"last_seen_rev,omitempty"`
+	HasRemote         bool     `json:"has_remote"`
+	HasLock           bool     `json:"has_lock"`
+	HasConflict       bool     `json:"has_conflict"`
+	Reason            string   `json:"reason,omitempty"`
+	ExpectedRev       string   `json:"expected_rev,omitempty"`
+	ActualRev         string   `json:"actual_rev,omitempty"`
+	Message           string   `json:"message,omitempty"`
+	LockPath          string   `json:"lock_path,omitempty"`
+	LockAge           string   `json:"lock_age,omitempty"`
+	LockPID           string   `json:"lock_pid,omitempty"`
+	LockHost          string   `json:"lock_host,omitempty"`
+	LockUser          string   `json:"lock_user,omitempty"`
+	LockCreated       string   `json:"lock_created,omitempty"`
+	LockError         string   `json:"lock_error,omitempty"`
+	LockBlocksPush    bool     `json:"lock_blocks_push,omitempty"`
+	LikelyStale       bool     `json:"likely_stale,omitempty"`
+	LockAgeSeconds    int64    `json:"lock_age_seconds,omitempty"`
+	Blockers          []string `json:"blockers,omitempty"`
+	RecommendedAction string   `json:"recommended_action,omitempty"`
 }
 
 type syncResetBaselineResult struct {
@@ -363,32 +365,50 @@ func newSyncConflictsCommand() *cobra.Command {
 			if lockInfo.HasLock && staleThreshold > 0 && lockInfo.LockAgeDur >= staleThreshold {
 				likelyStale = true
 			}
+			blockers := make([]string, 0, 2)
+			if lockBlocksPush {
+				blockers = append(blockers, "remote_lock_present")
+			}
+			if details.HasConflict {
+				blockers = append(blockers, details.Reason)
+			}
+			recommended := "none"
+			switch {
+			case details.HasConflict && details.Reason != "remote_disappeared":
+				recommended = "sync_pull"
+			case details.HasConflict && details.Reason == "remote_disappeared":
+				recommended = "sync_reset_baseline_or_remote_recreate"
+			case lockBlocksPush:
+				recommended = "wait_or_sync_unlock"
+			}
 			res := syncConflictResult{
-				OK:             true,
-				Action:         "sync_conflicts",
-				Remote:         remote.Name,
-				RemoteType:     remote.Type,
-				RemotePath:     remote.Path,
-				BundlePath:     bundlePath,
-				RemoteRev:      remoteRev,
-				LastSeenRev:    lastSeen,
-				HasRemote:      hasRemote,
-				HasLock:        lockInfo.HasLock,
-				HasConflict:    details.HasConflict,
-				Reason:         details.Reason,
-				ExpectedRev:    details.ExpectedRev,
-				ActualRev:      details.ActualRev,
-				Message:        details.Message,
-				LockPath:       lockInfo.LockPath,
-				LockAge:        lockInfo.LockAge,
-				LockPID:        lockInfo.LockPID,
-				LockHost:       lockInfo.LockHost,
-				LockUser:       lockInfo.LockUser,
-				LockCreated:    lockInfo.LockCreated,
-				LockError:      lockInfo.LockError,
-				LockBlocksPush: lockBlocksPush,
-				LikelyStale:    likelyStale,
-				LockAgeSeconds: int64(lockInfo.LockAgeDur.Seconds()),
+				OK:                true,
+				Action:            "sync_conflicts",
+				Remote:            remote.Name,
+				RemoteType:        remote.Type,
+				RemotePath:        remote.Path,
+				BundlePath:        bundlePath,
+				RemoteRev:         remoteRev,
+				LastSeenRev:       lastSeen,
+				HasRemote:         hasRemote,
+				HasLock:           lockInfo.HasLock,
+				HasConflict:       details.HasConflict,
+				Reason:            details.Reason,
+				ExpectedRev:       details.ExpectedRev,
+				ActualRev:         details.ActualRev,
+				Message:           details.Message,
+				LockPath:          lockInfo.LockPath,
+				LockAge:           lockInfo.LockAge,
+				LockPID:           lockInfo.LockPID,
+				LockHost:          lockInfo.LockHost,
+				LockUser:          lockInfo.LockUser,
+				LockCreated:       lockInfo.LockCreated,
+				LockError:         lockInfo.LockError,
+				LockBlocksPush:    lockBlocksPush,
+				LikelyStale:       likelyStale,
+				LockAgeSeconds:    int64(lockInfo.LockAgeDur.Seconds()),
+				Blockers:          blockers,
+				RecommendedAction: recommended,
 			}
 
 			if jsonOut {
@@ -414,6 +434,12 @@ func newSyncConflictsCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+				if len(blockers) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "blockers: (none)")
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "blockers: %s\n", strings.Join(blockers, ","))
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", recommended)
 				if lockInfo.HasLock && staleThreshold > 0 {
 					fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
 				}
@@ -453,6 +479,12 @@ func newSyncConflictsCommand() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+			if len(blockers) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "blockers: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "blockers: %s\n", strings.Join(blockers, ","))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", recommended)
 			if lockInfo.HasLock && staleThreshold > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
 			}

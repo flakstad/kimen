@@ -691,6 +691,12 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if !jsonBool(conflictsResp, "lock_blocks_push") {
 		t.Fatalf("expected lock_blocks_push=true in sync conflicts: %#v", conflictsResp)
 	}
+	if conflictsResp["recommended_action"] != "wait_or_sync_unlock" {
+		t.Fatalf("expected recommended_action=wait_or_sync_unlock in sync conflicts: %#v", conflictsResp)
+	}
+	if blockers := jsonStringSlice(conflictsResp, "blockers"); len(blockers) == 0 || blockers[0] != "remote_lock_present" {
+		t.Fatalf("expected remote_lock_present blocker in sync conflicts: %#v", conflictsResp)
+	}
 	if !jsonBool(conflictsResp, "likely_stale") {
 		t.Fatalf("expected likely_stale=true in sync conflicts: %#v", conflictsResp)
 	}
@@ -1031,6 +1037,12 @@ func TestCLI_SyncConflictsAndResetBaseline(t *testing.T) {
 	conflicts := parseJSONMap(t, out)
 	if !jsonBool(conflicts, "has_conflict") || conflicts["reason"] != "remote_changed" {
 		t.Fatalf("expected remote_changed conflict, got %#v", conflicts)
+	}
+	if conflicts["recommended_action"] != "sync_pull" {
+		t.Fatalf("expected recommended_action=sync_pull for remote_changed conflict: %#v", conflicts)
+	}
+	if blockers := jsonStringSlice(conflicts, "blockers"); len(blockers) == 0 || blockers[0] != "remote_changed" {
+		t.Fatalf("expected remote_changed blocker in conflicts: %#v", conflicts)
 	}
 
 	_, errOut, err := runCLI([]string{"sync", "reset-baseline", "--remote", "origin", "--to-remote", "--json"}, nil)

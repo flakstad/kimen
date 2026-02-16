@@ -804,6 +804,7 @@ What it does:
 - Explains whether push is blocked by a baseline conflict and why.
 - Returns conflict details (`reason`, expected/actual rev) without mutating state.
 - Also reports lock state (`has_lock`, lock metadata), useful when contention and conflict happen together.
+- Includes `blockers` and `recommended_action` for automation decisioning.
 
 Examples:
 
