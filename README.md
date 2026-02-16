@@ -88,9 +88,10 @@ Run the end-to-end sync/conflict/recovery harness:
 
 ```bash
 make sync-e2e
+make sync-e2e-git
 ```
 
-`make release-check` now includes this sync E2E harness.
+`make sync-e2e-all` runs both harnesses. `make release-check` includes both fs + git sync E2E checks.
 
 Set a vault location (optional) and initialize:
 

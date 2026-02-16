@@ -1,6 +1,6 @@
 BINARY_NAME=kimen
 
-.PHONY: prep-cache build run install tidy fmt vet test sync-e2e release-check release-snapshot
+.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot
 
 # Go caches:
 # - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
@@ -70,11 +70,16 @@ test: prep-cache
 sync-e2e: build
 	./scripts/e2e-sync.sh
 
+sync-e2e-git: build
+	./scripts/e2e-sync-git.sh
+
+sync-e2e-all: sync-e2e sync-e2e-git
+
 install: prep-cache test build
 	go install -ldflags "$(LDFLAGS)" ./cmd/kimen
 	@BIN_DIR="$$(go env GOBIN)"; if [ -z "$$BIN_DIR" ]; then BIN_DIR="$$(go env GOPATH)/bin"; fi; echo "Installed: $$BIN_DIR/$(BINARY_NAME)"
 
-release-check: vet test build sync-e2e
+release-check: vet test build sync-e2e-all
 
 release-snapshot: prep-cache
 	goreleaser release --snapshot --clean

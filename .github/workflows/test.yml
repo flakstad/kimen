@@ -29,3 +29,4 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make sync-e2e
+      - run: make sync-e2e-git
