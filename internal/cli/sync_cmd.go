@@ -199,10 +199,15 @@ func newSyncStatusCommand() *cobra.Command {
 				canPush = true
 			}
 			lockBlocksPush := lockInfo.HasLock
+			missingRecipient := strings.TrimSpace(remote.Recipient) == ""
+			missingIdentity := strings.TrimSpace(remote.Identity) == ""
 			if lockBlocksPush {
 				canPush = false
 			}
 			if !hasLocal {
+				canPush = false
+			}
+			if missingRecipient {
 				canPush = false
 			}
 			likelyStale := false
@@ -210,23 +215,33 @@ func newSyncStatusCommand() *cobra.Command {
 				likelyStale = true
 			}
 			conflictDetails := detectSyncConflict(strings.TrimSpace(lastSeen), remoteRev, hasRemote)
-			blockers := make([]string, 0, 3)
+			blockers := make([]string, 0, 5)
 			if !hasLocal {
 				blockers = append(blockers, "local_vault_missing")
 			}
 			if lockBlocksPush {
 				blockers = append(blockers, "remote_lock_present")
 			}
+			if missingRecipient {
+				blockers = append(blockers, "remote_recipient_missing")
+			}
+			if needsPull && missingIdentity {
+				blockers = append(blockers, "remote_identity_missing")
+			}
 			if conflictDetails.HasConflict {
 				blockers = append(blockers, conflictDetails.Reason)
 			}
 			recommended := "none"
 			switch {
-			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != "remote_disappeared"):
-				recommended = "sync_pull"
+			case needsPull && missingIdentity:
+				recommended = "configure_remote_identity"
 			case !hasLocal && !hasRemote:
 				recommended = "vault_init"
 			case !hasLocal && hasRemote:
+				recommended = "sync_pull"
+			case missingRecipient && !needsPull:
+				recommended = "configure_remote_recipient"
+			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != "remote_disappeared"):
 				recommended = "sync_pull"
 			case lockBlocksPush:
 				recommended = "wait_or_sync_unlock"

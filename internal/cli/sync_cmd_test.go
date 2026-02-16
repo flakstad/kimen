@@ -805,6 +805,105 @@ func TestCLI_SyncStatus_ReportsLocalVaultMissingBlocker(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncStatus_ReportsMissingRecipientBlocker(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", remoteDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	statusResp := parseJSONMap(t, out)
+	if jsonBool(statusResp, "can_push") {
+		t.Fatalf("expected can_push=false when recipient is missing: %#v", statusResp)
+	}
+	blockers := jsonStringSlice(statusResp, "blockers")
+	if !containsString(blockers, "remote_recipient_missing") {
+		t.Fatalf("expected remote_recipient_missing blocker, got %#v", statusResp)
+	}
+	if statusResp["recommended_action"] != "configure_remote_recipient" {
+		t.Fatalf("expected recommended_action=configure_remote_recipient, got %#v", statusResp)
+	}
+}
+
+func TestCLI_SyncStatus_ReportsMissingIdentityBlockerWhenPullNeeded(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", vaultPath,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("bundle seal: %v", err)
+	}
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	statusResp := parseJSONMap(t, out)
+	if !jsonBool(statusResp, "needs_pull") {
+		t.Fatalf("expected needs_pull=true for existing remote baseline mismatch: %#v", statusResp)
+	}
+	blockers := jsonStringSlice(statusResp, "blockers")
+	if !containsString(blockers, "remote_identity_missing") {
+		t.Fatalf("expected remote_identity_missing blocker, got %#v", statusResp)
+	}
+	if statusResp["recommended_action"] != "configure_remote_identity" {
+		t.Fatalf("expected recommended_action=configure_remote_identity, got %#v", statusResp)
+	}
+}
+
 func TestCLI_SyncUnlock_RemovesLockWithSafetyChecks(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
@@ -1214,6 +1313,15 @@ func jsonStringSlice(payload map[string]any, key string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func containsString(items []string, want string) bool {
+	for _, it := range items {
+		if it == want {
+			return true
+		}
+	}
+	return false
 }
 
 func readConfig(t *testing.T) config {
