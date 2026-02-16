@@ -306,3 +306,158 @@ func TestCLI_Doctor_StrictPassesWhenNoWarnings(t *testing.T) {
 		t.Fatalf("expected warning_count=0, got %#v", report)
 	}
 }
+
+func TestCLI_Doctor_RemoteFSDirectoryWarning(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote-missing")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "fs",
+		"--path", remoteDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add fs: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_origin_fs_dir")
+	if check["status"] != doctorStatusWarning {
+		t.Fatalf("expected remote_origin_fs_dir warning, got %#v", check)
+	}
+}
+
+func TestCLI_Doctor_RemoteGitUnreachableFails(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	missingRepo := filepath.Join(dir, "missing.git")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", missingRepo,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add git: %v", err)
+	}
+
+	out, _, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected doctor failure for unreachable git remote")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodeDoctorFailed {
+		t.Fatalf("expected doctor exit code %d, got %d", exitcode.CodeDoctorFailed, ec.Code)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_origin_git_remote")
+	if check["status"] != doctorStatusError {
+		t.Fatalf("expected remote_origin_git_remote error, got %#v", check)
+	}
+}
+
+func TestCLI_Doctor_RemoteGitBranchWarning(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	repoPath := filepath.Join(dir, "team.git")
+	runGit(t, "", "init", "--bare", repoPath)
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "git",
+		"--path", repoPath,
+		"--branch", "main",
+		"--bundle-path", "vault.age",
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add git: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_origin_git_branch")
+	if check["status"] != doctorStatusWarning {
+		t.Fatalf("expected remote_origin_git_branch warning, got %#v", check)
+	}
+}
+
+func findDoctorCheck(t *testing.T, report map[string]any, name string) map[string]any {
+	t.Helper()
+	checks, _ := report["checks"].([]any)
+	for _, raw := range checks {
+		check, _ := raw.(map[string]any)
+		if check["name"] == name {
+			return check
+		}
+	}
+	t.Fatalf("doctor check %q not found in %#v", name, report)
+	return nil
+}

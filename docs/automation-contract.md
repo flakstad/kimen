@@ -111,6 +111,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 - success/failure report on `stdout`:
   - `{"ok":true|false,"strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
+- check entries include stable core checks (`config_*`, `passphrase_source`, `vault_*`, `mapping_*`, `bundle_*`) and per-remote checks like `remote_<name>_config|push|pull|transport|fs_dir|git_remote|git_branch`
 - no separate error envelope on `stderr`
 
 `version --json`:

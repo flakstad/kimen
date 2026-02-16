@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"filippo.io/age"
@@ -104,6 +106,7 @@ func runDoctorChecks(mapPath, profile, bundleIn, identityFile string, allowMissi
 	checkDoctorVault(add, allowMissingVault)
 	checkDoctorMapProfile(add, mapPath, profile)
 	checkDoctorBundle(add, bundleIn, identityFile)
+	checkDoctorRemotes(add, cfg, cfgErr)
 
 	return report
 }
@@ -299,6 +302,102 @@ func checkDoctorBundle(add func(name, status, message string), bundleIn, identit
 		return
 	}
 	add("bundle_decrypt", doctorStatusOK, "bundle can be decrypted with identity")
+}
+
+func checkDoctorRemotes(add func(name, status, message string), cfg config, cfgErr error) {
+	if cfgErr != nil {
+		add("remote_config", doctorStatusError, "cannot validate remotes because config is invalid")
+		return
+	}
+	if len(cfg.Remotes) == 0 {
+		add("remote_config", doctorStatusOK, "no remotes configured; skipping remote checks")
+		return
+	}
+
+	remotes := append([]remoteConfig(nil), cfg.Remotes...)
+	sort.Slice(remotes, func(i, j int) bool { return remotes[i].Name < remotes[j].Name })
+	for i := range remotes {
+		r := remotes[i]
+		applyRemoteDefaults(&r)
+		checkDoctorRemote(add, r)
+	}
+}
+
+func checkDoctorRemote(add func(name, status, message string), r remoteConfig) {
+	base := fmt.Sprintf("remote_%s", r.Name)
+	if err := validateRemoteConfig(r); err != nil {
+		add(base+"_config", doctorStatusError, err.Error())
+		return
+	}
+	add(base+"_config", doctorStatusOK, fmt.Sprintf("type=%s path=%s", remoteType(r), strings.TrimSpace(r.Path)))
+
+	if strings.TrimSpace(r.Recipient) == "" {
+		add(base+"_push", doctorStatusWarning, "recipient not configured; sync push will fail")
+	} else {
+		add(base+"_push", doctorStatusOK, "recipient configured")
+	}
+	if strings.TrimSpace(r.Identity) == "" {
+		add(base+"_pull", doctorStatusWarning, "identity not configured; sync pull will fail")
+	} else {
+		if _, err := bundle.LoadIdentity(strings.TrimSpace(r.Identity), false, nil); err != nil {
+			add(base+"_pull", doctorStatusError, err.Error())
+		} else {
+			add(base+"_pull", doctorStatusOK, "identity configured")
+		}
+	}
+
+	switch remoteType(r) {
+	case "fs":
+		checkDoctorFSRemote(add, base, r)
+	case "git":
+		checkDoctorGitRemote(add, base, r)
+	default:
+		add(base+"_transport", doctorStatusError, fmt.Sprintf("unsupported remote type %q", r.Type))
+	}
+}
+
+func checkDoctorFSRemote(add func(name, status, message string), base string, r remoteConfig) {
+	bundlePath, err := remoteBundlePath(r)
+	if err != nil {
+		add(base+"_transport", doctorStatusError, err.Error())
+		return
+	}
+	add(base+"_transport", doctorStatusOK, fmt.Sprintf("bundle path=%s", bundlePath))
+
+	dir := filepath.Dir(bundlePath)
+	info, err := os.Stat(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			add(base+"_fs_dir", doctorStatusWarning, fmt.Sprintf("bundle directory does not exist yet: %s", dir))
+			return
+		}
+		add(base+"_fs_dir", doctorStatusError, err.Error())
+		return
+	}
+	if !info.IsDir() {
+		add(base+"_fs_dir", doctorStatusError, fmt.Sprintf("bundle directory path is not a directory: %s", dir))
+		return
+	}
+	add(base+"_fs_dir", doctorStatusOK, dir)
+}
+
+func checkDoctorGitRemote(add func(name, status, message string), base string, r remoteConfig) {
+	_, branch, relPath, err := gitRemoteRef(r)
+	if err != nil {
+		add(base+"_transport", doctorStatusError, err.Error())
+		return
+	}
+	add(base+"_transport", doctorStatusOK, fmt.Sprintf("branch=%s bundle_path=%s", branch, relPath))
+	out, err := gitRun("", "ls-remote", "--heads", strings.TrimSpace(r.Path), branch)
+	if err != nil {
+		add(base+"_git_remote", doctorStatusError, err.Error())
+		return
+	}
+	if strings.TrimSpace(out) == "" {
+		add(base+"_git_branch", doctorStatusWarning, fmt.Sprintf("branch %q not found on remote (may be created on first push)", branch))
+		return
+	}
+	add(base+"_git_branch", doctorStatusOK, fmt.Sprintf("branch %q found on remote", branch))
 }
 
 func summarizeLintIssues(errorCount, warningCount int, issues []mapLintIssue) string {

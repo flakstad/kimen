@@ -340,6 +340,10 @@ Checks include:
 - config path resolution and config JSON validity
 - passphrase source readiness for non-interactive usage
 - vault path/file/metadata/permissions
+- remote sync readiness for configured remotes:
+  - fs: bundle path shape and directory availability
+  - git: remote reachability and branch visibility
+  - push/pull prerequisites (`recipient`/`identity`)
 - optional map/profile parse + lint checks (`--map` or `--profile`)
 - optional bundle decryptability preflight (`--bundle-in` + `--identity`)
 
