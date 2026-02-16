@@ -31,10 +31,10 @@ type syncResult struct {
 	WouldBackup       bool     `json:"would_backup,omitempty"`
 	HasRemote         bool     `json:"has_remote"`
 	HasLock           bool     `json:"has_lock"`
-	HasLocal          bool     `json:"has_local,omitempty"`
-	InSync            bool     `json:"in_sync,omitempty"`
-	CanPush           bool     `json:"can_push,omitempty"`
-	NeedsPull         bool     `json:"needs_pull,omitempty"`
+	HasLocal          bool     `json:"has_local"`
+	InSync            bool     `json:"in_sync"`
+	CanPush           bool     `json:"can_push"`
+	NeedsPull         bool     `json:"needs_pull"`
 	LockPath          string   `json:"lock_path,omitempty"`
 	LockAge           string   `json:"lock_age,omitempty"`
 	LockPID           string   `json:"lock_pid,omitempty"`
