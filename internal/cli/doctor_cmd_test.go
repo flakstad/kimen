@@ -449,6 +449,108 @@ func TestCLI_Doctor_RemoteGitBranchWarning(t *testing.T) {
 	}
 }
 
+func TestCLI_Doctor_RemoteSyncStateWarningWhenNoBaseline(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", vaultPath,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("bundle seal: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "fs",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add fs: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_origin_sync_state")
+	if check["status"] != doctorStatusWarning {
+		t.Fatalf("expected remote_origin_sync_state warning, got %#v", check)
+	}
+}
+
+func TestCLI_Doctor_RemoteSyncStateOKWhenBaselineMatches(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "fs",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add fs: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_origin_sync_state")
+	if check["status"] != doctorStatusOK {
+		t.Fatalf("expected remote_origin_sync_state ok, got %#v", check)
+	}
+}
+
 func TestCLI_Doctor_RemoteStaleSyncStateWarning(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

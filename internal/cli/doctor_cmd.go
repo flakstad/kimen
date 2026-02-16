@@ -321,7 +321,8 @@ func checkDoctorRemotes(add func(name, status, message string), cfg config, cfgE
 		r := remotes[i]
 		applyRemoteDefaults(&r)
 		remoteNames[r.Name] = struct{}{}
-		checkDoctorRemote(add, r)
+		syncState, hasSyncState := cfg.Sync[r.Name]
+		checkDoctorRemote(add, r, strings.TrimSpace(syncState.LastSeenRev), hasSyncState)
 	}
 	if len(cfg.Sync) == 0 {
 		return
@@ -343,7 +344,7 @@ func checkDoctorRemotes(add func(name, status, message string), cfg config, cfgE
 	}
 }
 
-func checkDoctorRemote(add func(name, status, message string), r remoteConfig) {
+func checkDoctorRemote(add func(name, status, message string), r remoteConfig, lastSeenRev string, hasSyncState bool) {
 	base := fmt.Sprintf("remote_%s", r.Name)
 	if err := validateRemoteConfig(r); err != nil {
 		add(base+"_config", doctorStatusError, err.Error())
@@ -366,21 +367,26 @@ func checkDoctorRemote(add func(name, status, message string), r remoteConfig) {
 		}
 	}
 
+	transportOK := true
 	switch remoteType(r) {
 	case "fs":
-		checkDoctorFSRemote(add, base, r)
+		transportOK = checkDoctorFSRemote(add, base, r)
 	case "git":
-		checkDoctorGitRemote(add, base, r)
+		transportOK = checkDoctorGitRemote(add, base, r)
 	default:
+		transportOK = false
 		add(base+"_transport", doctorStatusError, fmt.Sprintf("unsupported remote type %q", r.Type))
+	}
+	if transportOK {
+		checkDoctorRemoteSyncState(add, base, r, lastSeenRev, hasSyncState)
 	}
 }
 
-func checkDoctorFSRemote(add func(name, status, message string), base string, r remoteConfig) {
+func checkDoctorFSRemote(add func(name, status, message string), base string, r remoteConfig) bool {
 	bundlePath, err := remoteBundlePath(r)
 	if err != nil {
 		add(base+"_transport", doctorStatusError, err.Error())
-		return
+		return false
 	}
 	add(base+"_transport", doctorStatusOK, fmt.Sprintf("bundle path=%s", bundlePath))
 
@@ -389,35 +395,60 @@ func checkDoctorFSRemote(add func(name, status, message string), base string, r 
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			add(base+"_fs_dir", doctorStatusWarning, fmt.Sprintf("bundle directory does not exist yet: %s", dir))
-			return
+			return true
 		}
 		add(base+"_fs_dir", doctorStatusError, err.Error())
-		return
+		return false
 	}
 	if !info.IsDir() {
 		add(base+"_fs_dir", doctorStatusError, fmt.Sprintf("bundle directory path is not a directory: %s", dir))
-		return
+		return false
 	}
 	add(base+"_fs_dir", doctorStatusOK, dir)
+	return true
 }
 
-func checkDoctorGitRemote(add func(name, status, message string), base string, r remoteConfig) {
+func checkDoctorGitRemote(add func(name, status, message string), base string, r remoteConfig) bool {
 	_, branch, relPath, err := gitRemoteRef(r)
 	if err != nil {
 		add(base+"_transport", doctorStatusError, err.Error())
-		return
+		return false
 	}
 	add(base+"_transport", doctorStatusOK, fmt.Sprintf("branch=%s bundle_path=%s", branch, relPath))
 	out, err := gitRun("", "ls-remote", "--heads", strings.TrimSpace(r.Path), branch)
 	if err != nil {
 		add(base+"_git_remote", doctorStatusError, err.Error())
-		return
+		return false
 	}
 	if strings.TrimSpace(out) == "" {
 		add(base+"_git_branch", doctorStatusWarning, fmt.Sprintf("branch %q not found on remote (may be created on first push)", branch))
-		return
+		return true
 	}
 	add(base+"_git_branch", doctorStatusOK, fmt.Sprintf("branch %q found on remote", branch))
+	return true
+}
+
+func checkDoctorRemoteSyncState(add func(name, status, message string), base string, r remoteConfig, lastSeenRev string, hasSyncState bool) {
+	remoteRev, hasRemote, _, err := remoteRevision(r)
+	if err != nil {
+		add(base+"_sync_state", doctorStatusError, err.Error())
+		return
+	}
+	hasBaseline := hasSyncState && strings.TrimSpace(lastSeenRev) != ""
+	if !hasBaseline && !hasRemote {
+		add(base+"_sync_state", doctorStatusOK, "no baseline and remote has no bundle yet")
+		return
+	}
+	if !hasBaseline && hasRemote {
+		add(base+"_sync_state", doctorStatusWarning, "remote has data but local baseline is empty; run `kimen sync pull`")
+		return
+	}
+	details := detectSyncConflict(strings.TrimSpace(lastSeenRev), remoteRev, hasRemote)
+	if details.HasConflict {
+		add(base+"_sync_state", doctorStatusWarning, details.Message)
+		return
+	}
+	add(base+"_sync_state", doctorStatusOK, "baseline matches remote revision")
 }
 
 func summarizeLintIssues(errorCount, warningCount int, issues []mapLintIssue) string {

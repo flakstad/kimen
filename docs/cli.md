@@ -344,6 +344,7 @@ Checks include:
   - fs: bundle path shape and directory availability
   - git: remote reachability and branch visibility
   - push/pull prerequisites (`recipient`/`identity`)
+  - sync baseline alignment (`sync` state vs current remote revision)
   - stale baseline state (`sync` entries for unknown remotes)
 - optional map/profile parse + lint checks (`--map` or `--profile`)
 - optional bundle decryptability preflight (`--bundle-in` + `--identity`)
