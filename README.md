@@ -15,6 +15,7 @@ That’s what projections are for: `kimen run` scopes secrets to a single proces
 ## Status
 
 Kimen is early-stage and evolving. The CLI and on-disk formats may change.
+Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 
 ## Mental model
 
@@ -39,6 +40,7 @@ In practice, most projections read bytes from the local vault by secret name. Ki
 - Plan diffing: `kimen plan --against-map/--against-profile`
 - Map/profile linting: `kimen map lint` (with optional `--strict`)
 - Preflight checks: `kimen doctor` (human/JSON, strict mode)
+- Build metadata: `kimen version` (`--json` supported)
 - Safe planning: `kimen plan` (no secret values)
 - CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
 

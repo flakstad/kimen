@@ -683,6 +683,28 @@ func TestHelperPassphraseCommand(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestCLI_Version(t *testing.T) {
+	out, errBuf, err := runCLI([]string{"version"}, nil)
+	if err != nil {
+		t.Fatalf("version: %v (stderr=%s)", err, errBuf)
+	}
+	if strings.TrimSpace(out) == "" {
+		t.Fatalf("expected non-empty version output")
+	}
+
+	out, errBuf, err = runCLI([]string{"version", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("version --json: %v (stderr=%s)", err, errBuf)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	if payload["version"] == "" || payload["raw_version"] == "" {
+		t.Fatalf("unexpected version payload: %#v", payload)
+	}
+}
+
 func withEnv(kv map[string]string) func() {
 	orig := make(map[string]*string, len(kv))
 	for k, v := range kv {

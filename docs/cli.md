@@ -359,6 +359,20 @@ Exit behavior:
 - with `--strict`, warnings are treated as failures
 - exits `27` when doctor fails
 
+## `kimen version`
+
+What it does:
+
+- Prints build information.
+- Release builds carry CalVer tag + commit/date metadata.
+
+Examples:
+
+```bash
+kimen version
+kimen version --json
+```
+
 ## Projections: `kimen run`, `kimen render`, `kimen project …`
 
 Kimen’s primary workflow is to *project* secrets into a runtime form on demand.

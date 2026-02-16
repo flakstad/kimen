@@ -87,6 +87,11 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `plan`, `envfile`, 
   - `{"ok":true|false,"strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
 - no separate error envelope on `stderr`
 
+`version --json`:
+
+- success: `{"version":"...","raw_version":"...","commit":"...","date":"..."}`
+- error: generic command failure behavior
+
 ## Exit code matrix
 
 - `12`: secret not found

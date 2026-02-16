@@ -1,6 +1,6 @@
 BINARY_NAME=kimen
 
-.PHONY: prep-cache build run install tidy fmt vet test
+.PHONY: prep-cache build run install tidy fmt vet test release-check release-snapshot
 
 # Go caches:
 # - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
@@ -18,14 +18,23 @@ GO_CACHE_DIR ?= $(DEFAULT_GO_CACHE_DIR)
 export GOMODCACHE ?= $(GO_CACHE_DIR)/gomodcache
 export GOCACHE ?= $(GO_CACHE_DIR)/gocache
 
+VERSION ?= $(shell (git describe --tags --dirty --always --match 'v[0-9][0-9][0-9][0-9].*' 2>/dev/null || git describe --tags --dirty --always 2>/dev/null) || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+LDFLAGS ?= \
+	-X kimen/internal/buildinfo.Version=$(VERSION) \
+	-X kimen/internal/buildinfo.Commit=$(COMMIT) \
+	-X kimen/internal/buildinfo.Date=$(DATE)
+
 prep-cache:
 	@mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" ./dist
 
 build: prep-cache
-	go build -o ./dist/$(BINARY_NAME) ./cmd/kimen
+	go build -ldflags "$(LDFLAGS)" -o ./dist/$(BINARY_NAME) ./cmd/kimen
 
 run: prep-cache
-	go run ./cmd/kimen
+	go run -ldflags "$(LDFLAGS)" ./cmd/kimen
 
 tidy: prep-cache
 	go mod tidy
@@ -59,6 +68,10 @@ test: prep-cache
 	go test ./...
 
 install: prep-cache test build
-	go install ./cmd/kimen
+	go install -ldflags "$(LDFLAGS)" ./cmd/kimen
 	@BIN_DIR="$$(go env GOBIN)"; if [ -z "$$BIN_DIR" ]; then BIN_DIR="$$(go env GOPATH)/bin"; fi; echo "Installed: $$BIN_DIR/$(BINARY_NAME)"
 
+release-check: vet test build
+
+release-snapshot: prep-cache
+	goreleaser release --snapshot --clean

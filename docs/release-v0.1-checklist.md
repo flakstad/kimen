@@ -1,9 +1,10 @@
-# Release v0.1 Checklist
+# Release Checklist (CalVer)
 
 This checklist is for cutting the first external milestone from branch `agent/agent/secret-rm-mv`.
 
 ## 1) Freeze and verify
 
+- [ ] `make release-check` passes.
 - [ ] `go test ./...` passes on the release commit.
 - [ ] `go build -o dist/kimen ./cmd/kimen` succeeds.
 - [ ] Smoke pass completed for:
@@ -24,7 +25,8 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 ## 3) Tag + publish
 
 - [ ] Merge branch into target release branch.
-- [ ] Create annotated tag (example): `v0.1.0`.
+- [ ] Create annotated CalVer tag (example): `v2026.2.1`.
+- [ ] Push tag and confirm `.github/workflows/release.yml` runs.
 - [ ] Publish release notes with:
   - projection workflow summary
   - map/profile/plan/envfile status
