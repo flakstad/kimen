@@ -316,10 +316,30 @@ func checkDoctorRemotes(add func(name, status, message string), cfg config, cfgE
 
 	remotes := append([]remoteConfig(nil), cfg.Remotes...)
 	sort.Slice(remotes, func(i, j int) bool { return remotes[i].Name < remotes[j].Name })
+	remoteNames := make(map[string]struct{}, len(remotes))
 	for i := range remotes {
 		r := remotes[i]
 		applyRemoteDefaults(&r)
+		remoteNames[r.Name] = struct{}{}
 		checkDoctorRemote(add, r)
+	}
+	if len(cfg.Sync) == 0 {
+		return
+	}
+	stale := make([]string, 0, len(cfg.Sync))
+	for name := range cfg.Sync {
+		if _, ok := remoteNames[name]; ok {
+			continue
+		}
+		stale = append(stale, name)
+	}
+	sort.Strings(stale)
+	for _, name := range stale {
+		add(
+			fmt.Sprintf("remote_sync_state_%s", name),
+			doctorStatusWarning,
+			"sync baseline exists for unknown remote; remove stale state with `kimen remote rm` or edit config",
+		)
 	}
 }
 

@@ -449,6 +449,57 @@ func TestCLI_Doctor_RemoteGitBranchWarning(t *testing.T) {
 	}
 }
 
+func TestCLI_Doctor_RemoteStaleSyncStateWarning(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll remote: %v", err)
+	}
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+
+	cfg := config{
+		Remotes: []remoteConfig{
+			{Name: "origin", Type: "fs", Path: remoteDir},
+		},
+		Sync: map[string]syncConfig{
+			"ghost": {LastSeenRev: "abc123"},
+		},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"doctor", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	check := findDoctorCheck(t, report, "remote_sync_state_ghost")
+	if check["status"] != doctorStatusWarning {
+		t.Fatalf("expected remote_sync_state_ghost warning, got %#v", check)
+	}
+}
+
 func findDoctorCheck(t *testing.T, report map[string]any, name string) map[string]any {
 	t.Helper()
 	checks, _ := report["checks"].([]any)
