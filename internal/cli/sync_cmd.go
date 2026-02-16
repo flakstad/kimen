@@ -673,6 +673,13 @@ func newSyncPushCommand() *cobra.Command {
 		Use:   "push",
 		Short: "Push local vault to remote as encrypted bundle",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if lockWait < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--lock-wait must be >= 0"))
+			}
+			if breakStaleLockAfter < 0 {
+				return syncCommandError(cmd, jsonOut, errors.New("--break-stale-lock-after must be >= 0"))
+			}
+
 			c, _, err := loadConfig()
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)

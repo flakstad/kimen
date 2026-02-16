@@ -568,6 +568,42 @@ func TestCLI_SyncPushBreaksStaleLockWhenRequested(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncPushRejectsNegativeLockDurations(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	_, errOut, err := runCLI([]string{"sync", "push", "--lock-wait", "-1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push failure for negative --lock-wait")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync push lock-wait error payload: %#v", errResp)
+	}
+	if !strings.Contains(errResp["error"].(string), "--lock-wait") {
+		t.Fatalf("expected lock-wait error message, got %#v", errResp)
+	}
+
+	_, errOut, err = runCLI([]string{"sync", "push", "--break-stale-lock-after", "-1s", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push failure for negative --break-stale-lock-after")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp = parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync push stale-lock error payload: %#v", errResp)
+	}
+	if !strings.Contains(errResp["error"].(string), "--break-stale-lock-after") {
+		t.Fatalf("expected stale-lock-after error message, got %#v", errResp)
+	}
+}
+
 func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
