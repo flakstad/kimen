@@ -59,7 +59,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `sync --json`:
 
-- `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","in_sync":bool,"can_push":bool,"needs_pull":bool,...}`
+- `sync status` success: `{"ok":true,"action":"sync_status","remote":"...","has_remote":bool,"has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...","lock_user":"...","in_sync":bool,"can_push":bool,"needs_pull":bool,"blockers":["..."],"recommended_action":"sync_pull|sync_push|wait_or_sync_unlock|vault_init|none",...}`
 - `sync conflicts` success: `{"ok":true,"action":"sync_conflicts","remote":"...","has_conflict":bool,"reason":"remote_changed|remote_disappeared|no_local_baseline","has_lock":bool,"lock_blocks_push":bool,"lock_path":"...","lock_age_seconds":N,"likely_stale":bool,"lock_pid":"...","lock_host":"...",...}`
 - `sync reset-baseline` success: `{"ok":true,"action":"sync_reset_baseline","remote":"...","mode":"to_remote|clear|rev","previous_rev":"...","new_rev":"..."}`
 - `sync unlock` success: `{"ok":true,"action":"sync_unlock","remote":"...","lock_path":"...","removed":bool,"reason":"lock_missing|..."}` (requires `--yes` when a lock exists)

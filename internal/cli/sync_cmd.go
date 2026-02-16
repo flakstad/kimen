@@ -17,33 +17,35 @@ import (
 )
 
 type syncResult struct {
-	OK              bool   `json:"ok"`
-	Action          string `json:"action"`
-	Remote          string `json:"remote"`
-	RemoteType      string `json:"remote_type,omitempty"`
-	RemotePath      string `json:"remote_path,omitempty"`
-	BundlePath      string `json:"bundle_path,omitempty"`
-	VaultPath       string `json:"vault_path,omitempty"`
-	RemoteRev       string `json:"remote_rev,omitempty"`
-	LastSeenRev     string `json:"last_seen_rev,omitempty"`
-	BackupPath      string `json:"backup_path,omitempty"`
-	HasRemote       bool   `json:"has_remote"`
-	HasLock         bool   `json:"has_lock"`
-	HasLocal        bool   `json:"has_local,omitempty"`
-	InSync          bool   `json:"in_sync,omitempty"`
-	CanPush         bool   `json:"can_push,omitempty"`
-	NeedsPull       bool   `json:"needs_pull,omitempty"`
-	LockPath        string `json:"lock_path,omitempty"`
-	LockAge         string `json:"lock_age,omitempty"`
-	LockPID         string `json:"lock_pid,omitempty"`
-	LockHost        string `json:"lock_host,omitempty"`
-	LockUser        string `json:"lock_user,omitempty"`
-	LockCreated     string `json:"lock_created,omitempty"`
-	LockError       string `json:"lock_error,omitempty"`
-	StaleLockBroken bool   `json:"stale_lock_broken,omitempty"`
-	LockBlocksPush  bool   `json:"lock_blocks_push,omitempty"`
-	LikelyStale     bool   `json:"likely_stale,omitempty"`
-	LockAgeSeconds  int64  `json:"lock_age_seconds,omitempty"`
+	OK                bool     `json:"ok"`
+	Action            string   `json:"action"`
+	Remote            string   `json:"remote"`
+	RemoteType        string   `json:"remote_type,omitempty"`
+	RemotePath        string   `json:"remote_path,omitempty"`
+	BundlePath        string   `json:"bundle_path,omitempty"`
+	VaultPath         string   `json:"vault_path,omitempty"`
+	RemoteRev         string   `json:"remote_rev,omitempty"`
+	LastSeenRev       string   `json:"last_seen_rev,omitempty"`
+	BackupPath        string   `json:"backup_path,omitempty"`
+	HasRemote         bool     `json:"has_remote"`
+	HasLock           bool     `json:"has_lock"`
+	HasLocal          bool     `json:"has_local,omitempty"`
+	InSync            bool     `json:"in_sync,omitempty"`
+	CanPush           bool     `json:"can_push,omitempty"`
+	NeedsPull         bool     `json:"needs_pull,omitempty"`
+	LockPath          string   `json:"lock_path,omitempty"`
+	LockAge           string   `json:"lock_age,omitempty"`
+	LockPID           string   `json:"lock_pid,omitempty"`
+	LockHost          string   `json:"lock_host,omitempty"`
+	LockUser          string   `json:"lock_user,omitempty"`
+	LockCreated       string   `json:"lock_created,omitempty"`
+	LockError         string   `json:"lock_error,omitempty"`
+	StaleLockBroken   bool     `json:"stale_lock_broken,omitempty"`
+	LockBlocksPush    bool     `json:"lock_blocks_push,omitempty"`
+	LikelyStale       bool     `json:"likely_stale,omitempty"`
+	LockAgeSeconds    int64    `json:"lock_age_seconds,omitempty"`
+	Blockers          []string `json:"blockers,omitempty"`
+	RecommendedAction string   `json:"recommended_action,omitempty"`
 }
 
 type syncErrorResult struct {
@@ -198,37 +200,66 @@ func newSyncStatusCommand() *cobra.Command {
 			if lockBlocksPush {
 				canPush = false
 			}
+			if !hasLocal {
+				canPush = false
+			}
 			likelyStale := false
 			if lockInfo.HasLock && staleThreshold > 0 && lockInfo.LockAgeDur >= staleThreshold {
 				likelyStale = true
 			}
+			conflictDetails := detectSyncConflict(strings.TrimSpace(lastSeen), remoteRev, hasRemote)
+			blockers := make([]string, 0, 3)
+			if !hasLocal {
+				blockers = append(blockers, "local_vault_missing")
+			}
+			if lockBlocksPush {
+				blockers = append(blockers, "remote_lock_present")
+			}
+			if conflictDetails.HasConflict {
+				blockers = append(blockers, conflictDetails.Reason)
+			}
+			recommended := "none"
+			switch {
+			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != "remote_disappeared"):
+				recommended = "sync_pull"
+			case !hasLocal && !hasRemote:
+				recommended = "vault_init"
+			case !hasLocal && hasRemote:
+				recommended = "sync_pull"
+			case lockBlocksPush:
+				recommended = "wait_or_sync_unlock"
+			case canPush:
+				recommended = "sync_push"
+			}
 
 			res := syncResult{
-				OK:             true,
-				Action:         "sync_status",
-				Remote:         remote.Name,
-				RemoteType:     remote.Type,
-				RemotePath:     remote.Path,
-				BundlePath:     bundlePath,
-				VaultPath:      vaultPath,
-				RemoteRev:      remoteRev,
-				LastSeenRev:    lastSeen,
-				HasRemote:      hasRemote,
-				HasLock:        lockInfo.HasLock,
-				HasLocal:       hasLocal,
-				InSync:         inSync,
-				CanPush:        canPush,
-				NeedsPull:      needsPull,
-				LockPath:       lockInfo.LockPath,
-				LockAge:        lockInfo.LockAge,
-				LockPID:        lockInfo.LockPID,
-				LockHost:       lockInfo.LockHost,
-				LockUser:       lockInfo.LockUser,
-				LockCreated:    lockInfo.LockCreated,
-				LockError:      lockInfo.LockError,
-				LockBlocksPush: lockBlocksPush,
-				LikelyStale:    likelyStale,
-				LockAgeSeconds: int64(lockInfo.LockAgeDur.Seconds()),
+				OK:                true,
+				Action:            "sync_status",
+				Remote:            remote.Name,
+				RemoteType:        remote.Type,
+				RemotePath:        remote.Path,
+				BundlePath:        bundlePath,
+				VaultPath:         vaultPath,
+				RemoteRev:         remoteRev,
+				LastSeenRev:       lastSeen,
+				HasRemote:         hasRemote,
+				HasLock:           lockInfo.HasLock,
+				HasLocal:          hasLocal,
+				InSync:            inSync,
+				CanPush:           canPush,
+				NeedsPull:         needsPull,
+				LockPath:          lockInfo.LockPath,
+				LockAge:           lockInfo.LockAge,
+				LockPID:           lockInfo.LockPID,
+				LockHost:          lockInfo.LockHost,
+				LockUser:          lockInfo.LockUser,
+				LockCreated:       lockInfo.LockCreated,
+				LockError:         lockInfo.LockError,
+				LockBlocksPush:    lockBlocksPush,
+				LikelyStale:       likelyStale,
+				LockAgeSeconds:    int64(lockInfo.LockAgeDur.Seconds()),
+				Blockers:          blockers,
+				RecommendedAction: recommended,
 			}
 
 			if jsonOut {
@@ -250,6 +281,12 @@ func newSyncStatusCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "can-push: %t\n", canPush)
 			fmt.Fprintf(cmd.OutOrStdout(), "needs-pull: %t\n", needsPull)
 			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+			if len(blockers) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "blockers: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "blockers: %s\n", strings.Join(blockers, ","))
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", recommended)
 			if lockInfo.HasLock && staleThreshold > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "likely-stale: %t (threshold=%s)\n", likelyStale, staleThreshold)
 			}

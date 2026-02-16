@@ -750,6 +750,55 @@ func TestCLI_SyncStatusAndConflicts_RejectNegativeStaleThreshold(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncStatus_ReportsLocalVaultMissingBlocker(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.Remove(vaultPath); err != nil {
+		t.Fatalf("remove local vault: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	statusResp := parseJSONMap(t, out)
+	if jsonBool(statusResp, "can_push") {
+		t.Fatalf("expected can_push=false when local vault is missing: %#v", statusResp)
+	}
+	blockers := jsonStringSlice(statusResp, "blockers")
+	if len(blockers) == 0 || blockers[0] != "local_vault_missing" {
+		t.Fatalf("expected local_vault_missing blocker, got %#v", statusResp)
+	}
+	if statusResp["recommended_action"] != "vault_init" {
+		t.Fatalf("expected recommended_action=vault_init, got %#v", statusResp)
+	}
+}
+
 func TestCLI_SyncUnlock_RemovesLockWithSafetyChecks(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
@@ -1133,6 +1182,26 @@ func jsonBool(payload map[string]any, key string) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
+}
+
+func jsonStringSlice(payload map[string]any, key string) []string {
+	v, ok := payload[key]
+	if !ok {
+		return nil
+	}
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		s, ok := it.(string)
+		if !ok {
+			return nil
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 func readConfig(t *testing.T) config {

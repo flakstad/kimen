@@ -758,6 +758,8 @@ Key fields (`--json`):
 - `lock_blocks_push`: whether current lock state blocks an immediate push
 - `lock_age_seconds`: numeric lock age for automation
 - `likely_stale`: set when `--stale-threshold` is provided and lock age meets/exceeds it
+- `blockers`: machine-readable blockers such as `local_vault_missing`, `remote_lock_present`, or conflict reasons
+- `recommended_action`: next step hint (`sync_pull`, `sync_push`, `wait_or_sync_unlock`, `vault_init`, `none`)
 - `last_seen_rev`: last remote revision observed by local machine
 - `in_sync`: local baseline matches current remote revision
 - `can_push`: push is allowed without conflict
