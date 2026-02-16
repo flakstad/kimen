@@ -41,6 +41,7 @@ type syncResult struct {
 	LockCreated     string `json:"lock_created,omitempty"`
 	LockError       string `json:"lock_error,omitempty"`
 	StaleLockBroken bool   `json:"stale_lock_broken,omitempty"`
+	LockBlocksPush  bool   `json:"lock_blocks_push,omitempty"`
 }
 
 type syncErrorResult struct {
@@ -50,28 +51,29 @@ type syncErrorResult struct {
 }
 
 type syncConflictResult struct {
-	OK          bool   `json:"ok"`
-	Action      string `json:"action"`
-	Remote      string `json:"remote"`
-	RemoteType  string `json:"remote_type,omitempty"`
-	RemotePath  string `json:"remote_path,omitempty"`
-	BundlePath  string `json:"bundle_path,omitempty"`
-	RemoteRev   string `json:"remote_rev,omitempty"`
-	LastSeenRev string `json:"last_seen_rev,omitempty"`
-	HasRemote   bool   `json:"has_remote"`
-	HasLock     bool   `json:"has_lock"`
-	HasConflict bool   `json:"has_conflict"`
-	Reason      string `json:"reason,omitempty"`
-	ExpectedRev string `json:"expected_rev,omitempty"`
-	ActualRev   string `json:"actual_rev,omitempty"`
-	Message     string `json:"message,omitempty"`
-	LockPath    string `json:"lock_path,omitempty"`
-	LockAge     string `json:"lock_age,omitempty"`
-	LockPID     string `json:"lock_pid,omitempty"`
-	LockHost    string `json:"lock_host,omitempty"`
-	LockUser    string `json:"lock_user,omitempty"`
-	LockCreated string `json:"lock_created,omitempty"`
-	LockError   string `json:"lock_error,omitempty"`
+	OK             bool   `json:"ok"`
+	Action         string `json:"action"`
+	Remote         string `json:"remote"`
+	RemoteType     string `json:"remote_type,omitempty"`
+	RemotePath     string `json:"remote_path,omitempty"`
+	BundlePath     string `json:"bundle_path,omitempty"`
+	RemoteRev      string `json:"remote_rev,omitempty"`
+	LastSeenRev    string `json:"last_seen_rev,omitempty"`
+	HasRemote      bool   `json:"has_remote"`
+	HasLock        bool   `json:"has_lock"`
+	HasConflict    bool   `json:"has_conflict"`
+	Reason         string `json:"reason,omitempty"`
+	ExpectedRev    string `json:"expected_rev,omitempty"`
+	ActualRev      string `json:"actual_rev,omitempty"`
+	Message        string `json:"message,omitempty"`
+	LockPath       string `json:"lock_path,omitempty"`
+	LockAge        string `json:"lock_age,omitempty"`
+	LockPID        string `json:"lock_pid,omitempty"`
+	LockHost       string `json:"lock_host,omitempty"`
+	LockUser       string `json:"lock_user,omitempty"`
+	LockCreated    string `json:"lock_created,omitempty"`
+	LockError      string `json:"lock_error,omitempty"`
+	LockBlocksPush bool   `json:"lock_blocks_push,omitempty"`
 }
 
 type syncResetBaselineResult struct {
@@ -184,30 +186,35 @@ func newSyncStatusCommand() *cobra.Command {
 			case hasRemote && lastSeen == remoteRev:
 				canPush = true
 			}
+			lockBlocksPush := lockInfo.HasLock
+			if lockBlocksPush {
+				canPush = false
+			}
 
 			res := syncResult{
-				OK:          true,
-				Action:      "sync_status",
-				Remote:      remote.Name,
-				RemoteType:  remote.Type,
-				RemotePath:  remote.Path,
-				BundlePath:  bundlePath,
-				VaultPath:   vaultPath,
-				RemoteRev:   remoteRev,
-				LastSeenRev: lastSeen,
-				HasRemote:   hasRemote,
-				HasLock:     lockInfo.HasLock,
-				HasLocal:    hasLocal,
-				InSync:      inSync,
-				CanPush:     canPush,
-				NeedsPull:   needsPull,
-				LockPath:    lockInfo.LockPath,
-				LockAge:     lockInfo.LockAge,
-				LockPID:     lockInfo.LockPID,
-				LockHost:    lockInfo.LockHost,
-				LockUser:    lockInfo.LockUser,
-				LockCreated: lockInfo.LockCreated,
-				LockError:   lockInfo.LockError,
+				OK:             true,
+				Action:         "sync_status",
+				Remote:         remote.Name,
+				RemoteType:     remote.Type,
+				RemotePath:     remote.Path,
+				BundlePath:     bundlePath,
+				VaultPath:      vaultPath,
+				RemoteRev:      remoteRev,
+				LastSeenRev:    lastSeen,
+				HasRemote:      hasRemote,
+				HasLock:        lockInfo.HasLock,
+				HasLocal:       hasLocal,
+				InSync:         inSync,
+				CanPush:        canPush,
+				NeedsPull:      needsPull,
+				LockPath:       lockInfo.LockPath,
+				LockAge:        lockInfo.LockAge,
+				LockPID:        lockInfo.LockPID,
+				LockHost:       lockInfo.LockHost,
+				LockUser:       lockInfo.LockUser,
+				LockCreated:    lockInfo.LockCreated,
+				LockError:      lockInfo.LockError,
+				LockBlocksPush: lockBlocksPush,
 			}
 
 			if jsonOut {
@@ -228,6 +235,7 @@ func newSyncStatusCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "in-sync: %t\n", inSync)
 			fmt.Fprintf(cmd.OutOrStdout(), "can-push: %t\n", canPush)
 			fmt.Fprintf(cmd.OutOrStdout(), "needs-pull: %t\n", needsPull)
+			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
 			if lockInfo.HasLock {
 				fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
 				if lockInfo.LockAge != "" {
@@ -291,29 +299,31 @@ func newSyncConflictsCommand() *cobra.Command {
 				lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
 			}
 			details := detectSyncConflict(lastSeen, remoteRev, hasRemote)
+			lockBlocksPush := lockInfo.HasLock
 			res := syncConflictResult{
-				OK:          true,
-				Action:      "sync_conflicts",
-				Remote:      remote.Name,
-				RemoteType:  remote.Type,
-				RemotePath:  remote.Path,
-				BundlePath:  bundlePath,
-				RemoteRev:   remoteRev,
-				LastSeenRev: lastSeen,
-				HasRemote:   hasRemote,
-				HasLock:     lockInfo.HasLock,
-				HasConflict: details.HasConflict,
-				Reason:      details.Reason,
-				ExpectedRev: details.ExpectedRev,
-				ActualRev:   details.ActualRev,
-				Message:     details.Message,
-				LockPath:    lockInfo.LockPath,
-				LockAge:     lockInfo.LockAge,
-				LockPID:     lockInfo.LockPID,
-				LockHost:    lockInfo.LockHost,
-				LockUser:    lockInfo.LockUser,
-				LockCreated: lockInfo.LockCreated,
-				LockError:   lockInfo.LockError,
+				OK:             true,
+				Action:         "sync_conflicts",
+				Remote:         remote.Name,
+				RemoteType:     remote.Type,
+				RemotePath:     remote.Path,
+				BundlePath:     bundlePath,
+				RemoteRev:      remoteRev,
+				LastSeenRev:    lastSeen,
+				HasRemote:      hasRemote,
+				HasLock:        lockInfo.HasLock,
+				HasConflict:    details.HasConflict,
+				Reason:         details.Reason,
+				ExpectedRev:    details.ExpectedRev,
+				ActualRev:      details.ActualRev,
+				Message:        details.Message,
+				LockPath:       lockInfo.LockPath,
+				LockAge:        lockInfo.LockAge,
+				LockPID:        lockInfo.LockPID,
+				LockHost:       lockInfo.LockHost,
+				LockUser:       lockInfo.LockUser,
+				LockCreated:    lockInfo.LockCreated,
+				LockError:      lockInfo.LockError,
+				LockBlocksPush: lockBlocksPush,
 			}
 
 			if jsonOut {
@@ -321,6 +331,27 @@ func newSyncConflictsCommand() *cobra.Command {
 			}
 			if !details.HasConflict {
 				fmt.Fprintf(cmd.OutOrStdout(), "no conflict for remote %s\n", remote.Name)
+				if lockInfo.HasLock {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
+					if lockInfo.LockAge != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "push-lock-age: %s\n", lockInfo.LockAge)
+					}
+					if lockInfo.LockPID != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "push-lock-pid: %s\n", lockInfo.LockPID)
+					}
+					if lockInfo.LockHost != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "push-lock-host: %s\n", lockInfo.LockHost)
+					}
+					if lockInfo.LockUser != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), "push-lock-user: %s\n", lockInfo.LockUser)
+					}
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
+				if lockInfo.LockError != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
+				}
 				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "conflict: %s\n", details.Reason)
@@ -353,6 +384,7 @@ func newSyncConflictsCommand() *cobra.Command {
 			} else {
 				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
 			}
+			fmt.Fprintf(cmd.OutOrStdout(), "lock-blocks-push: %t\n", lockBlocksPush)
 			if lockInfo.LockError != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
 			}

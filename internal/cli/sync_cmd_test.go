@@ -616,6 +616,12 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if !jsonBool(statusResp, "has_lock") {
 		t.Fatalf("expected has_lock=true in sync status: %#v", statusResp)
 	}
+	if !jsonBool(statusResp, "lock_blocks_push") {
+		t.Fatalf("expected lock_blocks_push=true in sync status: %#v", statusResp)
+	}
+	if jsonBool(statusResp, "can_push") {
+		t.Fatalf("expected can_push=false while lock is present: %#v", statusResp)
+	}
 	if statusResp["lock_path"] != lockPath {
 		t.Fatalf("unexpected lock_path in sync status: %#v", statusResp)
 	}
@@ -640,6 +646,9 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	if !jsonBool(conflictsResp, "has_lock") {
 		t.Fatalf("expected has_lock=true in sync conflicts: %#v", conflictsResp)
 	}
+	if !jsonBool(conflictsResp, "lock_blocks_push") {
+		t.Fatalf("expected lock_blocks_push=true in sync conflicts: %#v", conflictsResp)
+	}
 	if conflictsResp["lock_path"] != lockPath {
 		t.Fatalf("unexpected lock_path in sync conflicts: %#v", conflictsResp)
 	}
@@ -654,6 +663,12 @@ func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
 	statusResp = parseJSONMap(t, out)
 	if jsonBool(statusResp, "has_lock") {
 		t.Fatalf("expected has_lock=false after lock removal: %#v", statusResp)
+	}
+	if jsonBool(statusResp, "lock_blocks_push") {
+		t.Fatalf("expected lock_blocks_push=false after lock removal: %#v", statusResp)
+	}
+	if !jsonBool(statusResp, "can_push") {
+		t.Fatalf("expected can_push=true once lock is removed: %#v", statusResp)
 	}
 }
 
