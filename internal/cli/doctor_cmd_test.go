@@ -500,6 +500,58 @@ func TestCLI_Doctor_RemoteStaleSyncStateWarning(t *testing.T) {
 	}
 }
 
+func TestCLI_Doctor_StrictFailsOnRemoteWarnings(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll remote: %v", err)
+	}
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--type", "fs",
+		"--path", remoteDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add fs: %v", err)
+	}
+
+	out, _, err := runCLI([]string{"doctor", "--strict", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected strict doctor failure on remote warnings")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodeDoctorFailed {
+		t.Fatalf("expected doctor exit code %d, got %d", exitcode.CodeDoctorFailed, ec.Code)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	if ok, _ := report["ok"].(bool); ok {
+		t.Fatalf("expected ok=false for strict remote warnings, got %#v", report)
+	}
+	if wc, _ := report["warning_count"].(float64); wc < 1 {
+		t.Fatalf("expected warning_count>0, got %#v", report)
+	}
+}
+
 func findDoctorCheck(t *testing.T, report map[string]any, name string) map[string]any {
 	t.Helper()
 	checks, _ := report["checks"].([]any)
