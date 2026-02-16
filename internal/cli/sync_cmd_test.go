@@ -149,6 +149,78 @@ func TestCLI_SyncPushConflictWhenRemoteChanged(t *testing.T) {
 	if errResp["exit_code"] != float64(exitcode.CodeSyncConflict) {
 		t.Fatalf("unexpected sync push conflict payload: %#v", errResp)
 	}
+	if errResp["reason"] != "remote_changed" {
+		t.Fatalf("expected reason=remote_changed in sync push conflict payload: %#v", errResp)
+	}
+	if errResp["recommended_action"] != "sync_pull" {
+		t.Fatalf("expected recommended_action=sync_pull in sync push conflict payload: %#v", errResp)
+	}
+	if !jsonHasKey(errResp, "expected_rev") || !jsonHasKey(errResp, "actual_rev") {
+		t.Fatalf("expected expected_rev/actual_rev in sync push conflict payload: %#v", errResp)
+	}
+}
+
+func TestCLI_SyncPushConflictWhenRemoteDisappeared(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	if err := os.Remove(remoteBundle); err != nil {
+		t.Fatalf("remove remote bundle: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "push", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync push conflict after remote disappeared")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncConflict)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "remote_disappeared" {
+		t.Fatalf("expected reason=remote_disappeared in sync push conflict payload: %#v", errResp)
+	}
+	if errResp["recommended_action"] != "sync_reset_baseline_or_remote_recreate" {
+		t.Fatalf("expected remote_disappeared recommended action in sync push conflict payload: %#v", errResp)
+	}
+	if !jsonHasKey(errResp, "expected_rev") {
+		t.Fatalf("expected expected_rev in sync push conflict payload: %#v", errResp)
+	}
+	if jsonHasKey(errResp, "actual_rev") {
+		t.Fatalf("did not expect actual_rev for remote_disappeared payload: %#v", errResp)
+	}
 }
 
 func TestCLI_SyncPullRequiredForExistingRemote(t *testing.T) {

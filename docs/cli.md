@@ -788,6 +788,13 @@ Requirements:
 - remote baseline check must pass
 - push lock must be available (or waited for via `--lock-wait`)
 
+Automation notes (`--json` errors):
+
+- Conflict failures (exit `31`) include structured fields:
+  - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
+  - `expected_rev` / `actual_rev` when available
+  - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate`
+
 Examples:
 
 ```bash

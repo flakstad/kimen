@@ -67,6 +67,10 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 - `sync push` success: `{"ok":true,"action":"sync_push","remote":"...","remote_rev":"...","stale_lock_broken":bool}` (`stale_lock_broken` omitted unless stale lock auto-break occurred)
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
 - `sync push` uses a remote lock file (`<bundle>.lock`); lock contention failures use sync exit `32`
+- sync conflict errors (exit `31`) include structured fields in the standard envelope:
+  - `reason`: `remote_changed|remote_disappeared|no_local_baseline`
+  - `expected_rev` / `actual_rev` when available
+  - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate`
 - error: standard error envelope on `stderr`
 
 `plan --json` and `project plan --json`:

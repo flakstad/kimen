@@ -79,9 +79,13 @@ type syncStatusResult struct {
 }
 
 type syncErrorResult struct {
-	OK       bool   `json:"ok"`
-	Error    string `json:"error"`
-	ExitCode int    `json:"exit_code"`
+	OK                bool   `json:"ok"`
+	Error             string `json:"error"`
+	ExitCode          int    `json:"exit_code"`
+	Reason            string `json:"reason,omitempty"`
+	ExpectedRev       string `json:"expected_rev,omitempty"`
+	ActualRev         string `json:"actual_rev,omitempty"`
+	RecommendedAction string `json:"recommended_action,omitempty"`
 }
 
 type syncConflictResult struct {
@@ -1022,7 +1026,7 @@ func validatePushBaseline(lastSeen, remoteRev string, hasRemote bool) error {
 	if !details.HasConflict {
 		return nil
 	}
-	return fmt.Errorf("%w: %s", errSyncConflict, details.Message)
+	return &syncConflictError{Details: details}
 }
 
 func sealVaultToRemoteAtomic(vaultPath, bundlePath, recipient string) error {
@@ -1047,11 +1051,18 @@ func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 	}
 	code := syncExitCode(err)
 	if jsonOut {
-		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(syncErrorResult{
+		resp := syncErrorResult{
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: code,
-		})
+		}
+		if details, ok := syncConflictDetailsFromError(err); ok {
+			resp.Reason = details.Reason
+			resp.ExpectedRev = details.ExpectedRev
+			resp.ActualRev = details.ActualRev
+			resp.RecommendedAction = recommendedActionForConflictReason(details.Reason)
+		}
+		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(resp)
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
@@ -1063,6 +1074,17 @@ func syncExitCode(err error) int {
 		return exitcode.CodeSyncConflict
 	}
 	return exitcode.CodeSyncFailed
+}
+
+func recommendedActionForConflictReason(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "remote_changed", "no_local_baseline":
+		return "sync_pull"
+	case "remote_disappeared":
+		return "sync_reset_baseline_or_remote_recreate"
+	default:
+		return ""
+	}
 }
 
 func backupExistingVault(vaultPath string) (string, error) {

@@ -21,6 +21,30 @@ type syncConflictDetails struct {
 	ActualRev   string
 }
 
+type syncConflictError struct {
+	Details syncConflictDetails
+}
+
+func (e *syncConflictError) Error() string {
+	msg := strings.TrimSpace(e.Details.Message)
+	if msg == "" {
+		msg = "remote state differs from local sync baseline"
+	}
+	return fmt.Sprintf("sync conflict: %s", msg)
+}
+
+func (e *syncConflictError) Unwrap() error {
+	return errSyncConflict
+}
+
+func syncConflictDetailsFromError(err error) (syncConflictDetails, bool) {
+	var conflictErr *syncConflictError
+	if errors.As(err, &conflictErr) {
+		return conflictErr.Details, true
+	}
+	return syncConflictDetails{}, false
+}
+
 func resolveRemote(c config, name string) (remoteConfig, error) {
 	if strings.TrimSpace(name) != "" {
 		for _, r := range c.Remotes {
