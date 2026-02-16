@@ -132,6 +132,12 @@ git tag -a v2026.2.1 -m "Release v2026.2.1"
 git push origin v2026.2.1
 ```
 
+Or use the helper script:
+
+```bash
+scripts/release-calver.sh v2026.2.1 --push
+```
+
 Pushing a matching tag triggers `.github/workflows/release.yml`, which runs GoReleaser using `.goreleaser.yaml` and publishes release artifacts.
 
 ## Roadmap
@@ -155,4 +161,5 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/threat-model.md`: what Kimen does and does not protect against
 - `docs/stability.md`: early-stage stability and upgrade expectations
 - `docs/release-v0.1-checklist.md`: milestone release checklist
+- `docs/release-notes-template.md`: draft template for GitHub release notes
 - `docs/feedback-template.md`: structured early-adopter feedback template

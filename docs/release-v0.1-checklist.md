@@ -26,12 +26,14 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 
 - [ ] Merge branch into target release branch.
 - [ ] Create annotated CalVer tag (example): `v2026.2.1`.
+- [ ] Optional helper: `scripts/release-calver.sh v2026.2.1 [--push]`.
 - [ ] Push tag and confirm `.github/workflows/release.yml` runs.
 - [ ] Publish release notes with:
   - projection workflow summary
   - map/profile/plan/envfile status
   - automation contract and exit-code coverage
   - known limitations and next milestone scope
+  - use `docs/release-notes-template.md` as a base
 
 ## 4) Feedback loop
 
