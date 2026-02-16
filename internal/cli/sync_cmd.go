@@ -28,10 +28,16 @@ type syncResult struct {
 	LastSeenRev string `json:"last_seen_rev,omitempty"`
 	BackupPath  string `json:"backup_path,omitempty"`
 	HasRemote   bool   `json:"has_remote"`
+	HasLock     bool   `json:"has_lock"`
 	HasLocal    bool   `json:"has_local,omitempty"`
 	InSync      bool   `json:"in_sync,omitempty"`
 	CanPush     bool   `json:"can_push,omitempty"`
 	NeedsPull   bool   `json:"needs_pull,omitempty"`
+	LockPath    string `json:"lock_path,omitempty"`
+	LockAge     string `json:"lock_age,omitempty"`
+	LockPID     string `json:"lock_pid,omitempty"`
+	LockCreated string `json:"lock_created,omitempty"`
+	LockError   string `json:"lock_error,omitempty"`
 }
 
 type syncErrorResult struct {
@@ -50,11 +56,17 @@ type syncConflictResult struct {
 	RemoteRev   string `json:"remote_rev,omitempty"`
 	LastSeenRev string `json:"last_seen_rev,omitempty"`
 	HasRemote   bool   `json:"has_remote"`
+	HasLock     bool   `json:"has_lock"`
 	HasConflict bool   `json:"has_conflict"`
 	Reason      string `json:"reason,omitempty"`
 	ExpectedRev string `json:"expected_rev,omitempty"`
 	ActualRev   string `json:"actual_rev,omitempty"`
 	Message     string `json:"message,omitempty"`
+	LockPath    string `json:"lock_path,omitempty"`
+	LockAge     string `json:"lock_age,omitempty"`
+	LockPID     string `json:"lock_pid,omitempty"`
+	LockCreated string `json:"lock_created,omitempty"`
+	LockError   string `json:"lock_error,omitempty"`
 }
 
 type syncResetBaselineResult struct {
@@ -83,6 +95,15 @@ type syncUnlockResult struct {
 	LockAge   string `json:"lock_age,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Confirmed bool   `json:"confirmed,omitempty"`
+}
+
+type pushLockInfo struct {
+	HasLock     bool
+	LockPath    string
+	LockAge     string
+	LockPID     string
+	LockCreated string
+	LockError   string
 }
 
 func newSyncCommand() *cobra.Command {
@@ -120,6 +141,10 @@ func newSyncStatusCommand() *cobra.Command {
 			}
 
 			remoteRev, hasRemote, bundlePath, err := remoteRevision(remote)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+			lockInfo, err := readRemotePushLockInfo(bundlePath)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -163,10 +188,16 @@ func newSyncStatusCommand() *cobra.Command {
 				RemoteRev:   remoteRev,
 				LastSeenRev: lastSeen,
 				HasRemote:   hasRemote,
+				HasLock:     lockInfo.HasLock,
 				HasLocal:    hasLocal,
 				InSync:      inSync,
 				CanPush:     canPush,
 				NeedsPull:   needsPull,
+				LockPath:    lockInfo.LockPath,
+				LockAge:     lockInfo.LockAge,
+				LockPID:     lockInfo.LockPID,
+				LockCreated: lockInfo.LockCreated,
+				LockError:   lockInfo.LockError,
 			}
 
 			if jsonOut {
@@ -187,6 +218,23 @@ func newSyncStatusCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "in-sync: %t\n", inSync)
 			fmt.Fprintf(cmd.OutOrStdout(), "can-push: %t\n", canPush)
 			fmt.Fprintf(cmd.OutOrStdout(), "needs-pull: %t\n", needsPull)
+			if lockInfo.HasLock {
+				fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
+				if lockInfo.LockAge != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-age: %s\n", lockInfo.LockAge)
+				}
+				if lockInfo.LockPID != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-pid: %s\n", lockInfo.LockPID)
+				}
+				if lockInfo.LockCreated != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-created: %s\n", lockInfo.LockCreated)
+				}
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
+			}
+			if lockInfo.LockError != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
+			}
 			return nil
 		},
 	}
@@ -218,6 +266,10 @@ func newSyncConflictsCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
+			lockInfo, err := readRemotePushLockInfo(bundlePath)
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
 			lastSeen := ""
 			if c.Sync != nil {
 				lastSeen = strings.TrimSpace(c.Sync[remote.Name].LastSeenRev)
@@ -233,11 +285,17 @@ func newSyncConflictsCommand() *cobra.Command {
 				RemoteRev:   remoteRev,
 				LastSeenRev: lastSeen,
 				HasRemote:   hasRemote,
+				HasLock:     lockInfo.HasLock,
 				HasConflict: details.HasConflict,
 				Reason:      details.Reason,
 				ExpectedRev: details.ExpectedRev,
 				ActualRev:   details.ActualRev,
 				Message:     details.Message,
+				LockPath:    lockInfo.LockPath,
+				LockAge:     lockInfo.LockAge,
+				LockPID:     lockInfo.LockPID,
+				LockCreated: lockInfo.LockCreated,
+				LockError:   lockInfo.LockError,
 			}
 
 			if jsonOut {
@@ -260,6 +318,17 @@ func newSyncConflictsCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "actual-rev: %s\n", details.ActualRev)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "next: kimen sync pull --remote %s\n", remote.Name)
+			if lockInfo.HasLock {
+				fmt.Fprintf(cmd.OutOrStdout(), "push-lock: present (%s)\n", lockInfo.LockPath)
+				if lockInfo.LockAge != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "push-lock-age: %s\n", lockInfo.LockAge)
+				}
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "push-lock: (none)")
+			}
+			if lockInfo.LockError != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "push-lock-error: %s\n", lockInfo.LockError)
+			}
 			return nil
 		},
 	}
@@ -404,7 +473,7 @@ func newSyncUnlockCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			lockPath := bundlePath + ".lock"
+			lockPath := remotePushLockPath(bundlePath)
 			st, err := os.Stat(lockPath)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -836,7 +905,7 @@ func copyFileAtomic(srcPath, dstPath string, mode os.FileMode) error {
 }
 
 func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error) {
-	lockPath := bundlePath + ".lock"
+	lockPath := remotePushLockPath(bundlePath)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return nil, err
 	}
@@ -871,4 +940,50 @@ func acquireRemotePushLock(bundlePath string, wait time.Duration) (func(), error
 		}
 		time.Sleep(sleep)
 	}
+}
+
+func remotePushLockPath(bundlePath string) string {
+	return bundlePath + ".lock"
+}
+
+func readRemotePushLockInfo(bundlePath string) (pushLockInfo, error) {
+	lockPath := remotePushLockPath(bundlePath)
+	info := pushLockInfo{LockPath: lockPath}
+	st, err := os.Stat(lockPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return info, nil
+		}
+		return info, err
+	}
+	info.HasLock = true
+	info.LockAge = time.Since(st.ModTime()).Truncate(time.Second).String()
+
+	raw, err := os.ReadFile(lockPath)
+	if err != nil {
+		info.LockError = err.Error()
+		return info, nil
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		switch k {
+		case "pid":
+			info.LockPID = v
+		case "created_at":
+			info.LockCreated = v
+			if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
+				info.LockAge = time.Since(ts).Truncate(time.Second).String()
+			}
+		}
+	}
+	return info, nil
 }

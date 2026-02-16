@@ -504,6 +504,89 @@ func TestCLI_SyncPushLockWaitSucceedsAfterRelease(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncStatusAndConflicts_ReportLockState(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	lockPath := filepath.Join(remoteDir, "vault.age.lock")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	if err := os.MkdirAll(remoteDir, 0o700); err != nil {
+		t.Fatalf("mkdir remote dir: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("pid=4242\ncreated_at=2026-01-01T00:00:00Z\n"), 0o600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	statusResp := parseJSONMap(t, out)
+	if !jsonBool(statusResp, "has_lock") {
+		t.Fatalf("expected has_lock=true in sync status: %#v", statusResp)
+	}
+	if statusResp["lock_path"] != lockPath {
+		t.Fatalf("unexpected lock_path in sync status: %#v", statusResp)
+	}
+	if statusResp["lock_pid"] != "4242" {
+		t.Fatalf("unexpected lock_pid in sync status: %#v", statusResp)
+	}
+	if statusResp["lock_created"] != "2026-01-01T00:00:00Z" {
+		t.Fatalf("unexpected lock_created in sync status: %#v", statusResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
+	}
+	conflictsResp := parseJSONMap(t, out)
+	if !jsonBool(conflictsResp, "has_lock") {
+		t.Fatalf("expected has_lock=true in sync conflicts: %#v", conflictsResp)
+	}
+	if conflictsResp["lock_path"] != lockPath {
+		t.Fatalf("unexpected lock_path in sync conflicts: %#v", conflictsResp)
+	}
+
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("remove lock file: %v", err)
+	}
+	out, errBuf, err = runCLI([]string{"sync", "status", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json after lock remove: %v (stderr=%s)", err, errBuf)
+	}
+	statusResp = parseJSONMap(t, out)
+	if jsonBool(statusResp, "has_lock") {
+		t.Fatalf("expected has_lock=false after lock removal: %#v", statusResp)
+	}
+}
+
 func TestCLI_SyncUnlock_RemovesLockWithSafetyChecks(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
