@@ -13,6 +13,14 @@ import (
 
 var errSyncConflict = errors.New("sync conflict")
 
+type syncConflictDetails struct {
+	HasConflict bool
+	Reason      string
+	Message     string
+	ExpectedRev string
+	ActualRev   string
+}
+
 func resolveRemote(c config, name string) (remoteConfig, error) {
 	if strings.TrimSpace(name) != "" {
 		for _, r := range c.Remotes {
@@ -38,6 +46,37 @@ func findRemoteIndex(remotes []remoteConfig, name string) int {
 		}
 	}
 	return -1
+}
+
+func detectSyncConflict(lastSeen, remoteRev string, hasRemote bool) syncConflictDetails {
+	switch {
+	case !hasRemote && lastSeen == "":
+		return syncConflictDetails{}
+	case !hasRemote && lastSeen != "":
+		return syncConflictDetails{
+			HasConflict: true,
+			Reason:      "remote_disappeared",
+			Message:     fmt.Sprintf("remote bundle disappeared since last sync (expected rev %s)", lastSeen),
+			ExpectedRev: lastSeen,
+		}
+	case hasRemote && lastSeen == "":
+		return syncConflictDetails{
+			HasConflict: true,
+			Reason:      "no_local_baseline",
+			Message:     fmt.Sprintf("remote has data (rev %s) but no local baseline; run `kimen sync pull` first", remoteRev),
+			ActualRev:   remoteRev,
+		}
+	case hasRemote && lastSeen != remoteRev:
+		return syncConflictDetails{
+			HasConflict: true,
+			Reason:      "remote_changed",
+			Message:     fmt.Sprintf("remote changed (expected rev %s, found %s); run `kimen sync pull`, re-apply changes, then push", lastSeen, remoteRev),
+			ExpectedRev: lastSeen,
+			ActualRev:   remoteRev,
+		}
+	default:
+		return syncConflictDetails{}
+	}
 }
 
 func remoteBundlePath(r remoteConfig) (string, error) {

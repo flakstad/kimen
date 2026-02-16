@@ -391,6 +391,277 @@ func TestCLI_SyncErrors_MissingRemoteMetadata_And_MultipleRemotes(t *testing.T) 
 	}
 }
 
+func TestCLI_RemoteGetAndSet_JSON(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	newRemoteDir := filepath.Join(dir, "remote-new")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"remote", "get", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("remote get --json: %v (stderr=%s)", err, errBuf)
+	}
+	getResp := parseJSONMap(t, out)
+	if getResp["action"] != "remote_get" || getResp["name"] != "origin" {
+		t.Fatalf("unexpected remote get response: %#v", getResp)
+	}
+
+	_, _, err = runCLI([]string{"sync", "push", "--remote", "origin"}, nil)
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	cfg := readConfig(t)
+	if cfg.Sync["origin"].LastSeenRev == "" {
+		t.Fatalf("expected sync baseline after push")
+	}
+
+	_, errOut, err := runCLI([]string{"remote", "set", "origin", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected remote set to fail without changed fields")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeRemoteFailed) {
+		t.Fatalf("unexpected remote set error payload: %#v", errResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"remote", "set", "origin", "--path", newRemoteDir, "--json"}, nil)
+	if err != nil {
+		t.Fatalf("remote set --json: %v (stderr=%s)", err, errBuf)
+	}
+	setResp := parseJSONMap(t, out)
+	if setResp["action"] != "remote_set" || setResp["baseline_reset"] != true {
+		t.Fatalf("unexpected remote set response: %#v", setResp)
+	}
+	cfg = readConfig(t)
+	if cfg.Sync != nil {
+		if _, ok := cfg.Sync["origin"]; ok {
+			t.Fatalf("expected baseline reset when remote path changed: %#v", cfg.Sync)
+		}
+	}
+}
+
+func TestCLI_SyncConflictsAndResetBaseline(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	otherVault := filepath.Join(dir, "other.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	remoteBundle := filepath.Join(remoteDir, "vault.age")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("local-v1"))
+	if err != nil {
+		t.Fatalf("secret set local-v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push", "--remote", "origin"}, nil)
+	if err != nil {
+		t.Fatalf("initial sync push: %v", err)
+	}
+
+	restoreOther := withEnv(map[string]string{
+		envVaultPath: otherVault,
+	})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("remote-v2"))
+	if err != nil {
+		restoreOther()
+		t.Fatalf("other secret set: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"bundle", "seal",
+		"--vault", otherVault,
+		"--out", remoteBundle,
+		"--recipient", recipient,
+	}, nil)
+	restoreOther()
+	if err != nil {
+		t.Fatalf("bundle seal remote mutate: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "conflicts", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
+	}
+	conflicts := parseJSONMap(t, out)
+	if !jsonBool(conflicts, "has_conflict") || conflicts["reason"] != "remote_changed" {
+		t.Fatalf("expected remote_changed conflict, got %#v", conflicts)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "reset-baseline", "--remote", "origin", "--to-remote", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected reset-baseline refusal without --yes")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected reset-baseline error payload: %#v", errResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "reset-baseline", "--remote", "origin", "--to-remote", "--yes", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync reset-baseline --json: %v (stderr=%s)", err, errBuf)
+	}
+	resetResp := parseJSONMap(t, out)
+	if resetResp["action"] != "sync_reset_baseline" || resetResp["mode"] != "to_remote" {
+		t.Fatalf("unexpected reset-baseline response: %#v", resetResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "conflicts", "--remote", "origin", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync conflicts after reset: %v (stderr=%s)", err, errBuf)
+	}
+	conflicts = parseJSONMap(t, out)
+	if jsonBool(conflicts, "has_conflict") {
+		t.Fatalf("expected no conflict after reset-baseline: %#v", conflicts)
+	}
+
+	_, _, err = runCLI([]string{"sync", "push", "--remote", "origin"}, nil)
+	if err != nil {
+		t.Fatalf("sync push after reset-baseline: %v", err)
+	}
+}
+
+func TestCLI_SyncRestore_FromBackupAndNoBackup(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	manualBackup := filepath.Join(dir, "vault.manual.bak")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set v1: %v", err)
+	}
+
+	b, err := os.ReadFile(vaultPath)
+	if err != nil {
+		t.Fatalf("read vault for manual backup: %v", err)
+	}
+	if err := os.WriteFile(manualBackup, b, 0o600); err != nil {
+		t.Fatalf("write manual backup: %v", err)
+	}
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v2"))
+	if err != nil {
+		t.Fatalf("secret set v2: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "restore", "--backup", manualBackup, "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync restore --json: %v (stderr=%s)", err, errBuf)
+	}
+	restoreResp := parseJSONMap(t, out)
+	if restoreResp["action"] != "sync_restore" {
+		t.Fatalf("unexpected sync restore response: %#v", restoreResp)
+	}
+	currentBackupPath, _ := restoreResp["current_backup_path"].(string)
+	if currentBackupPath == "" {
+		t.Fatalf("expected current_backup_path when restore runs with backup enabled: %#v", restoreResp)
+	}
+	if _, err := os.Stat(currentBackupPath); err != nil {
+		t.Fatalf("expected current backup to exist: %v", err)
+	}
+
+	out, _, err = runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	if err != nil {
+		t.Fatalf("secret get after restore: %v", err)
+	}
+	if out != "v1" {
+		t.Fatalf("expected restored value v1, got %q", out)
+	}
+
+	restoreCurrentBackupVault := withEnv(map[string]string{
+		envVaultPath: currentBackupPath,
+	})
+	out, _, err = runCLI([]string{"secret", "get", "api_key", "--unsafe-stdout"}, nil)
+	restoreCurrentBackupVault()
+	if err != nil {
+		t.Fatalf("secret get current backup vault: %v", err)
+	}
+	if out != "v2" {
+		t.Fatalf("expected current backup to contain pre-restore value v2, got %q", out)
+	}
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v3"))
+	if err != nil {
+		t.Fatalf("secret set v3: %v", err)
+	}
+	out, errBuf, err = runCLI([]string{"sync", "restore", "--backup", manualBackup, "--no-backup", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync restore --no-backup --json: %v (stderr=%s)", err, errBuf)
+	}
+	restoreResp = parseJSONMap(t, out)
+	if _, ok := restoreResp["current_backup_path"]; ok {
+		t.Fatalf("expected no current_backup_path with --no-backup: %#v", restoreResp)
+	}
+}
+
 func generateRecipient(t *testing.T, identityPath string) string {
 	t.Helper()
 	out, errBuf, err := runCLI([]string{"bundle", "keygen", "--out", identityPath, "--json"}, nil)

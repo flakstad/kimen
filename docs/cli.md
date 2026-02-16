@@ -678,6 +678,35 @@ kimen remote add team \
 kimen remote add team --type fs --path /srv/kimen/team-vault.age --recipient age1... --identity ~/.config/kimen/team.agekey
 ```
 
+### `kimen remote get <name>`
+
+What it does:
+
+- Shows one configured remote in human or JSON form.
+
+Examples:
+
+```bash
+kimen remote get team
+kimen remote get team --json
+```
+
+### `kimen remote set <name>`
+
+What it does:
+
+- Updates an existing remote without removing/re-adding it.
+- Accepts partial updates for `--type`, `--path`, `--recipient`, `--identity`.
+- If `--type` or `--path` changes, sync baseline for that remote is cleared to avoid stale revision assumptions.
+
+Examples:
+
+```bash
+kimen remote set team --path /srv/kimen/new-team-vault
+kimen remote set team --recipient age1new...
+kimen remote set team --path /srv/kimen/new-team-vault --json
+```
+
 ### `kimen remote list`
 
 What it does:
@@ -707,7 +736,7 @@ kimen remote rm team --json
 
 Automation notes:
 
-- `remote add/list/rm --json` emit JSON success payloads.
+- `remote add/get/set/list/rm --json` emit JSON success payloads.
 - remote failures use exit code `30`.
 
 ## Sync: `kimen sync …`
@@ -756,6 +785,20 @@ kimen sync push --remote team
 kimen sync push --remote team --json
 ```
 
+### `kimen sync conflicts`
+
+What it does:
+
+- Explains whether push is blocked by a baseline conflict and why.
+- Returns conflict details (`reason`, expected/actual rev) without mutating state.
+
+Examples:
+
+```bash
+kimen sync conflicts --remote team
+kimen sync conflicts --remote team --json
+```
+
 ### `kimen sync pull`
 
 What it does:
@@ -775,6 +818,41 @@ Examples:
 kimen sync pull --remote team
 kimen sync pull --remote team --no-backup
 kimen sync pull --remote team --json
+```
+
+### `kimen sync reset-baseline` (dangerous)
+
+What it does:
+
+- Manually overrides baseline state for a remote when you intentionally want to bypass normal conflict flow.
+- Requires explicit `--yes`.
+
+Modes (choose exactly one):
+
+- `--to-remote`: set baseline to current remote revision
+- `--clear`: remove baseline
+- `--rev <sha>`: set baseline to an explicit revision
+
+Examples:
+
+```bash
+kimen sync reset-baseline --remote team --to-remote --yes
+kimen sync reset-baseline --remote team --clear --yes
+kimen sync reset-baseline --remote team --rev abc123... --yes --json
+```
+
+### `kimen sync restore`
+
+What it does:
+
+- Restores local vault from a backup file.
+- Backs up the current local vault first (default), unless `--no-backup` is set.
+
+Examples:
+
+```bash
+kimen sync restore --backup ~/.config/kimen/vault.db.bak.123456789
+kimen sync restore --backup ~/.config/kimen/vault.db.bak.123456789 --no-backup --json
 ```
 
 ### Sync conflicts and what to do

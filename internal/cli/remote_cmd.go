@@ -16,12 +16,13 @@ import (
 var remoteNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 type remoteResult struct {
-	OK      bool           `json:"ok"`
-	Action  string         `json:"action"`
-	Name    string         `json:"name,omitempty"`
-	Remote  *remoteConfig  `json:"remote,omitempty"`
-	Remotes []remoteConfig `json:"remotes,omitempty"`
-	Count   int            `json:"count,omitempty"`
+	OK            bool           `json:"ok"`
+	Action        string         `json:"action"`
+	Name          string         `json:"name,omitempty"`
+	Remote        *remoteConfig  `json:"remote,omitempty"`
+	Remotes       []remoteConfig `json:"remotes,omitempty"`
+	Count         int            `json:"count,omitempty"`
+	BaselineReset bool           `json:"baseline_reset,omitempty"`
 }
 
 type remoteErrorResult struct {
@@ -36,8 +37,156 @@ func newRemoteCommand() *cobra.Command {
 		Short: "Manage sync remotes",
 	}
 	cmd.AddCommand(newRemoteAddCommand())
+	cmd.AddCommand(newRemoteGetCommand())
+	cmd.AddCommand(newRemoteSetCommand())
 	cmd.AddCommand(newRemoteListCommand())
 	cmd.AddCommand(newRemoteRemoveCommand())
+	return cmd
+}
+
+func newRemoteGetCommand() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "get <name>",
+		Short: "Show a configured remote",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return remoteCommandError(cmd, jsonOut, errors.New("empty remote name"))
+			}
+			c, _, err := loadConfig()
+			if err != nil {
+				return remoteCommandError(cmd, jsonOut, err)
+			}
+			i := findRemoteIndex(c.Remotes, name)
+			if i < 0 {
+				return remoteCommandError(cmd, jsonOut, fmt.Errorf("remote %q not found", name))
+			}
+			r := c.Remotes[i]
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(remoteResult{
+					OK:     true,
+					Action: "remote_get",
+					Name:   name,
+					Remote: &r,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "name: %s\n", r.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "type: %s\n", r.Type)
+			fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", r.Path)
+			if r.Recipient == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "recipient: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "recipient: %s\n", r.Recipient)
+			}
+			if r.Identity == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "identity: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "identity: %s\n", r.Identity)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
+}
+
+func newRemoteSetCommand() *cobra.Command {
+	var remoteType string
+	var path string
+	var recipient string
+	var identity string
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "set <name>",
+		Short: "Update an existing remote configuration",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return remoteCommandError(cmd, jsonOut, errors.New("empty remote name"))
+			}
+			typeChanged := cmd.Flags().Changed("type")
+			pathChanged := cmd.Flags().Changed("path")
+			recipientChanged := cmd.Flags().Changed("recipient")
+			identityChanged := cmd.Flags().Changed("identity")
+			if !typeChanged && !pathChanged && !recipientChanged && !identityChanged {
+				return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity"))
+			}
+
+			c, _, err := loadConfig()
+			if err != nil {
+				return remoteCommandError(cmd, jsonOut, err)
+			}
+			i := findRemoteIndex(c.Remotes, name)
+			if i < 0 {
+				return remoteCommandError(cmd, jsonOut, fmt.Errorf("remote %q not found", name))
+			}
+			r := c.Remotes[i]
+			if typeChanged {
+				newType := strings.ToLower(strings.TrimSpace(remoteType))
+				if newType == "" {
+					newType = "fs"
+				}
+				if newType != "fs" {
+					return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs)", newType))
+				}
+				r.Type = newType
+			}
+			if pathChanged {
+				newPath := strings.TrimSpace(path)
+				if newPath == "" {
+					return remoteCommandError(cmd, jsonOut, errors.New("--path cannot be empty"))
+				}
+				r.Path = newPath
+			}
+			if recipientChanged {
+				r.Recipient = strings.TrimSpace(recipient)
+			}
+			if identityChanged {
+				r.Identity = strings.TrimSpace(identity)
+			}
+
+			baselineReset := false
+			if c.Sync != nil && (typeChanged || pathChanged) {
+				if _, ok := c.Sync[name]; ok {
+					delete(c.Sync, name)
+					baselineReset = true
+				}
+				if len(c.Sync) == 0 {
+					c.Sync = nil
+				}
+			}
+
+			c.Remotes[i] = r
+			if _, err := saveConfig(c); err != nil {
+				return remoteCommandError(cmd, jsonOut, err)
+			}
+
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(remoteResult{
+					OK:            true,
+					Action:        "remote_set",
+					Name:          name,
+					Remote:        &r,
+					BaselineReset: baselineReset,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "ok (remote %s updated)\n", name)
+			if baselineReset {
+				fmt.Fprintln(cmd.OutOrStdout(), "sync baseline reset (remote endpoint changed)")
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&remoteType, "type", "", "remote type (currently: fs)")
+	cmd.Flags().StringVar(&path, "path", "", "remote path (directory or .age file)")
+	cmd.Flags().StringVar(&recipient, "recipient", "", "age recipient used for sync push (set empty string to clear)")
+	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull (set empty string to clear)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
