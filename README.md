@@ -90,6 +90,8 @@ Run the end-to-end sync/conflict/recovery harness:
 make sync-e2e
 ```
 
+`make release-check` now includes this sync E2E harness.
+
 Set a vault location (optional) and initialize:
 
 ```bash

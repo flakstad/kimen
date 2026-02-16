@@ -74,7 +74,7 @@ install: prep-cache test build
 	go install -ldflags "$(LDFLAGS)" ./cmd/kimen
 	@BIN_DIR="$$(go env GOBIN)"; if [ -z "$$BIN_DIR" ]; then BIN_DIR="$$(go env GOPATH)/bin"; fi; echo "Installed: $$BIN_DIR/$(BINARY_NAME)"
 
-release-check: vet test build
+release-check: vet test build sync-e2e
 
 release-snapshot: prep-cache
 	goreleaser release --snapshot --clean
