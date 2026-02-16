@@ -1,9 +1,10 @@
 # CI Workflow Templates
 
-This repo includes two starter workflow templates in `.github/workflows/`:
+This repo includes three starter workflow templates in `.github/workflows/`:
 
 - `kimen-pr-safety-template.yml`
 - `kimen-deploy-template.yml`
+- `kimen-sync-gate-template.yml`
 
 These are intentionally `workflow_dispatch` templates so they do not auto-run until you adapt them.
 
@@ -22,6 +23,13 @@ Use `kimen-deploy-template.yml` when you want:
 - deploy steps run under `kimen project run`
 - uploaded artifacts (`kimen-*.json`) for post-run inspection
 
+Use `kimen-sync-gate-template.yml` when you want:
+
+- strict Team Sync readiness checks (`doctor --strict`)
+- fail-fast remote gating (`sync status --strict`, `sync conflicts --strict`)
+- no-mutation pull/push preflight (`sync pull --dry-run`, `sync push --dry-run`)
+- machine-readable sync artifacts for investigation
+
 ## Required edits before enabling
 
 1. Profile names:
@@ -32,14 +40,24 @@ Use `kimen-deploy-template.yml` when you want:
    - Ensure `vault.age` path matches your repo layout.
 4. Secrets:
    - Add `KIMEN_AGE_IDENTITY` and `KIMEN_PASSPHRASE` in GitHub Actions secrets.
+   - Add `KIMEN_AGE_RECIPIENT` for templates that validate push paths (`kimen-sync-gate-template.yml`).
+5. Remote target inputs (sync template):
+   - Set `remote_type` (`git` or `fs`) and `remote_path`.
+   - For `git`, also set `remote_branch` and `remote_bundle_path`.
 
 ## Built-in checklist gates
 
-Both templates now include a fail-fast checklist step before the main work:
+All templates include a fail-fast checklist step before the main work:
 
 - required profile map exists
 - required bundle file exists (`vault.age` in deploy template)
 - required GitHub secrets are present (deploy template)
+
+The sync template includes additional gates:
+
+- remote input validation (`remote_type`, `remote_path`)
+- strict doctor + sync checks in one consolidated gate step
+- dry-run pull/push checks without remote mutation
 
 Keep these checks strict in CI. They prevent partial runs with ambiguous failures.
 

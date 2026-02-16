@@ -12,6 +12,7 @@ If you want ready-to-copy workflow files, see:
 
 - `.github/workflows/kimen-pr-safety-template.yml`
 - `.github/workflows/kimen-deploy-template.yml`
+- `.github/workflows/kimen-sync-gate-template.yml`
 - `docs/ci-workflow-templates.md`
 
 ## Bootstrap once: CI identity and bundle
@@ -124,6 +125,34 @@ jobs:
             --profile linje-prod \
             -- ./scripts/deploy.sh
 ```
+
+## Template C: Team Sync strict gate (status/conflicts + dry-runs)
+
+Use this when you want CI to fail fast if Team Sync is not ready.
+
+Template file:
+
+- `.github/workflows/kimen-sync-gate-template.yml`
+
+Required GitHub secrets:
+
+- `KIMEN_AGE_IDENTITY`
+- `KIMEN_AGE_RECIPIENT`
+- `KIMEN_PASSPHRASE`
+
+Template gates include:
+
+- `kimen doctor --strict --json`
+- `kimen sync status --strict --json`
+- `kimen sync conflicts --strict --json`
+- `kimen sync pull --dry-run --json`
+- `kimen sync push --dry-run --json`
+
+Typical usage:
+
+1. Set remote inputs (`remote_type`, `remote_path`, and git-specific branch/path when relevant).
+2. Run the workflow via `workflow_dispatch`.
+3. Inspect uploaded `kimen-*.json` artifacts for root-cause details.
 
 ## Minimal bundle-open step (reference)
 
