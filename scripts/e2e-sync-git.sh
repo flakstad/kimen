@@ -79,6 +79,8 @@ RECIPIENT="$("$BIN" bundle keygen --out "$IDENTITY_PATH" --print-recipient)"
   --identity "$IDENTITY_PATH" >/dev/null
 STATUS_JSON="$("$BIN" sync status --remote team --json)"
 assert_contains "$STATUS_JSON" '"can_push":true'
+PUSH_DRY_JSON="$("$BIN" sync push --remote team --dry-run --json)"
+assert_contains "$PUSH_DRY_JSON" '"action":"sync_push_dry_run"'
 "$BIN" sync push --remote team >/dev/null
 
 echo "[e2e-sync-git] Actor B: pull + mutate + push"
@@ -102,6 +104,7 @@ printf 'remote-v2' | "$BIN" secret set api_key --stdin >/dev/null
 echo "[e2e-sync-git] Actor A: detect conflict + recover"
 as_actor_a
 require_exit_code 31 "$BIN" sync push --remote team
+require_exit_code 31 "$BIN" sync push --remote team --dry-run
 CONFLICTS_JSON="$("$BIN" sync conflicts --remote team --json)"
 assert_contains "$CONFLICTS_JSON" '"has_conflict":true'
 assert_contains "$CONFLICTS_JSON" '"reason":"remote_changed"'
@@ -127,6 +130,7 @@ fi
 
 echo "[e2e-sync-git] Git-specific behavior checks"
 require_exit_code 32 "$BIN" sync push --remote team --lock-wait 1s
+require_exit_code 32 "$BIN" sync push --remote team --dry-run --lock-wait 1s
 git --git-dir "$GIT_REMOTE" update-ref -d refs/heads/main
 require_exit_code 31 "$BIN" sync push --remote team
 "$BIN" sync reset-baseline --remote team --clear --yes >/dev/null

@@ -53,12 +53,15 @@ RECIPIENT="$("$BIN" bundle keygen --out "$IDENTITY_PATH" --print-recipient)"
 "$BIN" remote add team --path "$REMOTE_DIR" --recipient "$RECIPIENT" --identity "$IDENTITY_PATH" >/dev/null
 STATUS_JSON="$("$BIN" sync status --remote team --json)"
 assert_contains "$STATUS_JSON" '"can_push":true'
+PUSH_DRY_JSON="$("$BIN" sync push --remote team --dry-run --json)"
+assert_contains "$PUSH_DRY_JSON" '"action":"sync_push_dry_run"'
 "$BIN" sync push --remote team >/dev/null
 
 echo "[e2e-sync] Push lock behavior"
 mkdir -p "$REMOTE_DIR"
 printf 'held\n' > "$REMOTE_DIR/vault.age.lock"
 require_exit_code 32 "$BIN" sync push --remote team
+require_exit_code 32 "$BIN" sync push --remote team --dry-run
 require_exit_code 32 "$BIN" sync unlock --remote team
 "$BIN" sync unlock --remote team --yes >/dev/null
 "$BIN" sync push --remote team >/dev/null
@@ -81,6 +84,7 @@ printf 'remote-v2' | "$BIN" secret set api_key --stdin >/dev/null
 echo "[e2e-sync] Actor A: detect conflict + recover"
 export KIMEN_VAULT="$VAULT_A"
 require_exit_code 31 "$BIN" sync push --remote team
+require_exit_code 31 "$BIN" sync push --remote team --dry-run
 CONFLICTS_JSON="$("$BIN" sync conflicts --remote team --json)"
 assert_contains "$CONFLICTS_JSON" '"has_conflict":true'
 assert_contains "$CONFLICTS_JSON" '"reason":"remote_changed"'
