@@ -43,6 +43,9 @@ func TestCLI_MapLint_OK(t *testing.T) {
 	if report["exit_code"] != float64(0) {
 		t.Fatalf("expected exit_code=0, got %#v", report)
 	}
+	if report["mode"] != mapLintModeAll {
+		t.Fatalf("expected mode=%s, got %#v", mapLintModeAll, report)
+	}
 	if report["warning_count"] != float64(0) {
 		t.Fatalf("expected warning_count=0, got %#v", report)
 	}
@@ -368,6 +371,9 @@ func TestCLI_MapLint_ModeSpecificWarnings(t *testing.T) {
 	if runReport["warning_count"] != float64(0) {
 		t.Fatalf("expected warning_count=0 for run mode, got %#v", runReport)
 	}
+	if runReport["mode"] != mapLintModeRun {
+		t.Fatalf("expected mode=%s, got %#v", mapLintModeRun, runReport)
+	}
 
 	out, errBuf, err = runCLI([]string{"map", "lint", "--map", mapPath, "--mode", "envfile", "--json"}, nil)
 	if err != nil {
@@ -379,6 +385,9 @@ func TestCLI_MapLint_ModeSpecificWarnings(t *testing.T) {
 	}
 	if wc, _ := envfileReport["warning_count"].(float64); wc < 2 {
 		t.Fatalf("expected envfile mode warnings, got %#v", envfileReport)
+	}
+	if envfileReport["mode"] != mapLintModeEnvfile {
+		t.Fatalf("expected mode=%s, got %#v", mapLintModeEnvfile, envfileReport)
 	}
 }
 

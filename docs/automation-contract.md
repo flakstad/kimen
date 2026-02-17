@@ -128,7 +128,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `map lint --json`:
 
 - emits lint report on `stdout` in both success and failure cases:
-  - `{"ok":true|false,"action":"map_lint","exit_code":0|20,"error_count":N,"warning_count":N,"issues":[...]}`
+  - `{"ok":true|false,"action":"map_lint","exit_code":0|20,"mode":"all|run|render|envfile","error_count":N,"warning_count":N,"issues":[...]}`
 - no separate error envelope on `stderr`
 
 `doctor --json`:

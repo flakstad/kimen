@@ -40,6 +40,7 @@ type mapLintReport struct {
 	OK           bool           `json:"ok"`
 	Action       string         `json:"action"`
 	ExitCode     int            `json:"exit_code"`
+	Mode         string         `json:"mode,omitempty"`
 	Path         string         `json:"path,omitempty"`
 	EnvCount     int            `json:"env_count"`
 	FileCount    int            `json:"file_count"`
@@ -118,6 +119,7 @@ func newMapLintCommand() *cobra.Command {
 			report := mapLintReport{
 				OK:           ok,
 				Action:       "map_lint",
+				Mode:         lintMode,
 				Path:         resolvedPath,
 				EnvCount:     len(m.Request.Envs),
 				FileCount:    len(m.Request.Files),

@@ -237,7 +237,7 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 		t.Fatalf("map lint --json: %v (stderr=%s)", err, errBuf)
 	}
 	mapResp := parseJSONMap(t, out)
-	requireJSONKeys(t, mapResp, "ok", "action", "exit_code", "error_count", "warning_count")
+	requireJSONKeys(t, mapResp, "ok", "action", "exit_code", "mode", "error_count", "warning_count")
 	if mapResp["action"] != "map_lint" {
 		t.Fatalf("unexpected map lint payload: %#v", mapResp)
 	}
