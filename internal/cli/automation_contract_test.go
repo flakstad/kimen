@@ -197,6 +197,62 @@ func TestCLI_Contract_SyncInitJSONShape(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_CoreJSONActions(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	mapPath := filepath.Join(dir, "plan.kmap")
+
+	if err := os.WriteFile(mapPath, []byte("env API_KEY=api_key\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(map): %v", err)
+	}
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	out, errBuf, err := runCLI([]string{"version", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("version --json: %v (stderr=%s)", err, errBuf)
+	}
+	versionResp := parseJSONMap(t, out)
+	requireJSONKeys(t, versionResp, "ok", "action", "version", "raw_version", "commit", "date")
+	if versionResp["action"] != "version" || !jsonBool(versionResp, "ok") {
+		t.Fatalf("unexpected version payload: %#v", versionResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"doctor", "--allow-missing-vault", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
+	}
+	doctorResp := parseJSONMap(t, out)
+	requireJSONKeys(t, doctorResp, "ok", "action", "strict", "error_count", "warning_count", "checks")
+	if doctorResp["action"] != "doctor" {
+		t.Fatalf("unexpected doctor payload: %#v", doctorResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"map", "lint", "--map", mapPath, "--json"}, nil)
+	if err != nil {
+		t.Fatalf("map lint --json: %v (stderr=%s)", err, errBuf)
+	}
+	mapResp := parseJSONMap(t, out)
+	requireJSONKeys(t, mapResp, "ok", "action", "error_count", "warning_count")
+	if mapResp["action"] != "map_lint" {
+		t.Fatalf("unexpected map lint payload: %#v", mapResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"plan", "--map", mapPath, "--json"}, nil)
+	if err != nil {
+		t.Fatalf("plan --json: %v (stderr=%s)", err, errBuf)
+	}
+	planResp := parseJSONMap(t, out)
+	requireJSONKeys(t, planResp, "ok", "action", "mode", "env", "files", "env_paths", "cleanup")
+	if planResp["action"] != "plan" || !jsonBool(planResp, "ok") {
+		t.Fatalf("unexpected plan payload: %#v", planResp)
+	}
+}
+
 func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
