@@ -164,6 +164,9 @@ func TestCLI_InitCISyncGate_RefusesOverwriteWithoutForce(t *testing.T) {
 	if errResp["exit_code"] != float64(exitcode.CodeInitFailed) {
 		t.Fatalf("unexpected init error payload: %#v", errResp)
 	}
+	if errResp["reason"] != "output_exists" {
+		t.Fatalf("expected reason=output_exists, got %#v", errResp)
+	}
 }
 
 func TestCLI_InitCISyncGate_ForceOverwrite(t *testing.T) {
@@ -212,6 +215,9 @@ func TestCLI_InitCISyncGate_InvalidRemoteType(t *testing.T) {
 	errResp := parseJSONMap(t, errOut)
 	if errResp["exit_code"] != float64(exitcode.CodeInitFailed) {
 		t.Fatalf("unexpected init error payload: %#v", errResp)
+	}
+	if errResp["reason"] != "invalid_remote_type" {
+		t.Fatalf("expected reason=invalid_remote_type, got %#v", errResp)
 	}
 }
 

@@ -282,6 +282,9 @@ func TestCLI_SecretJSONOutput(t *testing.T) {
 	if errResp["exit_code"] != float64(exitcode.CodeSecretNotFound) {
 		t.Fatalf("unexpected error response: %#v", errResp)
 	}
+	if errResp["reason"] != "secret_not_found" {
+		t.Fatalf("expected reason=secret_not_found, got %#v", errResp)
+	}
 }
 
 func assertExitCode(t *testing.T, err error, code int) {
@@ -510,6 +513,9 @@ func TestCLI_VaultJSONAndTypedErrors(t *testing.T) {
 	if missingResp["exit_code"] != float64(exitcode.CodeVaultNotFound) {
 		t.Fatalf("unexpected vault info error response: %#v", missingResp)
 	}
+	if missingResp["reason"] != "vault_not_found" {
+		t.Fatalf("expected reason=vault_not_found, got %#v", missingResp)
+	}
 
 	out, errBuf, err := runCLI([]string{"vault", "init", "--json"}, nil)
 	if err != nil {
@@ -630,6 +636,9 @@ func TestCLI_BundleJSONAndTypedErrors(t *testing.T) {
 	if errResp["exit_code"] != float64(exitcode.CodeBundleFailed) {
 		t.Fatalf("unexpected bundle open error response: %#v", errResp)
 	}
+	if errResp["reason"] != "input_missing" {
+		t.Fatalf("expected reason=input_missing, got %#v", errResp)
+	}
 }
 
 func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
@@ -703,6 +712,27 @@ func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	}
 	if errResp["exit_code"] != float64(exitcode.CodeConfigFailed) {
 		t.Fatalf("unexpected config error response: %#v", errResp)
+	}
+	if errResp["reason"] != "unknown_unlock_method" {
+		t.Fatalf("expected reason=unknown_unlock_method, got %#v", errResp)
+	}
+}
+
+func TestCLI_RemoteJSONAndTypedErrors(t *testing.T) {
+	_, errOut, err := runCLI([]string{"remote", "add", "bad/name", "--path", "/tmp/remote", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add invalid-name failure")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	var errResp map[string]any
+	if err := json.Unmarshal([]byte(errOut), &errResp); err != nil {
+		t.Fatalf("remote add error json parse: %v (stderr=%q)", err, errOut)
+	}
+	if errResp["exit_code"] != float64(exitcode.CodeRemoteFailed) {
+		t.Fatalf("unexpected remote error response: %#v", errResp)
+	}
+	if errResp["reason"] != "invalid_remote_name" {
+		t.Fatalf("expected reason=invalid_remote_name, got %#v", errResp)
 	}
 }
 

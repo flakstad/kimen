@@ -313,6 +313,92 @@ func TestCLI_Contract_ProjectionAndPlanErrorReasons(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_CoreCommandErrorReasons(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"secret", "rm", "missing", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected secret rm missing failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSecretNotFound)
+	secretErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, secretErr, "ok", "error", "exit_code", "reason")
+	if secretErr["reason"] != "secret_not_found" {
+		t.Fatalf("unexpected secret reason: %#v", secretErr)
+	}
+
+	restoreVault := withEnv(map[string]string{envVaultPath: filepath.Join(dir, "missing.db")})
+	_, errOut, err = runCLI([]string{"vault", "info", "--json"}, nil)
+	restoreVault()
+	if err == nil {
+		t.Fatalf("expected vault info missing-vault failure")
+	}
+	assertExitCode(t, err, exitcode.CodeVaultNotFound)
+	vaultErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, vaultErr, "ok", "error", "exit_code", "reason")
+	if vaultErr["reason"] != "vault_not_found" {
+		t.Fatalf("unexpected vault reason: %#v", vaultErr)
+	}
+
+	_, errOut, err = runCLI([]string{"bundle", "open", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected bundle open missing input failure")
+	}
+	assertExitCode(t, err, exitcode.CodeBundleFailed)
+	bundleErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, bundleErr, "ok", "error", "exit_code", "reason")
+	if bundleErr["reason"] != "missing_in" {
+		t.Fatalf("unexpected bundle reason: %#v", bundleErr)
+	}
+
+	_, errOut, err = runCLI([]string{"config", "unlock", "set", "bogus", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected config unlock bogus failure")
+	}
+	assertExitCode(t, err, exitcode.CodeConfigFailed)
+	configErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, configErr, "ok", "error", "exit_code", "reason")
+	if configErr["reason"] != "unknown_unlock_method" {
+		t.Fatalf("unexpected config reason: %#v", configErr)
+	}
+
+	_, errOut, err = runCLI([]string{"remote", "add", "bad/name", "--path", filepath.Join(dir, "remote"), "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add invalid-name failure")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	remoteErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, remoteErr, "ok", "error", "exit_code", "reason")
+	if remoteErr["reason"] != "invalid_remote_name" {
+		t.Fatalf("unexpected remote reason: %#v", remoteErr)
+	}
+
+	_, errOut, err = runCLI([]string{"init", "ci-sync-gate", "--remote-type", "http", "--out", filepath.Join(dir, "wf.yml"), "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected init invalid remote-type failure")
+	}
+	assertExitCode(t, err, exitcode.CodeInitFailed)
+	initErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, initErr, "ok", "error", "exit_code", "reason")
+	if initErr["reason"] != "invalid_remote_type" {
+		t.Fatalf("unexpected init reason: %#v", initErr)
+	}
+}
+
 func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +27,7 @@ type vaultErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newVaultCommand() *cobra.Command {
@@ -139,6 +141,7 @@ func vaultCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: code,
+			Reason:   vaultErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
@@ -154,5 +157,32 @@ func vaultExitCodeForError(err error) int {
 		return exitcode.CodeWrongPassphrase
 	default:
 		return exitcode.CodeVaultFailed
+	}
+}
+
+func vaultErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, vault.ErrVaultNotFound):
+		return "vault_not_found"
+	case errors.Is(err, vault.ErrWrongPassphrase):
+		return "wrong_passphrase"
+	case errors.Is(err, vault.ErrInvalidVaultFile):
+		return "invalid_vault_file"
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "vault already exists"):
+		return "vault_exists"
+	case strings.Contains(msg, "empty --passphrase-cmd"):
+		return "empty_passphrase_command"
+	case strings.Contains(msg, "passphrase command failed"):
+		return "passphrase_command_failed"
+	case strings.Contains(msg, "no passphrase provided"):
+		return "missing_passphrase"
+	default:
+		return "vault_failed"
 	}
 }

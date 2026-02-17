@@ -24,6 +24,7 @@ type configErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newConfigCommand() *cobra.Command {
@@ -236,9 +237,29 @@ func configCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeConfigFailed,
+			Reason:   configErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeConfigFailed, err)
+}
+
+func configErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "unknown unlock method"):
+		return "unknown_unlock_method"
+	case strings.Contains(msg, "exec method requires a command"):
+		return "missing_unlock_exec_command"
+	case strings.Contains(msg, "invalid config json"):
+		return "invalid_config_json"
+	case strings.Contains(msg, "no user config dir"):
+		return "config_path_unavailable"
+	default:
+		return "config_failed"
+	}
 }

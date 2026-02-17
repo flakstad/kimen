@@ -44,22 +44,53 @@ General rule:
 
 - success: `{"ok":true,"action":"set|list|get|rm|mv","exit_code":0,...}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `secret_not_found`
+    - `secret_exists`
+    - `vault_not_found`
+    - `wrong_passphrase`
+    - `empty_secret_name`
+    - `same_secret_name`
+    - `unsafe_stdout_required`
+    - fallback: `secret_failed`
 
 `vault --json`:
 
 - success: `{"ok":true,"action":"vault_init|vault_info","exit_code":0,...}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `vault_not_found`
+    - `wrong_passphrase`
+    - `invalid_vault_file`
+    - `vault_exists`
+    - fallback: `vault_failed`
 
 `bundle --json`:
 
 - success: `{"ok":true,"action":"bundle_keygen|bundle_recipient|bundle_seal|bundle_open","exit_code":0,...}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `missing_out`
+    - `missing_in`
+    - `missing_recipient`
+    - `missing_identity_input`
+    - `invalid_recipient`
+    - `input_missing`
+    - `identity_exists`
+    - `output_vault_exists`
+    - fallback: `bundle_failed`
 
 `config`:
 
 - `config show` always emits config JSON on success
 - `config path --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...,"exit_code":0,...}`
 - errors use standard error envelope on `stderr`
+  - `reason` values include:
+    - `unknown_unlock_method`
+    - `missing_unlock_exec_command`
+    - `invalid_config_json`
+    - `config_path_unavailable`
+    - fallback: `config_failed`
 
 `remote --json`:
 
@@ -69,6 +100,16 @@ General rule:
   - `type=git`: `path` is repo URL/path, with `branch` and `bundle_path`
 - `remote set` may include `baseline_reset=true` when endpoint fields changed (`--type`/`--path`/`--branch`/`--bundle-path`)
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `empty_remote_name`
+    - `invalid_remote_name`
+    - `remote_not_found`
+    - `remote_exists`
+    - `unsupported_remote_type`
+    - `missing_path`
+    - `missing_identity_for_recipient_derivation`
+    - `recipient_derivation_failed`
+    - fallback: `remote_failed`
 
 `sync --json`:
 
@@ -200,6 +241,12 @@ General rule:
 
 - `init ci-sync-gate` success: `{"ok":true,"action":"init_ci_sync_gate","exit_code":0,"out":"..."}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `missing_out`
+    - `invalid_remote_type`
+    - `output_is_directory`
+    - `output_exists`
+    - fallback: `init_failed`
 
 `version --json`:
 

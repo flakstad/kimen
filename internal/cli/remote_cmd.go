@@ -31,6 +31,7 @@ type remoteErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newRemoteCommand() *cobra.Command {
@@ -456,11 +457,51 @@ func remoteCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeRemoteFailed,
+			Reason:   remoteErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeRemoteFailed, err)
+}
+
+func remoteErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "empty remote name"):
+		return "empty_remote_name"
+	case strings.Contains(msg, "invalid remote name"):
+		return "invalid_remote_name"
+	case strings.Contains(msg, "remote ") && strings.Contains(msg, " not found"):
+		return "remote_not_found"
+	case strings.Contains(msg, "remote ") && strings.Contains(msg, " already exists"):
+		return "remote_exists"
+	case strings.Contains(msg, "unsupported remote type"):
+		return "unsupported_remote_type"
+	case strings.Contains(msg, "set at least one of"):
+		return "missing_remote_set_fields"
+	case strings.Contains(msg, "--derive-recipient cannot be combined with --no-derive-recipient"):
+		return "conflicting_derive_flags"
+	case strings.Contains(msg, "--derive-recipient cannot be combined with --recipient"):
+		return "conflicting_derive_recipient_inputs"
+	case strings.Contains(msg, "--derive-recipient requires --identity"):
+		return "missing_identity_for_recipient_derivation"
+	case strings.Contains(msg, "derive recipient from identity"):
+		return "recipient_derivation_failed"
+	case strings.Contains(msg, "--branch/--bundle-path are only valid for --type git"):
+		return "git_fields_require_git_type"
+	case strings.Contains(msg, "--path is required"):
+		return "missing_path"
+	case strings.Contains(msg, "--path cannot be empty"):
+		return "empty_path"
+	case strings.Contains(msg, "invalid config json"):
+		return "invalid_config_json"
+	default:
+		return "remote_failed"
+	}
 }
 
 func normalizeRemoteType(raw string) string {

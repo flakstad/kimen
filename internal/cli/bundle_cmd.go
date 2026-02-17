@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -30,6 +31,7 @@ type bundleErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newBundleCommand() *cobra.Command {
@@ -238,9 +240,44 @@ func bundleCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeBundleFailed,
+			Reason:   bundleErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeBundleFailed, err)
+}
+
+func bundleErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return "input_missing"
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "--out is required"):
+		return "missing_out"
+	case strings.Contains(msg, "--in is required"):
+		return "missing_in"
+	case strings.Contains(msg, "at least one --recipient is required"):
+		return "missing_recipient"
+	case strings.Contains(msg, "provide --identity or --identity-stdin"):
+		return "missing_identity_input"
+	case strings.Contains(msg, "refusing to overwrite existing identity"):
+		return "identity_exists"
+	case strings.Contains(msg, "refusing to overwrite existing vault"):
+		return "output_vault_exists"
+	case strings.Contains(msg, "invalid recipient"):
+		return "invalid_recipient"
+	case strings.Contains(msg, "missing identity file"):
+		return "missing_identity_file"
+	case strings.Contains(msg, "no identities found"):
+		return "no_identity_found"
+	case strings.Contains(msg, "multiple identities found"):
+		return "multiple_identities_found"
+	default:
+		return "bundle_failed"
+	}
 }

@@ -35,6 +35,7 @@ type secretErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newSecretCommand() *cobra.Command {
@@ -383,7 +384,12 @@ func secretCommandError(cmd *cobra.Command, err error, jsonOut bool) error {
 	}
 	code := secretExitCode(err)
 	if jsonOut {
-		_ = writeSecretJSON(cmd.ErrOrStderr(), secretErrorResult{OK: false, Error: err.Error(), ExitCode: code})
+		_ = writeSecretJSON(cmd.ErrOrStderr(), secretErrorResult{
+			OK:       false,
+			Error:    err.Error(),
+			ExitCode: code,
+			Reason:   secretErrorReason(err),
+		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
@@ -402,5 +408,43 @@ func secretExitCode(err error) int {
 		return exitcode.CodeWrongPassphrase
 	default:
 		return 1
+	}
+}
+
+func secretErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, vault.ErrSecretNotFound):
+		return "secret_not_found"
+	case errors.Is(err, vault.ErrSecretExists):
+		return "secret_exists"
+	case errors.Is(err, vault.ErrVaultNotFound):
+		return "vault_not_found"
+	case errors.Is(err, vault.ErrWrongPassphrase):
+		return "wrong_passphrase"
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "empty secret name"):
+		return "empty_secret_name"
+	case strings.Contains(msg, "source and destination names must differ"):
+		return "same_secret_name"
+	case strings.Contains(msg, "refusing to print secrets"):
+		return "unsafe_stdout_required"
+	case strings.Contains(msg, "empty secret value"):
+		return "empty_secret_value"
+	case strings.Contains(msg, "no secret value provided"):
+		return "missing_secret_value"
+	case strings.Contains(msg, "empty --passphrase-cmd"):
+		return "empty_passphrase_command"
+	case strings.Contains(msg, "passphrase command failed"):
+		return "passphrase_command_failed"
+	case strings.Contains(msg, "no passphrase provided"):
+		return "missing_passphrase"
+	default:
+		return "secret_failed"
 	}
 }

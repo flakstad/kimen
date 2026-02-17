@@ -40,6 +40,7 @@ type initErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type initCISyncGateOptions struct {
@@ -313,9 +314,29 @@ func initCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: exitcode.CodeInitFailed,
+			Reason:   initErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodeInitFailed, err)
+}
+
+func initErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "--out cannot be empty"):
+		return "missing_out"
+	case strings.Contains(msg, "--remote-type must be git or fs"):
+		return "invalid_remote_type"
+	case strings.Contains(msg, "output path is a directory"):
+		return "output_is_directory"
+	case strings.Contains(msg, "output file already exists"):
+		return "output_exists"
+	default:
+		return "init_failed"
+	}
 }
