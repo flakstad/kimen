@@ -89,11 +89,17 @@ This is intentionally separate from the CLI/runtime repo:
   - auth/onboarding/signup flows for optional hosted coordination
   - should not become a runtime dependency for local projections
 
-Suggested execution:
+Current status:
 
-1) Create separate repo for web surfaces (landing + app shell).
-2) Start with static landing + lightweight docs routing.
-3) Add signup/onboarding flow stubs once hosted coordination scope is defined.
+- V1 landing/site work is in progress in a separate `kimen-site` repo.
+- CLI/runtime remains the source of truth for behavior and guarantees.
+- Signup/app-shell scope is still intentionally undecided.
+
+Next iterations:
+
+1) Keep website positioning aligned with shipped CLI behavior (sync, projections, automation contract).
+2) Add practical, copy-paste onboarding flows (local-first quickstart + CI sync gate path).
+3) Decide whether signup/app-shell work is in scope before implementing hosted UX flows.
 
 ## Team collaboration (shipped + directional)
 

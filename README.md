@@ -17,6 +17,25 @@ That’s what projections are for: `kimen run` scopes secrets to a single proces
 Kimen is early-stage and evolving. The CLI and on-disk formats may change.
 Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 
+## Project Surfaces
+
+Kimen now has two active surfaces:
+
+- **CLI/runtime (this repo)**: local-first vault, projections, Team Sync, and automation contract.
+- **Website v1 (separate `kimen-site` repo)**: landing and product positioning for onboarding.
+
+Hosted signup/app-shell flows remain optional and directional; they are not required for Kimen runtime behavior.
+
+## Recent Improvements
+
+Recent shipped milestones include:
+
+- Team Sync v2 orchestration defaults (`kimen sync`) and guided conflict/reconcile flows.
+- Script-facing contract hardening (`exit_code` on success envelopes + machine-readable `reason` codes across command families).
+- Shared reason-code catalog + anti-drift tests to keep JSON error semantics stable.
+- CI workflow template fixes and scaffold parity (`ci-deploy`, `ci-sync-gate`, `ci-pr-safety`).
+- CalVer release flow with tag-driven GitHub release automation.
+
 ## Team Sync (current state)
 
 Team Sync v1 + v2 behavior is implemented for `fs` and `git` remotes, including:
@@ -190,6 +209,7 @@ Pushing a matching tag triggers `.github/workflows/release.yml`, which runs GoRe
 ## Roadmap
 
 Ideas and possible future projection types live in `docs/roadmap.md`.
+Web/product track status and next steps are also tracked there.
 
 ## Docs
 
