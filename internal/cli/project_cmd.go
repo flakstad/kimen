@@ -336,53 +336,53 @@ func projectionErrorReason(err error) string {
 	}
 	switch {
 	case errors.Is(err, vault.ErrSecretNotFound):
-		return "secret_not_found"
+		return reasonSecretNotFound
 	case errors.Is(err, vault.ErrSecretExists):
-		return "secret_exists"
+		return reasonSecretExists
 	case errors.Is(err, vault.ErrVaultNotFound):
-		return "vault_not_found"
+		return reasonVaultNotFound
 	case errors.Is(err, vault.ErrWrongPassphrase):
-		return "wrong_passphrase"
+		return reasonWrongPassphrase
 	}
 
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "missing command"):
-		return "missing_command"
+		return reasonMissingCommand
 	case strings.Contains(msg, "use only one of --map or --profile"):
-		return "conflicting_map_profile_inputs"
+		return reasonConflictingMapProfileInputs
 	case strings.Contains(msg, "invalid profile name"):
-		return "invalid_profile_name"
+		return reasonInvalidProfileName
 	case strings.Contains(msg, "stdin projection specified multiple times"):
-		return "conflicting_stdin_inputs"
+		return reasonConflictingStdinInputs
 	case strings.Contains(msg, "use only one of --dir or --systemd-service"):
-		return "conflicting_render_target_inputs"
+		return reasonConflictingRenderTargetInputs
 	case strings.Contains(msg, "--dir is required (or use --systemd-service)"):
-		return "missing_render_target"
+		return reasonMissingRenderTarget
 	case strings.Contains(msg, "--print-systemd-hints requires --systemd-service"):
-		return "systemd_hints_requires_service"
+		return reasonSystemdHintsRequiresService
 	case strings.Contains(msg, "at least one --file is required"):
-		return "missing_file_mappings"
+		return reasonMissingFileMappings
 	case strings.Contains(msg, "invalid --systemd-service"):
-		return "invalid_systemd_service"
+		return reasonInvalidSystemdService
 	case strings.Contains(msg, "stdin projection is only supported for `kimen run`"):
-		return "stdin_not_supported"
+		return reasonStdinNotSupported
 	case strings.Contains(msg, "no files to render"):
-		return "no_files_to_render"
+		return reasonNoFilesToRender
 	case strings.Contains(msg, "envpath mappings require projected files"):
-		return "envpath_requires_projected_files"
+		return reasonEnvpathRequiresProjectedFiles
 	case strings.Contains(msg, "envpath refers to missing projected file"):
-		return "envpath_missing_projected_file"
+		return reasonEnvpathMissingProjectedFile
 	case strings.Contains(msg, "invalid --env mapping"),
 		strings.Contains(msg, "invalid --file mapping"),
 		strings.Contains(msg, "invalid envpath mapping"):
-		return "invalid_mapping"
+		return reasonInvalidMapping
 	case strings.Contains(msg, "invalid env var name"):
-		return "invalid_env_var"
+		return reasonInvalidEnvVar
 	case strings.Contains(msg, "invalid relative path"):
-		return "invalid_relative_path"
+		return reasonInvalidRelativePath
 	default:
-		return "projection_failed"
+		return reasonProjectionFailed
 	}
 }
 

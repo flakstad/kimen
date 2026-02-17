@@ -472,35 +472,35 @@ func remoteErrorReason(err error) string {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "empty remote name"):
-		return "empty_remote_name"
+		return reasonEmptyRemoteName
 	case strings.Contains(msg, "invalid remote name"):
-		return "invalid_remote_name"
+		return reasonInvalidRemoteName
 	case strings.Contains(msg, "remote ") && strings.Contains(msg, " not found"):
-		return "remote_not_found"
+		return reasonRemoteNotFound
 	case strings.Contains(msg, "remote ") && strings.Contains(msg, " already exists"):
-		return "remote_exists"
+		return reasonRemoteExists
 	case strings.Contains(msg, "unsupported remote type"):
-		return "unsupported_remote_type"
+		return reasonUnsupportedRemoteType
 	case strings.Contains(msg, "set at least one of"):
-		return "missing_remote_set_fields"
+		return reasonMissingRemoteSetFields
 	case strings.Contains(msg, "--derive-recipient cannot be combined with --no-derive-recipient"):
-		return "conflicting_derive_flags"
+		return reasonConflictingDeriveFlags
 	case strings.Contains(msg, "--derive-recipient cannot be combined with --recipient"):
-		return "conflicting_derive_recipient_inputs"
+		return reasonConflictingDeriveRecipientInputs
 	case strings.Contains(msg, "--derive-recipient requires --identity"):
-		return "missing_identity_for_recipient_derivation"
+		return reasonMissingIdentityForRecipientDerive
 	case strings.Contains(msg, "derive recipient from identity"):
-		return "recipient_derivation_failed"
+		return reasonRecipientDerivationFailed
 	case strings.Contains(msg, "--branch/--bundle-path are only valid for --type git"):
-		return "git_fields_require_git_type"
+		return reasonGitFieldsRequireGitType
 	case strings.Contains(msg, "--path is required"):
-		return "missing_path"
+		return reasonMissingPath
 	case strings.Contains(msg, "--path cannot be empty"):
-		return "empty_path"
+		return reasonEmptyPath
 	case strings.Contains(msg, "invalid config json"):
-		return "invalid_config_json"
+		return reasonInvalidConfigJSON
 	default:
-		return "remote_failed"
+		return reasonRemoteFailed
 	}
 }
 

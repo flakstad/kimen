@@ -252,14 +252,14 @@ func configErrorReason(err error) string {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "unknown unlock method"):
-		return "unknown_unlock_method"
+		return reasonUnknownUnlockMethod
 	case strings.Contains(msg, "exec method requires a command"):
-		return "missing_unlock_exec_command"
+		return reasonMissingUnlockExecCommand
 	case strings.Contains(msg, "invalid config json"):
-		return "invalid_config_json"
+		return reasonInvalidConfigJSON
 	case strings.Contains(msg, "no user config dir"):
-		return "config_path_unavailable"
+		return reasonConfigPathUnavailable
 	default:
-		return "config_failed"
+		return reasonConfigFailed
 	}
 }

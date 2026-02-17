@@ -149,21 +149,21 @@ func detectSyncConflict(lastSeen, remoteRev string, hasRemote bool) syncConflict
 	case !hasRemote && lastSeen != "":
 		return syncConflictDetails{
 			HasConflict: true,
-			Reason:      "remote_disappeared",
+			Reason:      reasonRemoteDisappeared,
 			Message:     fmt.Sprintf("remote bundle disappeared since last sync (expected rev %s)", lastSeen),
 			ExpectedRev: lastSeen,
 		}
 	case hasRemote && lastSeen == "":
 		return syncConflictDetails{
 			HasConflict: true,
-			Reason:      "no_local_baseline",
+			Reason:      reasonNoLocalBaseline,
 			Message:     fmt.Sprintf("remote has data (rev %s) but no local baseline; run `kimen sync pull` first", remoteRev),
 			ActualRev:   remoteRev,
 		}
 	case hasRemote && lastSeen != remoteRev:
 		return syncConflictDetails{
 			HasConflict: true,
-			Reason:      "remote_changed",
+			Reason:      reasonRemoteChanged,
 			Message:     fmt.Sprintf("remote changed (expected rev %s, found %s); run `kimen sync pull`, re-apply changes, then push", lastSeen, remoteRev),
 			ExpectedRev: lastSeen,
 			ActualRev:   remoteRev,

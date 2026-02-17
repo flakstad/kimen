@@ -576,21 +576,21 @@ func planErrorReason(err error) string {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "invalid --mode"):
-		return "invalid_mode"
+		return reasonInvalidMode
 	case strings.Contains(msg, "invalid profile name"):
-		return "invalid_profile_name"
+		return reasonInvalidProfileName
 	case strings.Contains(msg, "use only one of --map or --profile"):
-		return "conflicting_map_profile_inputs"
+		return reasonConflictingMapProfileInputs
 	case strings.Contains(msg, "use only one of --against-map or --against-profile"):
-		return "conflicting_against_inputs"
+		return reasonConflictingAgainstInputs
 	case strings.Contains(msg, "against spec is invalid"):
-		return "invalid_against_spec"
+		return reasonInvalidAgainstSpec
 	case strings.Contains(msg, "envpath mappings require projected files"):
-		return "envpath_requires_projected_files"
+		return reasonEnvpathRequiresProjectedFiles
 	case strings.Contains(msg, "envpath refers to missing projected file"):
-		return "envpath_missing_projected_file"
+		return reasonEnvpathMissingProjectedFile
 	default:
-		return "plan_failed"
+		return reasonPlanFailed
 	}
 }
 

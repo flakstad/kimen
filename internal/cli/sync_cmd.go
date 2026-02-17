@@ -971,7 +971,7 @@ func newSyncResolveCommand() *cobra.Command {
 			}
 			if !hasRemote {
 				return syncCommandError(cmd, jsonOut, &syncConditionError{
-					Reason:            "remote_missing",
+					Reason:            reasonRemoteMissing,
 					Message:           "remote bundle is missing",
 					RecommendedAction: "sync_reset_baseline_or_remote_recreate",
 				})
@@ -984,7 +984,7 @@ func newSyncResolveCommand() *cobra.Command {
 				return syncCommandError(cmd, jsonOut, err)
 			} else if !hasLocal {
 				return syncCommandError(cmd, jsonOut, &syncConditionError{
-					Reason:            "local_vault_missing",
+					Reason:            reasonLocalVaultMissing,
 					Message:           "local vault file not found",
 					RecommendedAction: "sync_pull",
 				})
@@ -1008,7 +1008,7 @@ func newSyncResolveCommand() *cobra.Command {
 			syncState, hasSyncState := c.Sync[remote.Name]
 			if !hasSyncState || syncState.BaselineSecretHashes == nil {
 				return syncCommandError(cmd, jsonOut, &syncConditionError{
-					Reason:            "reconcile_baseline_missing",
+					Reason:            reasonReconcileBaselineMissing,
 					Message:           "cannot resolve conflicts without baseline key hashes; run `kimen sync pull` first",
 					RecommendedAction: "sync_pull",
 				})
@@ -1018,7 +1018,7 @@ func newSyncResolveCommand() *cobra.Command {
 			analysis := analyzeSyncChanges(baseline, localSnap.Hashes, remoteSnap.Hashes)
 			if len(analysis.ConflictKeys) == 0 {
 				return syncCommandError(cmd, jsonOut, &syncConditionError{
-					Reason:            "no_overlapping_conflicts",
+					Reason:            reasonNoOverlappingConflicts,
 					Message:           "no overlapping key conflicts to resolve",
 					RecommendedAction: "none",
 				})
@@ -1027,7 +1027,7 @@ func newSyncResolveCommand() *cobra.Command {
 			selectedKeys, err := resolveSyncResolveKeys(keys, analysis.ConflictKeys)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, &syncConditionError{
-					Reason:            "resolve_key_not_conflict",
+					Reason:            reasonResolveKeyNotConflict,
 					Message:           err.Error(),
 					RecommendedAction: "manual_reconcile",
 				})
@@ -1225,16 +1225,16 @@ func newSyncStatusCommand() *cobra.Command {
 			conflictDetails := detectSyncConflict(strings.TrimSpace(lastSeen), remoteRev, hasRemote)
 			blockers := make([]string, 0, 5)
 			if !hasLocal {
-				blockers = append(blockers, "local_vault_missing")
+				blockers = append(blockers, reasonLocalVaultMissing)
 			}
 			if lockBlocksPush {
-				blockers = append(blockers, "remote_lock_present")
+				blockers = append(blockers, reasonRemoteLockPresent)
 			}
 			if missingRecipient {
-				blockers = append(blockers, "remote_recipient_missing")
+				blockers = append(blockers, reasonRemoteRecipientMissing)
 			}
 			if needsPull && missingIdentity {
-				blockers = append(blockers, "remote_identity_missing")
+				blockers = append(blockers, reasonRemoteIdentityMissing)
 			}
 			if conflictDetails.HasConflict {
 				blockers = append(blockers, conflictDetails.Reason)
@@ -1249,9 +1249,9 @@ func newSyncStatusCommand() *cobra.Command {
 				recommended = "sync_pull"
 			case missingRecipient && !needsPull:
 				recommended = "configure_remote_recipient"
-			case conflictDetails.HasConflict && conflictDetails.Reason == "remote_disappeared":
+			case conflictDetails.HasConflict && conflictDetails.Reason == reasonRemoteDisappeared:
 				recommended = "sync_reset_baseline_or_remote_recreate"
-			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != "remote_disappeared"):
+			case needsPull || (conflictDetails.HasConflict && conflictDetails.Reason != reasonRemoteDisappeared):
 				recommended = "sync_pull"
 			case lockBlocksPush:
 				recommended = "wait_or_sync_unlock"
@@ -1294,30 +1294,30 @@ func newSyncStatusCommand() *cobra.Command {
 					return syncCommandError(cmd, jsonOut, &syncConflictError{Details: conflictDetails})
 				case lockBlocksPush:
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "remote_lock_present",
+						Reason:            reasonRemoteLockPresent,
 						Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress)", lockInfo.LockPath),
 						RecommendedAction: "wait_or_sync_unlock",
 					})
 				case !hasLocal:
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "local_vault_missing",
+						Reason:            reasonLocalVaultMissing,
 						Message:           "local vault file not found",
 						RecommendedAction: recommended,
 					})
 				case missingRecipient:
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "remote_recipient_missing",
+						Reason:            reasonRemoteRecipientMissing,
 						Message:           "remote recipient is not configured (set --recipient on `remote add`)",
 						RecommendedAction: recommended,
 					})
 				case needsPull && missingIdentity:
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "remote_identity_missing",
+						Reason:            reasonRemoteIdentityMissing,
 						Message:           "remote identity is not configured (set --identity on `remote add`)",
 						RecommendedAction: recommended,
 					})
 				case !canPush:
-					reason := "push_blocked"
+					reason := reasonPushBlocked
 					if len(blockers) > 0 {
 						reason = blockers[0]
 					}
@@ -1447,16 +1447,16 @@ func newSyncConflictsCommand() *cobra.Command {
 			}
 			blockers := make([]string, 0, 2)
 			if lockBlocksPush {
-				blockers = append(blockers, "remote_lock_present")
+				blockers = append(blockers, reasonRemoteLockPresent)
 			}
 			if details.HasConflict {
 				blockers = append(blockers, details.Reason)
 			}
 			recommended := "none"
 			switch {
-			case details.HasConflict && details.Reason != "remote_disappeared":
+			case details.HasConflict && details.Reason != reasonRemoteDisappeared:
 				recommended = "sync_pull"
-			case details.HasConflict && details.Reason == "remote_disappeared":
+			case details.HasConflict && details.Reason == reasonRemoteDisappeared:
 				recommended = "sync_reset_baseline_or_remote_recreate"
 			case lockBlocksPush:
 				recommended = "wait_or_sync_unlock"
@@ -1496,7 +1496,7 @@ func newSyncConflictsCommand() *cobra.Command {
 				}
 				if lockBlocksPush {
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "remote_lock_present",
+						Reason:            reasonRemoteLockPresent,
 						Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress)", lockInfo.LockPath),
 						RecommendedAction: "wait_or_sync_unlock",
 					})
@@ -1757,7 +1757,7 @@ func newSyncUnlockCommand() *cobra.Command {
 							Remote:   remote.Name,
 							LockPath: lockPath,
 							Removed:  false,
-							Reason:   "lock_missing",
+							Reason:   reasonLockMissing,
 						})
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "no lock file found for remote %s\n", remote.Name)
@@ -1781,7 +1781,7 @@ func newSyncUnlockCommand() *cobra.Command {
 							Remote:   remote.Name,
 							LockPath: lockPath,
 							Removed:  false,
-							Reason:   "lock_missing",
+							Reason:   reasonLockMissing,
 						})
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "no lock file found for remote %s\n", remote.Name)
@@ -1951,7 +1951,7 @@ func newSyncPushCommand() *cobra.Command {
 					}
 					if lockInfo.HasLock {
 						return syncCommandError(cmd, jsonOut, &syncConditionError{
-							Reason:            "remote_lock_present",
+							Reason:            reasonRemoteLockPresent,
 							Message:           fmt.Sprintf("remote push lock exists: %s (another sync push may be in progress; dry-run cannot acquire locks)", lockInfo.LockPath),
 							RecommendedAction: "wait_or_sync_unlock",
 						})
@@ -2010,7 +2010,7 @@ func newSyncPushCommand() *cobra.Command {
 				if err != nil {
 					if errors.Is(err, errRemotePushLockExists) {
 						return syncCommandError(cmd, jsonOut, &syncConditionError{
-							Reason:            "remote_lock_present",
+							Reason:            reasonRemoteLockPresent,
 							Message:           err.Error(),
 							RecommendedAction: "wait_or_sync_unlock",
 						})
@@ -2185,7 +2185,7 @@ func newSyncPullCommand() *cobra.Command {
 				reconcileAnalysis = analyzeSyncChanges(syncState.BaselineSecretHashes, localSnap.Hashes, remoteSnap.Hashes)
 				if !reconcileAnalysis.HasBaseline {
 					return syncCommandError(cmd, jsonOut, &syncConditionError{
-						Reason:            "reconcile_baseline_missing",
+						Reason:            reasonReconcileBaselineMissing,
 						Message:           "cannot reconcile without baseline key hashes; run `kimen sync pull` first",
 						RecommendedAction: "sync_pull",
 					})
@@ -2516,12 +2516,12 @@ func chooseSyncAutoDecision(status syncStatusResult, localChanged, localChangeUn
 					return "blocked", &syncConflictError{Details: conflict}
 				}
 				return "blocked", &syncConditionError{
-					Reason:            "manual_pull_required",
+					Reason:            reasonManualPullRequired,
 					Message:           "remote pull required but local vault has unpushed changes; run `kimen sync pull` manually and re-apply local changes",
 					RecommendedAction: "sync_pull",
 				}
 			}
-			if conflict.HasConflict && conflict.Reason != "remote_changed" {
+			if conflict.HasConflict && conflict.Reason != reasonRemoteChanged {
 				return "blocked", &syncConflictError{Details: conflict}
 			}
 			return "pull_reconcile", nil
@@ -2536,7 +2536,7 @@ func chooseSyncAutoDecision(status syncStatusResult, localChanged, localChangeUn
 	}
 	if status.LockBlocksPush {
 		return "blocked", &syncConditionError{
-			Reason:            "remote_lock_present",
+			Reason:            reasonRemoteLockPresent,
 			Message:           "remote push lock exists; wait or remove lock with `kimen sync unlock`",
 			RecommendedAction: "wait_or_sync_unlock",
 		}
@@ -3140,7 +3140,7 @@ func newSyncOverlappingChangesConflict(conflictKeys []string) error {
 	return &syncConflictError{
 		Details: syncConflictDetails{
 			HasConflict: true,
-			Reason:      "overlapping_changes",
+			Reason:      reasonOverlappingChanges,
 			Message:     msg,
 		},
 	}
@@ -3315,99 +3315,99 @@ func syncErrorReason(err error) string {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "--stale-threshold must be >= 0"):
-		return "invalid_stale_threshold"
+		return reasonInvalidStaleThreshold
 	case strings.Contains(msg, "--check and --dry-run cannot be used together"):
-		return "conflicting_check_and_dry_run"
+		return reasonConflictingCheckAndDryRun
 	case strings.Contains(msg, "empty remote name"):
-		return "empty_remote_name"
+		return reasonEmptyRemoteName
 	case strings.Contains(msg, "remote name mismatch between arg and --remote"):
-		return "remote_name_mismatch"
+		return reasonRemoteNameMismatch
 	case strings.Contains(msg, "invalid remote name"):
-		return "invalid_remote_name"
+		return reasonInvalidRemoteName
 	case strings.Contains(msg, "remote ") && strings.Contains(msg, "already exists"):
-		return "remote_exists"
+		return reasonRemoteExists
 	case strings.Contains(msg, "remote ") && strings.Contains(msg, "not found (from kimen_remote)"):
-		return "remote_not_found_from_env"
+		return reasonRemoteNotFoundFromEnv
 	case strings.Contains(msg, "remote ") && strings.Contains(msg, "not found"):
-		return "remote_not_found"
+		return reasonRemoteNotFound
 	case strings.Contains(msg, "no remotes configured"):
-		return "no_remotes_configured"
+		return reasonNoRemotesConfigured
 	case strings.Contains(msg, "multiple remotes configured"):
-		return "multiple_remotes_configured"
+		return reasonMultipleRemotesConfigured
 	case strings.Contains(msg, "--path is required"):
-		return "missing_path"
+		return reasonMissingPath
 	case strings.Contains(msg, "--branch/--bundle-path are only valid for --type git"):
-		return "git_fields_require_git_type"
+		return reasonGitFieldsRequireGitType
 	case strings.Contains(msg, "derive recipient from identity"):
-		return "recipient_derivation_failed"
+		return reasonRecipientDerivationFailed
 	case strings.Contains(msg, "--take must be one of"):
-		return "invalid_take"
+		return reasonInvalidTake
 	case strings.Contains(msg, "choose exactly one mode: --to-remote, --clear, or --rev"):
-		return "invalid_reset_baseline_mode"
+		return reasonInvalidResetBaselineMode
 	case strings.Contains(msg, "refusing to reset baseline without --yes"):
-		return "reset_baseline_confirmation_required"
+		return reasonResetBaselineConfirmationRequired
 	case strings.Contains(msg, "remote bundle is missing; cannot set baseline to remote"):
-		return "remote_bundle_missing_for_baseline"
+		return reasonRemoteBundleMissingForBaseline
 	case strings.Contains(msg, "--if-older-than must be >= 0"):
-		return "invalid_if_older_than"
+		return reasonInvalidIfOlderThan
 	case strings.Contains(msg, "sync unlock is only supported for fs remotes"):
-		return "unlock_requires_fs_remote"
+		return reasonUnlockRequiresFSRemote
 	case strings.Contains(msg, "refusing to unlock") && strings.Contains(msg, "lock is only"):
-		return "lock_too_new"
+		return reasonLockTooNew
 	case strings.Contains(msg, "refusing to remove lock without --yes"):
-		return "unlock_confirmation_required"
+		return reasonUnlockConfirmationRequired
 	case strings.Contains(msg, "--backup is required"):
-		return "missing_backup"
+		return reasonMissingBackup
 	case strings.Contains(msg, "--lock-wait must be >= 0"):
-		return "invalid_lock_wait"
+		return reasonInvalidLockWait
 	case strings.Contains(msg, "--break-stale-lock-after must be >= 0"):
-		return "invalid_break_stale_lock_after"
+		return reasonInvalidBreakStaleLockAfter
 	case strings.Contains(msg, "--dry-run cannot be combined with --lock-wait/--break-stale-lock-after"):
-		return "conflicting_dry_run_lock_flags"
+		return reasonConflictingDryRunLockFlags
 	case strings.Contains(msg, "remote recipient is not configured"):
-		return "remote_recipient_missing"
+		return reasonRemoteRecipientMissing
 	case strings.Contains(msg, "--lock-wait/--break-stale-lock-after are only supported for fs remotes"):
-		return "lock_flags_require_fs_remote"
+		return reasonLockFlagsRequireFSRemote
 	case strings.Contains(msg, "local vault file not found"):
-		return "local_vault_missing"
+		return reasonLocalVaultMissing
 	case strings.Contains(msg, "local vault missing after sync resolve"):
-		return "local_vault_missing_after_resolve"
+		return reasonLocalVaultMissingAfterResolve
 	case strings.Contains(msg, "local vault missing after pull"):
-		return "local_vault_missing_after_pull"
+		return reasonLocalVaultMissingAfterPull
 	case strings.Contains(msg, "local vault disappeared before baseline update"):
-		return "local_vault_disappeared_before_baseline_update"
+		return reasonLocalVaultDisappearedBeforeBaseline
 	case strings.Contains(msg, "remote identity is not configured"):
-		return "remote_identity_missing"
+		return reasonRemoteIdentityMissing
 	case strings.Contains(msg, "remote bundle is missing"):
-		return "remote_bundle_missing"
+		return reasonRemoteBundleMissing
 	case strings.Contains(msg, "unsupported remote type"):
-		return "unsupported_remote_type"
+		return reasonUnsupportedRemoteType
 	case strings.Contains(msg, "unknown preflight check"):
-		return "unknown_preflight_check"
+		return reasonUnknownPreflightCheck
 	case strings.Contains(msg, "unsupported preflight check"):
-		return "unsupported_preflight_check"
+		return reasonUnsupportedPreflightCheck
 	case strings.Contains(msg, "no preflight checks selected"):
-		return "no_preflight_checks_selected"
+		return reasonNoPreflightChecksSelected
 	case strings.Contains(msg, "keys are not current conflict keys"):
-		return "resolve_keys_not_conflicts"
+		return reasonResolveKeysNotConflicts
 	case strings.Contains(msg, "sync status returned empty payload"):
-		return "sync_status_empty_payload"
+		return reasonSyncStatusEmptyPayload
 	case strings.Contains(msg, "decode sync status payload"):
-		return "sync_status_decode_failed"
+		return reasonSyncStatusDecodeFailed
 	case strings.Contains(msg, "sync status payload missing action"):
-		return "sync_status_missing_action"
+		return reasonSyncStatusMissingAction
 	default:
-		return "sync_failed"
+		return reasonSyncFailed
 	}
 }
 
 func recommendedActionForConflictReason(reason string) string {
 	switch strings.TrimSpace(reason) {
-	case "remote_changed", "no_local_baseline":
+	case reasonRemoteChanged, reasonNoLocalBaseline:
 		return "sync_pull"
-	case "remote_disappeared":
+	case reasonRemoteDisappeared:
 		return "sync_reset_baseline_or_remote_recreate"
-	case "overlapping_changes":
+	case reasonOverlappingChanges:
 		return "manual_reconcile"
 	default:
 		return ""

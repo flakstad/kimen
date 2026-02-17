@@ -236,31 +236,31 @@ func envfileErrorReason(err error) string {
 	}
 	switch {
 	case errors.Is(err, vault.ErrSecretNotFound):
-		return "secret_not_found"
+		return reasonSecretNotFound
 	case errors.Is(err, vault.ErrVaultNotFound):
-		return "vault_not_found"
+		return reasonVaultNotFound
 	case errors.Is(err, vault.ErrWrongPassphrase):
-		return "wrong_passphrase"
+		return reasonWrongPassphrase
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "--out is required"):
-		return "missing_out"
+		return reasonMissingOut
 	case strings.Contains(msg, "stdin projection is only supported for `kimen run`"):
-		return "stdin_not_supported"
+		return reasonStdinNotSupported
 	case strings.Contains(msg, "no env mappings provided"):
-		return "missing_env_mappings"
+		return reasonMissingEnvMappings
 	case strings.Contains(msg, "--files-dir is required when using envpath mappings"):
-		return "missing_files_dir_for_envpath"
+		return reasonMissingFilesDirForEnvpath
 	case strings.Contains(msg, "invalid profile name"):
-		return "invalid_profile_name"
+		return reasonInvalidProfileName
 	case strings.Contains(msg, "use only one of --map or --profile"):
-		return "conflicting_map_profile_inputs"
+		return reasonConflictingMapProfileInputs
 	case strings.Contains(msg, "envpath mappings require projected files"):
-		return "envpath_requires_projected_files"
+		return reasonEnvpathRequiresProjectedFiles
 	case strings.Contains(msg, "envpath refers to missing projected file"):
-		return "envpath_missing_projected_file"
+		return reasonEnvpathMissingProjectedFile
 	default:
-		return "envfile_failed"
+		return reasonEnvfileFailed
 	}
 }

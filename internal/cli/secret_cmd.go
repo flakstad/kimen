@@ -417,34 +417,34 @@ func secretErrorReason(err error) string {
 	}
 	switch {
 	case errors.Is(err, vault.ErrSecretNotFound):
-		return "secret_not_found"
+		return reasonSecretNotFound
 	case errors.Is(err, vault.ErrSecretExists):
-		return "secret_exists"
+		return reasonSecretExists
 	case errors.Is(err, vault.ErrVaultNotFound):
-		return "vault_not_found"
+		return reasonVaultNotFound
 	case errors.Is(err, vault.ErrWrongPassphrase):
-		return "wrong_passphrase"
+		return reasonWrongPassphrase
 	}
 
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "empty secret name"):
-		return "empty_secret_name"
+		return reasonEmptySecretName
 	case strings.Contains(msg, "source and destination names must differ"):
-		return "same_secret_name"
+		return reasonSameSecretName
 	case strings.Contains(msg, "refusing to print secrets"):
-		return "unsafe_stdout_required"
+		return reasonUnsafeStdoutRequired
 	case strings.Contains(msg, "empty secret value"):
-		return "empty_secret_value"
+		return reasonEmptySecretValue
 	case strings.Contains(msg, "no secret value provided"):
-		return "missing_secret_value"
+		return reasonMissingSecretValue
 	case strings.Contains(msg, "empty --passphrase-cmd"):
-		return "empty_passphrase_command"
+		return reasonEmptyPassphraseCommand
 	case strings.Contains(msg, "passphrase command failed"):
-		return "passphrase_command_failed"
+		return reasonPassphraseCommandFailed
 	case strings.Contains(msg, "no passphrase provided"):
-		return "missing_passphrase"
+		return reasonMissingPassphrase
 	default:
-		return "secret_failed"
+		return reasonSecretFailed
 	}
 }

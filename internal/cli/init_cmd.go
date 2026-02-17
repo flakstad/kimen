@@ -329,14 +329,14 @@ func initErrorReason(err error) string {
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "--out cannot be empty"):
-		return "missing_out"
+		return reasonMissingOut
 	case strings.Contains(msg, "--remote-type must be git or fs"):
-		return "invalid_remote_type"
+		return reasonInvalidRemoteType
 	case strings.Contains(msg, "output path is a directory"):
-		return "output_is_directory"
+		return reasonOutputIsDirectory
 	case strings.Contains(msg, "output file already exists"):
-		return "output_exists"
+		return reasonOutputExists
 	default:
-		return "init_failed"
+		return reasonInitFailed
 	}
 }

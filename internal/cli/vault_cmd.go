@@ -166,23 +166,23 @@ func vaultErrorReason(err error) string {
 	}
 	switch {
 	case errors.Is(err, vault.ErrVaultNotFound):
-		return "vault_not_found"
+		return reasonVaultNotFound
 	case errors.Is(err, vault.ErrWrongPassphrase):
-		return "wrong_passphrase"
+		return reasonWrongPassphrase
 	case errors.Is(err, vault.ErrInvalidVaultFile):
-		return "invalid_vault_file"
+		return reasonInvalidVaultFile
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "vault already exists"):
-		return "vault_exists"
+		return reasonVaultExists
 	case strings.Contains(msg, "empty --passphrase-cmd"):
-		return "empty_passphrase_command"
+		return reasonEmptyPassphraseCommand
 	case strings.Contains(msg, "passphrase command failed"):
-		return "passphrase_command_failed"
+		return reasonPassphraseCommandFailed
 	case strings.Contains(msg, "no passphrase provided"):
-		return "missing_passphrase"
+		return reasonMissingPassphrase
 	default:
-		return "vault_failed"
+		return reasonVaultFailed
 	}
 }

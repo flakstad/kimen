@@ -253,31 +253,31 @@ func bundleErrorReason(err error) string {
 		return ""
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return "input_missing"
+		return reasonInputMissing
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "--out is required"):
-		return "missing_out"
+		return reasonMissingOut
 	case strings.Contains(msg, "--in is required"):
-		return "missing_in"
+		return reasonMissingIn
 	case strings.Contains(msg, "at least one --recipient is required"):
-		return "missing_recipient"
+		return reasonMissingRecipient
 	case strings.Contains(msg, "provide --identity or --identity-stdin"):
-		return "missing_identity_input"
+		return reasonMissingIdentityInput
 	case strings.Contains(msg, "refusing to overwrite existing identity"):
-		return "identity_exists"
+		return reasonIdentityExists
 	case strings.Contains(msg, "refusing to overwrite existing vault"):
-		return "output_vault_exists"
+		return reasonOutputVaultExists
 	case strings.Contains(msg, "invalid recipient"):
-		return "invalid_recipient"
+		return reasonInvalidRecipient
 	case strings.Contains(msg, "missing identity file"):
-		return "missing_identity_file"
+		return reasonMissingIdentityFile
 	case strings.Contains(msg, "no identities found"):
-		return "no_identity_found"
+		return reasonNoIdentityFound
 	case strings.Contains(msg, "multiple identities found"):
-		return "multiple_identities_found"
+		return reasonMultipleIdentitiesFound
 	default:
-		return "bundle_failed"
+		return reasonBundleFailed
 	}
 }
