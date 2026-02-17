@@ -42,6 +42,9 @@ func TestCLI_Doctor_JSON_OK(t *testing.T) {
 	if ok, _ := report["ok"].(bool); !ok {
 		t.Fatalf("expected ok=true, got %#v", report)
 	}
+	if report["action"] != "doctor" {
+		t.Fatalf("expected action=doctor, got %#v", report)
+	}
 }
 
 func TestCLI_Doctor_FailsOnMissingVault(t *testing.T) {
@@ -72,6 +75,9 @@ func TestCLI_Doctor_FailsOnMissingVault(t *testing.T) {
 	}
 	if ok, _ := report["ok"].(bool); ok {
 		t.Fatalf("expected ok=false, got %#v", report)
+	}
+	if report["action"] != "doctor" {
+		t.Fatalf("expected action=doctor, got %#v", report)
 	}
 	checks, _ := report["checks"].([]any)
 	foundVaultError := false

@@ -749,6 +749,12 @@ func TestCLI_Version(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatalf("json parse: %v", err)
 	}
+	if ok, _ := payload["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true in version payload, got %#v", payload)
+	}
+	if payload["action"] != "version" {
+		t.Fatalf("expected action=version, got %#v", payload)
+	}
 	if payload["version"] == "" || payload["raw_version"] == "" {
 		t.Fatalf("unexpected version payload: %#v", payload)
 	}

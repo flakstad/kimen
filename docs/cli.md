@@ -442,6 +442,7 @@ Exit behavior:
 - exits `0` when there are no doctor errors
 - with `--strict`, warnings are treated as failures
 - exits `27` when doctor fails
+- with `--json`, reports include `ok` and `action: "doctor"` on stdout
 
 ## `kimen version`
 
@@ -456,6 +457,10 @@ Examples:
 kimen version
 kimen version --json
 ```
+
+JSON notes:
+
+- `kimen version --json` includes `ok: true`, `action: "version"`, and build metadata fields.
 
 ## Projections: `kimen run`, `kimen render`, `kimen project …`
 

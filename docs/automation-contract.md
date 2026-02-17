@@ -134,7 +134,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `doctor --json`:
 
 - success/failure report on `stdout`:
-  - `{"ok":true|false,"strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
+  - `{"ok":true|false,"action":"doctor","strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
 - check entries include stable core checks (`config_*`, `passphrase_source`, `vault_*`, `mapping_*`, `bundle_*`) and per-remote checks like `remote_<name>_config|push|pull|transport|fs_dir|git_remote|git_branch|sync_state`
 - no separate error envelope on `stderr`
 
@@ -145,7 +145,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `version --json`:
 
-- success: `{"version":"...","raw_version":"...","commit":"...","date":"..."}`
+- success: `{"ok":true,"action":"version","version":"...","raw_version":"...","commit":"...","date":"..."}`
 - error: generic command failure behavior
 
 ## Exit code matrix

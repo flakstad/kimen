@@ -34,6 +34,7 @@ type doctorCheck struct {
 
 type doctorReport struct {
 	OK           bool          `json:"ok"`
+	Action       string        `json:"action"`
 	Strict       bool          `json:"strict"`
 	ErrorCount   int           `json:"error_count"`
 	WarningCount int           `json:"warning_count"`
@@ -71,7 +72,7 @@ func newDoctorCommand() *cobra.Command {
 }
 
 func runDoctorChecks(mapPath, profile, bundleIn, identityFile string, allowMissingVault bool) doctorReport {
-	report := doctorReport{Checks: make([]doctorCheck, 0, 16)}
+	report := doctorReport{Action: "doctor", Checks: make([]doctorCheck, 0, 16)}
 	add := func(name, status, message string) {
 		report.Checks = append(report.Checks, doctorCheck{Name: name, Status: status, Message: message})
 		switch status {
