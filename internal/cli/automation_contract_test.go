@@ -51,7 +51,7 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
 	}
 	status := parseJSONMap(t, out)
-	requireJSONKeys(t, status, "ok", "action", "remote", "has_remote", "has_lock", "has_local", "in_sync", "can_push", "needs_pull", "lock_blocks_push", "likely_stale", "lock_age_seconds")
+	requireJSONKeys(t, status, "ok", "action", "exit_code", "remote", "has_remote", "has_lock", "has_local", "in_sync", "can_push", "needs_pull", "lock_blocks_push", "likely_stale", "lock_age_seconds")
 	if status["action"] != "sync_status" {
 		t.Fatalf("unexpected sync status action: %#v", status)
 	}
@@ -66,7 +66,7 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 		t.Fatalf("sync conflicts --json: %v (stderr=%s)", err, errBuf)
 	}
 	conflicts := parseJSONMap(t, out)
-	requireJSONKeys(t, conflicts, "ok", "action", "remote", "has_remote", "has_lock", "has_conflict", "lock_blocks_push", "likely_stale", "lock_age_seconds")
+	requireJSONKeys(t, conflicts, "ok", "action", "exit_code", "remote", "has_remote", "has_lock", "has_conflict", "lock_blocks_push", "likely_stale", "lock_age_seconds")
 	if conflicts["action"] != "sync_conflicts" {
 		t.Fatalf("unexpected sync conflicts action: %#v", conflicts)
 	}
@@ -80,7 +80,7 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 		t.Fatalf("sync push --dry-run --json: %v (stderr=%s)", err, errBuf)
 	}
 	pushDry := parseJSONMap(t, out)
-	requireJSONKeys(t, pushDry, "ok", "action", "remote", "dry_run", "has_local", "can_push")
+	requireJSONKeys(t, pushDry, "ok", "action", "exit_code", "remote", "dry_run", "has_local", "can_push")
 	if pushDry["action"] != "sync_push_dry_run" || !jsonBool(pushDry, "dry_run") {
 		t.Fatalf("unexpected sync push dry-run payload: %#v", pushDry)
 	}
@@ -144,7 +144,7 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 		t.Fatalf("sync pull --dry-run --json: %v (stderr=%s)", err, errBuf)
 	}
 	pullDry := parseJSONMap(t, out)
-	requireJSONKeys(t, pullDry, "ok", "action", "remote", "dry_run", "has_local", "would_backup", "in_sync")
+	requireJSONKeys(t, pullDry, "ok", "action", "exit_code", "remote", "dry_run", "has_local", "would_backup", "in_sync")
 	if pullDry["action"] != "sync_pull_dry_run" || !jsonBool(pullDry, "dry_run") {
 		t.Fatalf("unexpected sync pull dry-run payload: %#v", pullDry)
 	}
@@ -175,7 +175,7 @@ func TestCLI_Contract_SyncInitJSONShape(t *testing.T) {
 		t.Fatalf("sync init --json: %v (stderr=%s)", err, errBuf)
 	}
 	resp := parseJSONMap(t, out)
-	requireJSONKeys(t, resp, "ok", "action", "remote", "created", "remote_config")
+	requireJSONKeys(t, resp, "ok", "action", "exit_code", "remote", "created", "remote_config")
 	if resp["action"] != "sync_init" || !jsonBool(resp, "created") {
 		t.Fatalf("unexpected sync init payload: %#v", resp)
 	}
@@ -307,7 +307,7 @@ func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 		t.Fatalf("sync status --strict --json (healthy): %v (stderr=%s)", err, errBuf)
 	}
 	status := parseJSONMap(t, out)
-	requireJSONKeys(t, status, "action", "remote", "can_push", "needs_pull", "recommended_action")
+	requireJSONKeys(t, status, "action", "exit_code", "remote", "can_push", "needs_pull", "recommended_action")
 	if status["action"] != "sync_status" {
 		t.Fatalf("unexpected strict status payload: %#v", status)
 	}
@@ -317,7 +317,7 @@ func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 		t.Fatalf("sync conflicts --strict --json (healthy): %v (stderr=%s)", err, errBuf)
 	}
 	conflicts := parseJSONMap(t, out)
-	requireJSONKeys(t, conflicts, "action", "remote", "has_conflict", "recommended_action")
+	requireJSONKeys(t, conflicts, "action", "exit_code", "remote", "has_conflict", "recommended_action")
 	if conflicts["action"] != "sync_conflicts" {
 		t.Fatalf("unexpected strict conflicts payload: %#v", conflicts)
 	}

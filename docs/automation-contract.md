@@ -94,6 +94,7 @@ General rule:
 - `sync pull` success: `{"ok":true,"action":"sync_pull","remote":"...","remote_rev":"...","in_sync":true,"backup_path":"..."}` (`backup_path` is omitted when there was no local vault to back up or when `--no-backup` is used)
 - `sync pull --reconcile` success: `{"ok":true,"action":"sync_pull_reconcile","remote":"...","remote_rev":"...","reconcile":true,"merged_key_count":N,"backup_path":"..."}` (disjoint local/remote key changes merged; overlap fails)
 - `sync pull --dry-run` success: `{"ok":true,"action":"sync_pull_dry_run","remote":"...","remote_rev":"...","dry_run":true,"has_local":bool,"would_backup":bool,"in_sync":bool}` (no local vault/config mutation)
+- All sync success payloads include `exit_code: 0`.
 - `sync push` uses a remote lock file (`<bundle>.lock`) for `type=fs`; lock contention failures use sync exit `32`
 - `sync push --dry-run` rejects `--lock-wait` and `--break-stale-lock-after`
 - for `type=git`, lock-related fields are false/empty and lock flags (`--lock-wait`, `--break-stale-lock-after`) are rejected
