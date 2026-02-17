@@ -29,6 +29,7 @@ Team Sync v1 + v2 behavior is implemented for `fs` and `git` remotes, including:
 - strict CI gating via `sync preflight --strict`
 - no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`
 - remote readiness + sync-state checks in `kimen doctor`
+- bootstrap/setup ergonomics via `sync init` and `remote add/set --derive-recipient`
 
 See:
 

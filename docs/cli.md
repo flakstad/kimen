@@ -746,6 +746,7 @@ What it does:
 
 - Adds a named remote to local config.
 - Stores remote transport information plus optional sync credentials.
+- `--derive-recipient` can derive `recipient` from the provided `--identity` file.
 
 Examples:
 
@@ -759,6 +760,9 @@ kimen remote add team \
 
 # Direct bundle file path:
 kimen remote add team --type fs --path /srv/kimen/team-vault.age --recipient age1... --identity ~/.config/kimen/team.agekey
+
+# Derive recipient from identity automatically:
+kimen remote add team --type fs --path /srv/kimen/team-vault --identity ~/.config/kimen/team.agekey --derive-recipient
 
 # Git remote:
 kimen remote add team \
@@ -789,6 +793,7 @@ What it does:
 
 - Updates an existing remote without removing/re-adding it.
 - Accepts partial updates for `--type`, `--path`, `--recipient`, `--identity`, `--branch`, `--bundle-path`.
+- `--derive-recipient` derives recipient from `--identity` (or existing remote identity) and updates `recipient`.
 - If endpoint fields change (`--type`, `--path`, `--branch`, `--bundle-path`), sync baseline for that remote is cleared to avoid stale revision assumptions.
 
 Examples:
@@ -797,6 +802,7 @@ Examples:
 kimen remote set team --path /srv/kimen/new-team-vault
 kimen remote set team --type git --path git@github.com:org/new-secrets.git --branch main --bundle-path vault.age
 kimen remote set team --recipient age1new...
+kimen remote set team --identity ~/.config/kimen/team.agekey --derive-recipient
 kimen remote set team --path /srv/kimen/new-team-vault --json
 ```
 

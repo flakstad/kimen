@@ -516,6 +516,138 @@ func TestCLI_RemoteGitDefaultsAndFieldValidation(t *testing.T) {
 	}
 }
 
+func TestCLI_RemoteAddAndSet_DeriveRecipientFromIdentity(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	identityOne := filepath.Join(dir, "sync-one.agekey")
+	identityTwo := filepath.Join(dir, "sync-two.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	recipientOne := generateRecipient(t, identityOne)
+	out, errBuf, err := runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--identity", identityOne,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add --derive-recipient: %v (stderr=%s)", err, errBuf)
+	}
+	addResp := parseJSONMap(t, out)
+	addRemote, ok := addResp["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote payload in add response: %#v", addResp)
+	}
+	if addRemote["recipient"] != recipientOne {
+		t.Fatalf("expected derived recipient in add response: %#v", addResp)
+	}
+
+	recipientTwo := generateRecipient(t, identityTwo)
+	out, errBuf, err = runCLI([]string{
+		"remote", "set", "origin",
+		"--identity", identityTwo,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote set --derive-recipient: %v (stderr=%s)", err, errBuf)
+	}
+	setResp := parseJSONMap(t, out)
+	setRemote, ok := setResp["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote payload in set response: %#v", setResp)
+	}
+	if setRemote["recipient"] != recipientTwo {
+		t.Fatalf("expected derived recipient in set response: %#v", setResp)
+	}
+
+	out, errBuf, err = runCLI([]string{
+		"remote", "set", "origin",
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote set --derive-recipient using existing identity: %v (stderr=%s)", err, errBuf)
+	}
+	setResp = parseJSONMap(t, out)
+	setRemote, ok = setResp["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote payload in set response: %#v", setResp)
+	}
+	if setRemote["recipient"] != recipientTwo {
+		t.Fatalf("expected recipient to stay derivable from existing identity: %#v", setResp)
+	}
+}
+
+func TestCLI_RemoteDeriveRecipient_Validation(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	_, errOut, err := runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add --derive-recipient without identity to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeRemoteFailed) {
+		t.Fatalf("unexpected remote add derive validation payload: %#v", errResp)
+	}
+
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "main",
+		"--path", filepath.Join(dir, "main-remote"),
+		"--identity", identityPath,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add baseline for set validation: %v", err)
+	}
+
+	_, errOut, err = runCLI([]string{
+		"remote", "add", "dup",
+		"--path", filepath.Join(dir, "dup-remote"),
+		"--identity", identityPath,
+		"--recipient", recipient,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add with --recipient + --derive-recipient to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+
+	_, errOut, err = runCLI([]string{
+		"remote", "set", "main",
+		"--recipient", recipient,
+		"--derive-recipient",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote set with --recipient + --derive-recipient to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+}
+
 func TestCLI_SyncPushConflictWhenRemoteChanged(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

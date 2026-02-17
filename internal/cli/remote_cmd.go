@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kimen/internal/bundle"
 	"kimen/internal/exitcode"
 )
 
@@ -112,6 +113,7 @@ func newRemoteSetCommand() *cobra.Command {
 	var identity string
 	var branch string
 	var bundlePath string
+	var deriveRecipient bool
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -130,7 +132,12 @@ func newRemoteSetCommand() *cobra.Command {
 			branchChanged := cmd.Flags().Changed("branch")
 			bundlePathChanged := cmd.Flags().Changed("bundle-path")
 			if !typeChanged && !pathChanged && !recipientChanged && !identityChanged && !branchChanged && !bundlePathChanged {
-				return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity, --branch, --bundle-path"))
+				if !deriveRecipient {
+					return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity, --branch, --bundle-path, --derive-recipient"))
+				}
+			}
+			if deriveRecipient && recipientChanged {
+				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --recipient"))
 			}
 
 			c, _, err := loadConfig()
@@ -161,6 +168,17 @@ func newRemoteSetCommand() *cobra.Command {
 			}
 			if identityChanged {
 				r.Identity = strings.TrimSpace(identity)
+			}
+			if deriveRecipient {
+				identityPath := strings.TrimSpace(r.Identity)
+				if identityPath == "" {
+					return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient requires --identity (or existing remote identity)"))
+				}
+				derived, err := deriveRecipientFromIdentityFile(identityPath)
+				if err != nil {
+					return remoteCommandError(cmd, jsonOut, err)
+				}
+				r.Recipient = derived
 			}
 			if branchChanged {
 				r.Branch = strings.TrimSpace(branch)
@@ -215,6 +233,7 @@ func newRemoteSetCommand() *cobra.Command {
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull (set empty string to clear)")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (set empty string for default)")
 	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (set empty string for default)")
+	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "derive recipient from identity file (requires --identity or existing identity)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -226,6 +245,7 @@ func newRemoteAddCommand() *cobra.Command {
 	var identity string
 	var branch string
 	var bundlePath string
+	var deriveRecipient bool
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -244,6 +264,9 @@ func newRemoteAddCommand() *cobra.Command {
 			if remoteTypeFlag != "fs" && remoteTypeFlag != "git" {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs or git)", remoteTypeFlag))
 			}
+			if deriveRecipient && strings.TrimSpace(recipient) != "" {
+				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --recipient"))
+			}
 			branchChanged := cmd.Flags().Changed("branch")
 			bundlePathChanged := cmd.Flags().Changed("bundle-path")
 			if remoteTypeFlag != "git" && (branchChanged || bundlePathChanged) {
@@ -260,6 +283,17 @@ func newRemoteAddCommand() *cobra.Command {
 			}
 			if findRemoteIndex(c.Remotes, name) >= 0 {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("remote %q already exists", name))
+			}
+			if deriveRecipient {
+				identityPath := strings.TrimSpace(identity)
+				if identityPath == "" {
+					return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient requires --identity"))
+				}
+				derived, err := deriveRecipientFromIdentityFile(identityPath)
+				if err != nil {
+					return remoteCommandError(cmd, jsonOut, err)
+				}
+				recipient = derived
 			}
 
 			r := remoteConfig{
@@ -300,6 +334,7 @@ func newRemoteAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (default: main)")
 	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (default: vault.age)")
+	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "derive recipient from identity file (requires --identity)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -417,6 +452,18 @@ func normalizeRemoteType(raw string) string {
 		return "fs"
 	}
 	return t
+}
+
+func deriveRecipientFromIdentityFile(identityPath string) (string, error) {
+	id, err := bundle.LoadIdentity(strings.TrimSpace(identityPath), false, nil)
+	if err != nil {
+		return "", fmt.Errorf("derive recipient from identity: %w", err)
+	}
+	recipient, err := bundle.RecipientForIdentity(id)
+	if err != nil {
+		return "", fmt.Errorf("derive recipient from identity: %w", err)
+	}
+	return strings.TrimSpace(recipient), nil
 }
 
 func applyRemoteDefaults(r *remoteConfig) {
