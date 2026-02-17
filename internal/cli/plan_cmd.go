@@ -91,6 +91,10 @@ func newPlanCommand() *cobra.Command {
 		Short: "Show what would be projected (no secret values)",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedMode, err := normalizePlanMode(mode)
+			if err != nil {
+				return planCommandError(cmd, jsonOut, err)
+			}
 			req, envPaths, err := resolveRunMappings(mapPath, profile, envMappings, fileMappings, envPathMappings, stdin)
 			if err != nil {
 				return planCommandError(cmd, jsonOut, err)
@@ -98,7 +102,7 @@ func newPlanCommand() *cobra.Command {
 			if err := validateEnvPaths(req, envPaths); err != nil {
 				return planCommandError(cmd, jsonOut, err)
 			}
-			p := planFromResolved(mode, args, req, envPaths, filesDir)
+			p := planFromResolved(resolvedMode, args, req, envPaths, filesDir)
 
 			againstReq, againstEnvPaths, againstLabel, hasAgainst, err := resolveAgainstMappings(againstMap, againstProfile)
 			if err != nil {
@@ -137,6 +141,19 @@ func newPlanCommand() *cobra.Command {
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory used to resolve envpath values (defaults to $KIMEN_FILES_DIR or a temp dir for run mode)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
+}
+
+func normalizePlanMode(raw string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		mode = "run"
+	}
+	switch mode {
+	case "run", "render", "envfile":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid --mode %q (expected run, render, or envfile)", raw)
+	}
 }
 
 func resolveAgainstMappings(againstMap, againstProfile string) (projection.Request, []projection.EnvPathMapping, string, bool, error) {
