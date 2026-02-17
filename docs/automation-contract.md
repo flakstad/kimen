@@ -147,6 +147,7 @@ General rule:
   - `recommended_action`: `sync_pull|sync_reset_baseline_or_remote_recreate|manual_reconcile`
 - sync precondition errors (exit `32`) may include structured fields:
   - `reason`: e.g. `remote_lock_present|remote_missing|local_vault_missing|reconcile_baseline_missing|no_overlapping_conflicts|resolve_key_not_conflict`
+    - validation/input failures also emit typed reasons such as `invalid_stale_threshold`, `conflicting_check_and_dry_run`, `unknown_preflight_check`, `no_preflight_checks_selected`, `invalid_take`, and `conflicting_dry_run_lock_flags`
   - `recommended_action`: e.g. `wait_or_sync_unlock|sync_pull|manual_reconcile|sync_reset_baseline_or_remote_recreate|none`
 - error: standard error envelope on `stderr` (except `sync --json` orchestration failures and `sync preflight --json`, which report failures on `stdout`)
 

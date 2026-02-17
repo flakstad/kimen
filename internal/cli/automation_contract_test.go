@@ -925,7 +925,10 @@ func TestCLI_Contract_SyncPreflightCheckSelectionValidation(t *testing.T) {
 		t.Fatalf("expected no stdout for selection validation failure, got %q", out)
 	}
 	errPayload := parseJSONMap(t, errOut)
-	requireJSONKeys(t, errPayload, "ok", "error", "exit_code")
+	requireJSONKeys(t, errPayload, "ok", "error", "exit_code", "reason")
+	if errPayload["reason"] != "unknown_preflight_check" {
+		t.Fatalf("unexpected reason for unknown-check error payload: %#v", errPayload)
+	}
 	msg, _ := errPayload["error"].(string)
 	if !strings.Contains(msg, "unknown preflight check") {
 		t.Fatalf("unexpected unknown-check error payload: %#v", errPayload)
@@ -940,10 +943,26 @@ func TestCLI_Contract_SyncPreflightCheckSelectionValidation(t *testing.T) {
 		t.Fatalf("expected no stdout for empty-selection validation failure, got %q", out)
 	}
 	errPayload = parseJSONMap(t, errOut)
-	requireJSONKeys(t, errPayload, "ok", "error", "exit_code")
+	requireJSONKeys(t, errPayload, "ok", "error", "exit_code", "reason")
+	if errPayload["reason"] != "no_preflight_checks_selected" {
+		t.Fatalf("unexpected reason for empty-selection error payload: %#v", errPayload)
+	}
 	msg, _ = errPayload["error"].(string)
 	if !strings.Contains(msg, "no preflight checks selected") {
 		t.Fatalf("unexpected empty-selection error payload: %#v", errPayload)
+	}
+}
+
+func TestCLI_Contract_SyncRootValidationReason(t *testing.T) {
+	_, errOut, err := runCLI([]string{"sync", "--check", "--dry-run", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync validation failure for --check + --dry-run")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errPayload := parseJSONMap(t, errOut)
+	requireJSONKeys(t, errPayload, "ok", "error", "exit_code", "reason")
+	if errPayload["reason"] != "conflicting_check_and_dry_run" {
+		t.Fatalf("unexpected reason for conflicting root flags: %#v", errPayload)
 	}
 }
 

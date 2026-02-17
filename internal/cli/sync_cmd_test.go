@@ -2028,6 +2028,9 @@ func TestCLI_SyncStatusAndConflicts_RejectNegativeStaleThreshold(t *testing.T) {
 	if !strings.Contains(errResp["error"].(string), "--stale-threshold") {
 		t.Fatalf("expected stale-threshold error in status response: %#v", errResp)
 	}
+	if errResp["reason"] != "invalid_stale_threshold" {
+		t.Fatalf("expected reason=invalid_stale_threshold in status response: %#v", errResp)
+	}
 
 	_, errOut, err = runCLI([]string{"sync", "conflicts", "--stale-threshold", "-1s", "--json"}, nil)
 	if err == nil {
@@ -2037,6 +2040,9 @@ func TestCLI_SyncStatusAndConflicts_RejectNegativeStaleThreshold(t *testing.T) {
 	errResp = parseJSONMap(t, errOut)
 	if !strings.Contains(errResp["error"].(string), "--stale-threshold") {
 		t.Fatalf("expected stale-threshold error in conflicts response: %#v", errResp)
+	}
+	if errResp["reason"] != "invalid_stale_threshold" {
+		t.Fatalf("expected reason=invalid_stale_threshold in conflicts response: %#v", errResp)
 	}
 }
 

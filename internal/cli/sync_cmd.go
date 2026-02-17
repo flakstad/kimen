@@ -3288,6 +3288,11 @@ func syncCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 		} else if details, ok := syncConditionDetailsFromError(err); ok {
 			resp.Reason = details.Reason
 			resp.RecommendedAction = details.RecommendedAction
+			if strings.TrimSpace(resp.Reason) == "" {
+				resp.Reason = syncErrorReason(err)
+			}
+		} else {
+			resp.Reason = syncErrorReason(err)
 		}
 		_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(resp)
 	} else {
@@ -3301,6 +3306,99 @@ func syncExitCode(err error) int {
 		return exitcode.CodeSyncConflict
 	}
 	return exitcode.CodeSyncFailed
+}
+
+func syncErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "--stale-threshold must be >= 0"):
+		return "invalid_stale_threshold"
+	case strings.Contains(msg, "--check and --dry-run cannot be used together"):
+		return "conflicting_check_and_dry_run"
+	case strings.Contains(msg, "empty remote name"):
+		return "empty_remote_name"
+	case strings.Contains(msg, "remote name mismatch between arg and --remote"):
+		return "remote_name_mismatch"
+	case strings.Contains(msg, "invalid remote name"):
+		return "invalid_remote_name"
+	case strings.Contains(msg, "remote ") && strings.Contains(msg, "already exists"):
+		return "remote_exists"
+	case strings.Contains(msg, "remote ") && strings.Contains(msg, "not found (from kimen_remote)"):
+		return "remote_not_found_from_env"
+	case strings.Contains(msg, "remote ") && strings.Contains(msg, "not found"):
+		return "remote_not_found"
+	case strings.Contains(msg, "no remotes configured"):
+		return "no_remotes_configured"
+	case strings.Contains(msg, "multiple remotes configured"):
+		return "multiple_remotes_configured"
+	case strings.Contains(msg, "--path is required"):
+		return "missing_path"
+	case strings.Contains(msg, "--branch/--bundle-path are only valid for --type git"):
+		return "git_fields_require_git_type"
+	case strings.Contains(msg, "derive recipient from identity"):
+		return "recipient_derivation_failed"
+	case strings.Contains(msg, "--take must be one of"):
+		return "invalid_take"
+	case strings.Contains(msg, "choose exactly one mode: --to-remote, --clear, or --rev"):
+		return "invalid_reset_baseline_mode"
+	case strings.Contains(msg, "refusing to reset baseline without --yes"):
+		return "reset_baseline_confirmation_required"
+	case strings.Contains(msg, "remote bundle is missing; cannot set baseline to remote"):
+		return "remote_bundle_missing_for_baseline"
+	case strings.Contains(msg, "--if-older-than must be >= 0"):
+		return "invalid_if_older_than"
+	case strings.Contains(msg, "sync unlock is only supported for fs remotes"):
+		return "unlock_requires_fs_remote"
+	case strings.Contains(msg, "refusing to unlock") && strings.Contains(msg, "lock is only"):
+		return "lock_too_new"
+	case strings.Contains(msg, "refusing to remove lock without --yes"):
+		return "unlock_confirmation_required"
+	case strings.Contains(msg, "--backup is required"):
+		return "missing_backup"
+	case strings.Contains(msg, "--lock-wait must be >= 0"):
+		return "invalid_lock_wait"
+	case strings.Contains(msg, "--break-stale-lock-after must be >= 0"):
+		return "invalid_break_stale_lock_after"
+	case strings.Contains(msg, "--dry-run cannot be combined with --lock-wait/--break-stale-lock-after"):
+		return "conflicting_dry_run_lock_flags"
+	case strings.Contains(msg, "remote recipient is not configured"):
+		return "remote_recipient_missing"
+	case strings.Contains(msg, "--lock-wait/--break-stale-lock-after are only supported for fs remotes"):
+		return "lock_flags_require_fs_remote"
+	case strings.Contains(msg, "local vault file not found"):
+		return "local_vault_missing"
+	case strings.Contains(msg, "local vault missing after sync resolve"):
+		return "local_vault_missing_after_resolve"
+	case strings.Contains(msg, "local vault missing after pull"):
+		return "local_vault_missing_after_pull"
+	case strings.Contains(msg, "local vault disappeared before baseline update"):
+		return "local_vault_disappeared_before_baseline_update"
+	case strings.Contains(msg, "remote identity is not configured"):
+		return "remote_identity_missing"
+	case strings.Contains(msg, "remote bundle is missing"):
+		return "remote_bundle_missing"
+	case strings.Contains(msg, "unsupported remote type"):
+		return "unsupported_remote_type"
+	case strings.Contains(msg, "unknown preflight check"):
+		return "unknown_preflight_check"
+	case strings.Contains(msg, "unsupported preflight check"):
+		return "unsupported_preflight_check"
+	case strings.Contains(msg, "no preflight checks selected"):
+		return "no_preflight_checks_selected"
+	case strings.Contains(msg, "keys are not current conflict keys"):
+		return "resolve_keys_not_conflicts"
+	case strings.Contains(msg, "sync status returned empty payload"):
+		return "sync_status_empty_payload"
+	case strings.Contains(msg, "decode sync status payload"):
+		return "sync_status_decode_failed"
+	case strings.Contains(msg, "sync status payload missing action"):
+		return "sync_status_missing_action"
+	default:
+		return "sync_failed"
+	}
 }
 
 func recommendedActionForConflictReason(reason string) string {
