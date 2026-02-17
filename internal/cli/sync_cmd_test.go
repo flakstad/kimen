@@ -93,6 +93,219 @@ func TestCLI_RemoteLifecycle_JSONAndSyncCleanup(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncRemoteSelection_PrefersOriginWhenMultiple(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	originDir := filepath.Join(dir, "remote-origin")
+	backupDir := filepath.Join(dir, "remote-backup")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "backup", "--path", backupDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add backup: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", originDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["remote"] != "origin" {
+		t.Fatalf("expected origin remote selection, got %#v", resp)
+	}
+}
+
+func TestCLI_SyncRemoteSelection_UsesKimenRemoteEnv(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	originDir := filepath.Join(dir, "remote-origin")
+	backupDir := filepath.Join(dir, "remote-backup")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+		envRemoteName: "backup",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", originDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "backup", "--path", backupDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add backup: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json (env remote): %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["remote"] != "backup" {
+		t.Fatalf("expected backup remote selection from %s, got %#v", envRemoteName, resp)
+	}
+
+	restoreBadEnv := withEnv(map[string]string{envRemoteName: "missing"})
+	_, errOut, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	restoreBadEnv()
+	if err == nil {
+		t.Fatalf("expected sync status to fail for invalid %s", envRemoteName)
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	msg, _ := errResp["error"].(string)
+	if !strings.Contains(msg, envRemoteName) {
+		t.Fatalf("expected invalid env remote message to mention %s: %#v", envRemoteName, errResp)
+	}
+}
+
+func TestCLI_SyncRemoteSelection_UsesUniqueSyncStateRemote(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	alphaDir := filepath.Join(dir, "remote-alpha")
+	betaDir := filepath.Join(dir, "remote-beta")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "alpha",
+		"--path", alphaDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add alpha: %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "beta",
+		"--path", betaDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add beta: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push", "--remote", "beta"}, nil)
+	if err != nil {
+		t.Fatalf("sync push --remote beta: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["remote"] != "beta" {
+		t.Fatalf("expected beta remote selection from unique sync state, got %#v", resp)
+	}
+}
+
+func TestCLI_SyncStatus_TerseHumanOutput(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", remoteDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "status", "--terse"}, nil)
+	if err != nil {
+		t.Fatalf("sync status --terse: %v (stderr=%s)", err, errBuf)
+	}
+	if !strings.Contains(out, "remote=origin") || !strings.Contains(out, "recommended_action=") {
+		t.Fatalf("unexpected sync status --terse output: %q", out)
+	}
+	if strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("expected single-line sync status --terse output, got %q", out)
+	}
+}
+
+func TestCLI_SyncConflicts_TerseHumanOutput(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", remoteDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "conflicts", "--terse"}, nil)
+	if err != nil {
+		t.Fatalf("sync conflicts --terse: %v (stderr=%s)", err, errBuf)
+	}
+	if !strings.Contains(out, "remote=origin") || !strings.Contains(out, "has_conflict=false") {
+		t.Fatalf("unexpected sync conflicts --terse output: %q", out)
+	}
+	if strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("expected single-line sync conflicts --terse output, got %q", out)
+	}
+}
+
 func TestCLI_RemoteGitDefaultsAndFieldValidation(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -643,14 +856,13 @@ func TestCLI_SyncErrors_MissingRemoteMetadata_And_MultipleRemotes(t *testing.T) 
 	if err != nil {
 		t.Fatalf("remote add backup: %v", err)
 	}
-	_, errOut, err = runCLI([]string{"sync", "status", "--json"}, nil)
-	if err == nil {
-		t.Fatalf("expected sync status failure with multiple remotes and no --remote")
+	out, errBuf, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("expected sync status to select origin remote by default: %v (stderr=%s)", err, errBuf)
 	}
-	assertExitCode(t, err, exitcode.CodeSyncFailed)
-	errResp = parseJSONMap(t, errOut)
-	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
-		t.Fatalf("unexpected sync status error payload: %#v", errResp)
+	statusResp := parseJSONMap(t, out)
+	if statusResp["remote"] != "origin" {
+		t.Fatalf("expected sync status to target origin by default, got %#v", statusResp)
 	}
 }
 

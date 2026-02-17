@@ -273,6 +273,8 @@ const (
 	syncAutoCheckSyncReconcile   = "sync_pull_reconcile"
 )
 
+const syncRemoteFlagHelp = "remote name (selection: --remote, KIMEN_REMOTE, unique sync-state remote, origin, or only configured remote)"
+
 var syncPreflightCheckOrder = []string{
 	syncPreflightCheckDoctor,
 	syncPreflightCheckStatus,
@@ -304,6 +306,7 @@ func newSyncCommand() *cobra.Command {
 	var checkOnly bool
 	var noDoctor bool
 	var allowMissingVault bool
+	var terse bool
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -352,7 +355,7 @@ func newSyncCommand() *cobra.Command {
 				if result.RecommendedAction == "" {
 					result.RecommendedAction = "manual_review"
 				}
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			}
 
 			if !noDoctor {
@@ -402,7 +405,7 @@ func newSyncCommand() *cobra.Command {
 						result.RecommendedAction = details.RecommendedAction
 					}
 				}
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			}
 			if result.Decision == "noop" || checkOnly {
 				if checkOnly {
@@ -415,7 +418,7 @@ func newSyncCommand() *cobra.Command {
 						result.Decision = "would_pull_reconcile"
 					}
 				}
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			}
 
 			switch result.Decision {
@@ -427,14 +430,14 @@ func newSyncCommand() *cobra.Command {
 					}
 					appendStep(step)
 					result.Decision = "would_push"
-					return renderSyncAutoAndExit(cmd, result, jsonOut)
+					return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 				}
 				step := runSyncPreflightCheck(syncAutoCheckSyncPush, buildSyncAutoPushArgs(remoteName))
 				if !step.OK {
 					return fail(step)
 				}
 				appendStep(step)
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			case "pull":
 				if dryRun {
 					step := runSyncPreflightCheck(syncPreflightCheckPullDryRun, buildSyncPreflightPullArgs(remoteName))
@@ -443,14 +446,14 @@ func newSyncCommand() *cobra.Command {
 					}
 					appendStep(step)
 					result.Decision = "would_pull"
-					return renderSyncAutoAndExit(cmd, result, jsonOut)
+					return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 				}
 				step := runSyncPreflightCheck(syncAutoCheckSyncPull, buildSyncAutoPullArgs(remoteName))
 				if !step.OK {
 					return fail(step)
 				}
 				appendStep(step)
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			case "pull_reconcile":
 				if dryRun {
 					step := runSyncPreflightCheck(syncPreflightCheckPullDryRun, buildSyncPreflightPullReconcileArgs(remoteName))
@@ -459,20 +462,20 @@ func newSyncCommand() *cobra.Command {
 					}
 					appendStep(step)
 					result.Decision = "would_pull_reconcile"
-					return renderSyncAutoAndExit(cmd, result, jsonOut)
+					return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 				}
 				step := runSyncPreflightCheck(syncAutoCheckSyncReconcile, buildSyncAutoPullReconcileArgs(remoteName))
 				if !step.OK {
 					return fail(step)
 				}
 				appendStep(step)
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			default:
-				return renderSyncAutoAndExit(cmd, result, jsonOut)
+				return renderSyncAutoAndExit(cmd, result, jsonOut, terse)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().StringVar(&profile, "profile", "", "profile name passed to doctor")
 	cmd.Flags().StringVar(&bundleIn, "bundle-in", "", "bundle file passed to doctor")
 	cmd.Flags().StringVar(&identity, "identity", "", "identity file passed to doctor")
@@ -482,6 +485,7 @@ func newSyncCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "run checks and action selection only (no push/pull)")
 	cmd.Flags().BoolVar(&noDoctor, "no-doctor", false, "skip doctor check before action selection")
 	cmd.Flags().BoolVar(&allowMissingVault, "allow-missing-vault", false, "pass --allow-missing-vault to doctor")
+	cmd.Flags().BoolVar(&terse, "terse", false, "human output: emit a single-line summary")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.AddCommand(newSyncPreflightCommand())
 	cmd.AddCommand(newSyncChangesCommand())
@@ -556,7 +560,7 @@ func newSyncPreflightCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().StringVar(&profile, "profile", "", "profile name passed to doctor")
 	cmd.Flags().StringVar(&bundleIn, "bundle-in", "", "bundle file passed to doctor")
 	cmd.Flags().StringVar(&identity, "identity", "", "identity file passed to doctor")
@@ -664,7 +668,7 @@ func newSyncChangesCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -865,7 +869,7 @@ func newSyncResolveCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().StringVar(&take, "take", "", "resolution side for selected keys: local|remote")
 	cmd.Flags().StringSliceVar(&keys, "key", nil, "conflict key(s) to resolve (repeatable or comma-separated); defaults to all conflict keys")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
@@ -875,6 +879,7 @@ func newSyncResolveCommand() *cobra.Command {
 func newSyncStatusCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var terse bool
 	var staleThreshold time.Duration
 	var strict bool
 	cmd := &cobra.Command{
@@ -1057,6 +1062,18 @@ func newSyncStatusCommand() *cobra.Command {
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(res)
 			}
+			if terse {
+				blockers := "-"
+				if len(res.Blockers) > 0 {
+					blockers = strings.Join(res.Blockers, ",")
+				}
+				fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"remote=%s in_sync=%t can_push=%t needs_pull=%t has_lock=%t blockers=%s recommended_action=%s\n",
+					res.Remote, res.InSync, res.CanPush, res.NeedsPull, res.HasLock, blockers, res.RecommendedAction,
+				)
+				return nil
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "remote: %s (%s)\n", remote.Name, remote.Type)
 			fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", remote.Path)
 			if hasRemote {
@@ -1108,8 +1125,9 @@ func newSyncStatusCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&terse, "terse", false, "human output: emit a single-line summary")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
 	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when push is currently blocked")
 	return cmd
@@ -1118,6 +1136,7 @@ func newSyncStatusCommand() *cobra.Command {
 func newSyncConflictsCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var terse bool
 	var staleThreshold time.Duration
 	var strict bool
 	cmd := &cobra.Command{
@@ -1217,6 +1236,22 @@ func newSyncConflictsCommand() *cobra.Command {
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(res)
 			}
+			if terse {
+				reason := res.Reason
+				if strings.TrimSpace(reason) == "" {
+					reason = "none"
+				}
+				blockers := "-"
+				if len(res.Blockers) > 0 {
+					blockers = strings.Join(res.Blockers, ",")
+				}
+				fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"remote=%s has_conflict=%t reason=%s has_lock=%t blockers=%s recommended_action=%s\n",
+					res.Remote, res.HasConflict, reason, res.HasLock, blockers, res.RecommendedAction,
+				)
+				return nil
+			}
 			if !details.HasConflict {
 				fmt.Fprintf(cmd.OutOrStdout(), "no conflict for remote %s\n", remote.Name)
 				if lockInfo.HasLock {
@@ -1297,8 +1332,9 @@ func newSyncConflictsCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&terse, "terse", false, "human output: emit a single-line summary")
 	cmd.Flags().DurationVar(&staleThreshold, "stale-threshold", 0, "mark lock as likely stale when lock age is >= this duration")
 	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when conflicts or lock blockers are present")
 	return cmd
@@ -1404,7 +1440,7 @@ func newSyncResetBaselineCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&toRemote, "to-remote", false, "set baseline to the current remote revision")
 	cmd.Flags().BoolVar(&clear, "clear", false, "clear the stored baseline")
@@ -1499,7 +1535,7 @@ func newSyncUnlockCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm that you want to remove the lock file")
 	cmd.Flags().DurationVar(&ifOlderThan, "if-older-than", 0, "only unlock if lock file is at least this old (e.g. 5m)")
@@ -1795,7 +1831,7 @@ func newSyncPushCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().DurationVar(&lockWait, "lock-wait", 0, "how long to wait for remote push lock (e.g. 10s, 1m); default is fail-fast")
 	cmd.Flags().DurationVar(&breakStaleLockAfter, "break-stale-lock-after", 0, "break remote push lock when it is older than this duration")
@@ -2012,7 +2048,7 @@ func newSyncPullCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&remoteName, "remote", "", "remote name (defaults to the only configured remote)")
+	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip creating a local vault backup before overwrite")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate pull preconditions without modifying local vault/baseline")
@@ -2255,7 +2291,7 @@ func syncReasonFromPayload(payload map[string]any) string {
 	return ""
 }
 
-func renderSyncAutoAndExit(cmd *cobra.Command, result syncAutoResult, jsonOut bool) error {
+func renderSyncAutoAndExit(cmd *cobra.Command, result syncAutoResult, jsonOut, terse bool) error {
 	if result.ExitCode == 0 && !result.OK {
 		result.ExitCode = exitcode.CodeSyncFailed
 	}
@@ -2264,7 +2300,7 @@ func renderSyncAutoAndExit(cmd *cobra.Command, result syncAutoResult, jsonOut bo
 			return err
 		}
 	} else {
-		renderSyncAutoHuman(cmd, result)
+		renderSyncAutoHuman(cmd, result, terse)
 	}
 	if result.ExitCode != 0 {
 		return exitcode.New(result.ExitCode, errors.New("sync failed"))
@@ -2272,7 +2308,27 @@ func renderSyncAutoAndExit(cmd *cobra.Command, result syncAutoResult, jsonOut bo
 	return nil
 }
 
-func renderSyncAutoHuman(cmd *cobra.Command, result syncAutoResult) {
+func renderSyncAutoHuman(cmd *cobra.Command, result syncAutoResult, terse bool) {
+	if terse {
+		remote := strings.TrimSpace(result.Remote)
+		if remote == "" {
+			remote = "-"
+		}
+		reason := strings.TrimSpace(result.Reason)
+		if reason == "" {
+			reason = "none"
+		}
+		recommended := strings.TrimSpace(result.RecommendedAction)
+		if recommended == "" {
+			recommended = "none"
+		}
+		fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"remote=%s decision=%s ok=%t exit_code=%d reason=%s recommended_action=%s\n",
+			remote, result.Decision, result.OK, result.ExitCode, reason, recommended,
+		)
+		return
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "sync (mode=%s strict=%t)\n", result.Mode, result.Strict)
 	if strings.TrimSpace(result.Remote) != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "remote: %s\n", result.Remote)

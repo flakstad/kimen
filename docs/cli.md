@@ -21,6 +21,7 @@ This document describes what each command does, how it works, and the typical us
 - `KIMEN_VAULT`: vault file path (overrides the default)
 - `KIMEN_PASSPHRASE`: passphrase used to unlock the vault (non-interactive)
 - `KIMEN_CONFIG`: config file path (overrides the default user config location)
+- `KIMEN_REMOTE`: default remote name used by `sync` commands when `--remote` is omitted
 
 When using file projections with `kimen run`, Kimen also sets:
 
@@ -854,17 +855,25 @@ Common flags:
 - `--dry-run`: run chosen action in dry-run mode
 - `--no-doctor`: skip doctor in orchestration mode
 - `--strict`: make doctor warnings fail the run
+- `--terse`: human mode single-line summary output
 - `--json`: emit one orchestration report
 
 Notes:
 
 - On orchestration failure with `--json`, Kimen emits a report on `stdout` (similar to `sync preflight`).
 - Existing explicit subcommands (`sync push/pull/changes/resolve/status/conflicts/...`) remain available for expert/debug workflows.
+- Remote selection when `--remote` is omitted uses this order:
+  - `KIMEN_REMOTE` (if set)
+  - uniquely inferred sync-state remote
+  - `origin` (if configured)
+  - only configured remote
+  - otherwise: error requiring explicit `--remote`
 
 Examples:
 
 ```bash
 kimen sync
+kimen sync --terse
 kimen sync --check --json
 kimen sync --dry-run --json
 kimen sync --remote team --json
@@ -907,6 +916,7 @@ What it does:
 - Compares local baseline state to the remote bundle revision.
 - Reports whether pushing is safe or pulling is required.
 - `--strict` exits non-zero when push is currently blocked.
+- `--terse` emits a one-line human summary (`remote=... in_sync=... can_push=...`).
 
 Key fields (`--json`):
 
@@ -927,6 +937,7 @@ Examples:
 
 ```bash
 kimen sync status --remote team
+kimen sync status --remote team --terse
 kimen sync status --remote team --stale-threshold 30m
 kimen sync status --remote team --strict --json
 kimen sync status --remote team --json
@@ -1028,11 +1039,13 @@ What it does:
 - Also reports lock state (`has_lock`, lock metadata), useful when contention and conflict happen together.
 - Includes `blockers` and `recommended_action` for automation decisioning.
 - `--strict` exits non-zero when push is currently blocked by either conflict or lock.
+- `--terse` emits a one-line human summary (`remote=... has_conflict=... reason=...`).
 
 Examples:
 
 ```bash
 kimen sync conflicts --remote team
+kimen sync conflicts --remote team --terse
 kimen sync conflicts --remote team --stale-threshold 30m
 kimen sync conflicts --remote team --strict --json
 kimen sync conflicts --remote team --json

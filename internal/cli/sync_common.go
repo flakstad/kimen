@@ -14,6 +14,8 @@ import (
 var errSyncConflict = errors.New("sync conflict")
 var errRemotePushLockExists = errors.New("remote push lock exists")
 
+const envRemoteName = "KIMEN_REMOTE"
+
 type syncConflictDetails struct {
 	HasConflict bool
 	Reason      string
@@ -69,21 +71,66 @@ func syncConditionDetailsFromError(err error) (syncConditionError, bool) {
 }
 
 func resolveRemote(c config, name string) (remoteConfig, error) {
-	if strings.TrimSpace(name) != "" {
+	if explicit := strings.TrimSpace(name); explicit != "" {
 		for _, r := range c.Remotes {
-			if r.Name == name {
+			if r.Name == explicit {
 				return r, nil
 			}
 		}
-		return remoteConfig{}, fmt.Errorf("remote %q not found", name)
+		return remoteConfig{}, fmt.Errorf("remote %q not found", explicit)
 	}
 	if len(c.Remotes) == 0 {
 		return remoteConfig{}, errors.New("no remotes configured")
 	}
-	if len(c.Remotes) > 1 {
-		return remoteConfig{}, errors.New("multiple remotes configured; use --remote")
+	if len(c.Remotes) == 1 {
+		return c.Remotes[0], nil
 	}
-	return c.Remotes[0], nil
+
+	if envRemote := strings.TrimSpace(os.Getenv(envRemoteName)); envRemote != "" {
+		i := findRemoteIndex(c.Remotes, envRemote)
+		if i < 0 {
+			return remoteConfig{}, fmt.Errorf("remote %q not found (from %s)", envRemote, envRemoteName)
+		}
+		return c.Remotes[i], nil
+	}
+
+	if inferred, ok := inferRemoteFromSyncState(c); ok {
+		return inferred, nil
+	}
+
+	if i := findRemoteIndex(c.Remotes, "origin"); i >= 0 {
+		return c.Remotes[i], nil
+	}
+
+	return remoteConfig{}, errors.New("multiple remotes configured; use --remote or set KIMEN_REMOTE")
+}
+
+func inferRemoteFromSyncState(c config) (remoteConfig, bool) {
+	if len(c.Sync) == 0 {
+		return remoteConfig{}, false
+	}
+	var selected remoteConfig
+	found := false
+	for _, r := range c.Remotes {
+		state, ok := c.Sync[r.Name]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(state.LastSeenRev) == "" &&
+			strings.TrimSpace(state.LastLocalRev) == "" &&
+			len(state.BaselineSecretHashes) == 0 {
+			continue
+		}
+		if found {
+			return remoteConfig{}, false
+		}
+		selected = r
+		found = true
+	}
+	if !found {
+		return remoteConfig{}, false
+	}
+	return selected, true
 }
 
 func findRemoteIndex(remotes []remoteConfig, name string) int {
