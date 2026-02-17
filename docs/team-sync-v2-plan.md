@@ -141,15 +141,45 @@ Acceptance gates:
 - documented runbooks updated
 - strict CI templates remain compatible
 
+## v2.5: Documentation parity and API alignment
+
+Goal:
+
+- make docs the canonical reflection of shipped behavior
+
+Status: implemented.
+
+Scope:
+
+- `README.md` (status, feature list, quickstart, sync workflows)
+- `docs/cli.md` (all sync/remote/doctor/init surfaces and examples)
+- `docs/automation-contract.md` (JSON/exit-code contract parity)
+- `docs/team-sync-v1.md` + `docs/team-sync-v1-checklist.md` (operating runbooks and guarantees)
+- `docs/team-sync.md` + `docs/team-sync-roadmap.md` (separate “implemented now” from directional roadmap)
+- supporting docs that reference sync status/capabilities (`docs/when-to-use.md`, `docs/stability.md`, release notes/checklists)
+
+Acceptance gates:
+
+- no user-facing command examples that fail against current CLI surface
+- no stale “proposed/future-only” wording for implemented Team Sync v1/v2 behavior
+- README and docs agree on:
+  - default orchestration flow (`kimen sync`)
+  - conflict/reconcile model (`sync changes`, `sync pull --reconcile`, `sync resolve`)
+  - strict preflight/gating patterns (`sync preflight --strict`, `doctor --strict`)
+- docs clearly distinguish:
+  - implemented v1/v2 sync behavior
+  - directional post-v2 roadmap items
+
 ## Migration and compatibility
 
 - existing `sync` subcommands remain source-compatible
 - orchestration mode is additive and becomes the recommended default
 - CI can continue to use strict explicit commands or move to `kimen sync --check --json`
 
-## Work order
+## Work order (updated)
 
-1. Implement v2.1 command behavior + tests.
-2. Update CLI + automation contract docs.
-3. Re-run full test + e2e matrix.
-4. Iterate on v2.2 conflict intelligence.
+1. Complete v2.5 docs parity matrix (README + all sync/API docs). (done)
+2. Update `README.md` as canonical operator entrypoint. (done)
+3. Refresh `docs/cli.md` and `docs/automation-contract.md` to exact command/output behavior. (done)
+4. Align team sync narrative docs (`team-sync-v1`, `team-sync`, `team-sync-roadmap`) with shipped v1/v2 state. (done)
+5. Re-run command-example validation and e2e docs checks (`go test ./...`, `make sync-e2e-all`). (done)

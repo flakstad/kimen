@@ -17,6 +17,7 @@ Release date: {{DATE}}
 - `bundle`: JSON + typed exits
 - `config`: JSON/typed failures on key paths
 - `run` / `render` / `plan` / `envfile`: aligned machine behavior
+- `remote` / `sync`: team sync orchestration + explicit operator subcommands
 
 ### Mapping and planning
 
@@ -31,6 +32,7 @@ Release date: {{DATE}}
 - CI workflow templates:
   - `.github/workflows/kimen-pr-safety-template.yml`
   - `.github/workflows/kimen-deploy-template.yml`
+  - `.github/workflows/kimen-sync-gate-template.yml`
 
 ### Docs
 
@@ -44,8 +46,9 @@ Release date: {{DATE}}
 
 ## Known limitations
 
-- Local-first only; no mandatory remote.
-- Team sync remains directional/design-stage.
+- Local-first runtime remains the core model; remote sync is optional.
+- Team sync currently targets `fs` and `git` remotes only.
+- No hosted coordination service in the shipped product today.
 
 ## Upgrade notes
 

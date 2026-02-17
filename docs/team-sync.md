@@ -1,98 +1,96 @@
 # Team sync and collaboration
 
-Kimen is local-first and complete without a server. Teams still need shared state. This document describes collaboration models and where Kimen could go.
+Kimen is local-first and complete without a server. Teams still need shared state, conflict handling, and automation-safe coordination.
+
+This document describes what is implemented now and what remains directional.
 
 ## The invariant
 
 > Runtime behavior is always local: projections happen on the machine running the command or service.
 
-“Team sync” should not become “central runtime dependency”.
+Team sync should never become a required runtime control plane.
 
-## Today (works now): bundles + shared transport
+## Implemented now (Team Sync v1 + v2)
 
-Kimen supports transporting a vault as ciphertext:
+Kimen ships first-class team sync for `fs` and `git` remotes:
 
-- `kimen bundle seal`: encrypt `vault.db` into `vault.age`
-- `kimen bundle open`: decrypt `vault.age` into a local vault file
+- `kimen remote add/get/set/list/rm`
+- orchestration-first `kimen sync` (with `--check`, `--dry-run`, `--json`, `--terse`)
+- explicit subcommands for operators/automation:
+  - `sync preflight`
+  - `sync status`
+  - `sync conflicts`
+  - `sync changes`
+  - `sync pull` / `sync push`
+  - `sync resolve`
+  - `sync reset-baseline` / `sync unlock` / `sync restore`
 
-This enables:
+Current safety model:
 
-- CI: store `vault.age` in a repo/artifact store; decrypt inside the job
-- Small teams: share `vault.age` through any channel
+- ciphertext-only transport (`vault.age`) over remote storage
+- runtime still local even when sync is configured
+- typed conflict/precondition exits (`31` and `32`)
+- strict CI gating with `sync preflight --strict`
+- no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`
 
-Limitations:
+Current conflict model:
 
-- Whole-vault transport is coarse.
-- Concurrent edits don’t merge cleanly.
+- baseline rev checks detect remote drift before push
+- disjoint local+remote key changes can reconcile safely (`sync pull --reconcile`)
+- overlapping key changes require explicit operator intent (`sync resolve --take local|remote`)
 
-## Team models (in increasing capability)
+## Supported operating models
 
-### 1) Single-writer shared vault
+### 1) Single-writer (recommended default)
 
-One operator/CI job is the writer. Everyone else consumes projections.
-
-Pros:
-
-- Simple and safe
-- Easy to automate
-
-Cons:
-
-- Not collaborative for writes
-
-### 2) Locking over whole-vault bundles
-
-Keep whole-vault bundles, but add coordination (a lease/lock) so only one writer updates at a time.
-
-Pros:
-
-- Avoids merge semantics
-
-Cons:
-
-- Serializes edits
-- Requires a lock mechanism (Git-based or hosted)
-
-### 3) Merge-friendly canonical store (Git-style collaboration)
-
-Adopt a merge-friendly canonical format (e.g. append-only encrypted events, per-device shards), so Git can merge and clients can deterministically replay.
+One operator/CI pipeline pushes; everyone else pulls.
 
 Pros:
 
-- Real multi-writer collaboration without a trusted server
+- lowest operational complexity
+- predictable CI behavior
 
 Cons:
 
-- Requires a new storage format and membership/key management story
+- write throughput is serialized
 
-### 4) Hosted sync & coordination (optional)
+### 2) Coordinated multi-writer
 
-A hosted service can remain “no-trust” (ciphertext only) and still provide:
-
-- membership
-- key exchange assistance
-- conflict resolution/coordination
-- audit aggregation
+Multiple writers coordinate using status/conflict checks plus reconcile/resolve flow.
 
 Pros:
 
-- Best UX for teams
-- Doesn’t require hosting plaintext secrets or executing projections
+- supports multiple team editors without centralized runtime service
 
 Cons:
 
-- You operate a service; teams depend on it for sync (not runtime)
+- requires stronger operational discipline
 
-## Recommended direction
+## CI guidance
 
-Kimen should ideally support multiple collaboration backends:
+For gating deployments and pipelines, use:
 
-- Git-first, self-managed remotes (for teams that want to own transport)
-- Optional hosted coordination (for teams that want the best UX)
+```bash
+kimen sync preflight --remote team --strict --json
+```
 
-Both can preserve the local-first core if the server never sees plaintext secrets and never participates in runtime projections.
+Interpretation:
 
-## Roadmap
+- exit `0`: safe to proceed
+- exit `31`: sync conflict (pull/reconcile/resolve required)
+- exit `32`: non-conflict precondition failure (lock/missing config/other blockers)
 
-See `docs/team-sync-roadmap.md` for a phased implementation plan.
+## What remains directional
 
+These are not part of the current shipped sync model:
+
+- merge-friendly canonical storage redesign (beyond whole-vault bundle transport)
+- optional hosted coordination service (ciphertext-only)
+- richer membership/key-management UX for larger organizations
+
+## Related docs
+
+- `docs/team-sync-v1.md`: v1 guarantees and runbooks
+- `docs/team-sync-v2-plan.md`: v2 implementation milestones and status
+- `docs/automation-contract.md`: canonical JSON and exit-code contract
+- `docs/team-sync-roadmap.md`: delivered milestones and directional next phases

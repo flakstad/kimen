@@ -8,6 +8,7 @@ Use Kimen when you want:
 - Secrets materialized into files with strict perms (`kimen render`, `kimen envfile`)
 - A safe planning step that never prints secret values (`kimen plan`)
 - Repeatable intent via maps/profiles (`--map`, `--profile`)
+- Team sync for `fs`/`git` remotes with orchestration-first defaults (`kimen sync`, `sync preflight`)
 
 Use something else when you want:
 
@@ -17,4 +18,3 @@ Use something else when you want:
 - First-class Kubernetes secret delivery patterns (sidecars/operators/injectors)
 
 Kimen can still complement those systems as a projection tool.
-

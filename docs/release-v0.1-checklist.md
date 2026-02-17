@@ -10,7 +10,7 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 - [ ] Smoke pass completed for:
   - `vault`, `secret`, `run`, `render`, `envfile`
   - `plan` / `project plan`
-  - `bundle` and `doctor`
+  - `bundle`, `doctor`, `remote`, `sync`
 - [ ] CI templates reviewed:
   - `.github/workflows/kimen-pr-safety-template.yml`
   - `.github/workflows/kimen-deploy-template.yml`
@@ -21,6 +21,7 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 - [ ] `docs/automation-contract.md` is the canonical machine contract.
 - [ ] `docs/recommended-paths.md` reflects preferred usage.
 - [ ] `docs/ci-workflow-templates.md` matches template content.
+- [ ] `docs/team-sync.md` + `docs/team-sync-roadmap.md` match shipped Team Sync behavior.
 
 ## 3) Tag + publish
 

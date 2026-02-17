@@ -9,6 +9,7 @@ This doc sets expectations so adopters know what is likely to be stable and what
 - CLI flags and subcommands (especially before 1.0)
 - Vault/bundle format details (with migrations or export/import paths)
 - Map/profile file format (new directives may be added)
+- Team sync data/metadata semantics (while preserving documented automation contracts)
 
 ## What we try to preserve
 
@@ -34,4 +35,3 @@ Until Kimen declares a 1.0:
 
 - expect breaking changes occasionally
 - expect docs to describe migration/export options when formats change
-

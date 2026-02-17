@@ -17,9 +17,9 @@ That’s what projections are for: `kimen run` scopes secrets to a single proces
 Kimen is early-stage and evolving. The CLI and on-disk formats may change.
 Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 
-## Team Sync v1
+## Team Sync (current state)
 
-Team Sync v1 is now implemented for `fs` and `git` remotes, including:
+Team Sync v1 + v2 behavior is implemented for `fs` and `git` remotes, including:
 
 - orchestration-first default `kimen sync` (with `--check` / `--dry-run` / `--json`)
 - `sync preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`
@@ -34,6 +34,7 @@ See:
 
 - `docs/team-sync-v1.md`
 - `docs/team-sync-v1-checklist.md`
+- `docs/team-sync-v2-plan.md`
 - `docs/automation-contract.md`
 
 ## Mental model
@@ -185,12 +186,13 @@ Ideas and possible future projection types live in `docs/roadmap.md`.
 - `docs/ci-workflow-templates.md`: choose and adapt workflow templates in `.github/workflows/`
 - `docs/recommended-paths.md`: recommended default paths for dev, CI, and systemd usage
 - `docs/maps.md`: map files and profiles (`--map` / `--profile`)
-- `docs/plan-1-2-3.md`: next implementation plan (maps/profiles, plan, envfile)
+- `docs/plan-1-2-3.md`: historical milestone plan (maps/profiles, plan, envfile)
 - `docs/when-to-use.md`: guidance on when Kimen fits (and when it doesn’t)
 - `docs/alternatives.md`: adjacent tools and comparisons
-- `docs/team-sync.md`: team collaboration models and future direction
-- `docs/team-sync-roadmap.md`: team sync roadmap (directional)
+- `docs/team-sync.md`: Team Sync current model, runbooks, and boundaries
+- `docs/team-sync-roadmap.md`: delivered sync milestones + directional next phases
 - `docs/team-sync-v1.md`: Team Sync v1 guarantees, operating models, and runbooks
+- `docs/team-sync-v2-plan.md`: Team Sync v2 implementation plan and status
 - `docs/team-sync-v1-checklist.md`: Team Sync v1 exit checklist
 - `docs/threat-model.md`: what Kimen does and does not protect against
 - `docs/stability.md`: early-stage stability and upgrade expectations

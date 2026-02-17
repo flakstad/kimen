@@ -1,125 +1,71 @@
-# Team sync roadmap (directional)
+# Team sync roadmap
 
-This document turns `docs/team-sync.md` into an actionable roadmap.
+This roadmap tracks delivered Team Sync milestones and what comes after v2.
 
-Goal: strong team collaboration while preserving Kimen’s core invariant:
+## Invariant
 
 > Projections and runtime behavior are always local.
-> Any “remote” must not be required to run a command, and must not need plaintext secrets.
+> Any remote sync layer must be optional for runtime and must not require plaintext secrets.
 
-Kimen should ideally support multiple collaboration backends:
+## Delivered milestones
 
-- **Git-first / self-managed** remotes (teams bring their own Git hosting or storage)
-- **Optional hosted coordination** (best UX, still ciphertext-only)
-
-## Where we are today
-
-Kimen has:
-
-- local vault (`vault.db`) encrypted at rest
-- projections (`run`, `render`, `envfile`) + planning (`plan`)
-- bundle transport (`bundle seal/open`) using `age`
-
-This supports CI and small-team workflows, but whole-vault transport is coarse and doesn’t merge well under concurrent edits.
-
-## Phase 0 (done): make intent repeatable and safe
-
-Status: implemented.
+### Phase 0 (delivered): projection ergonomics foundation
 
 - maps/profiles (`--map`, `--profile`)
-- `plan` / `run --dry-run` (no values)
-- `envfile` projection (atomic write, strict validation)
-- bundles for CI and “no-trust” transport
+- plan/dry-run surfaces (`plan`, `run --dry-run`)
+- `envfile` projection
+- age bundle transport (`bundle seal/open`)
 
-## Phase 1: introduce a first-class “remote” concept (without redesigning storage)
+### Phase 1 (delivered): remote-backed Team Sync v1
 
-Purpose: automate the currently-manual push/pull loop, while keeping the storage format unchanged.
+- first-class remotes (`remote add/get/set/list/rm`)
+- sync status/conflict/push/pull lifecycle
+- `fs` + `git` remote backends
+- strict conflict/precondition exits for automation (`31`, `32`)
+- strict CI gating entrypoint (`sync preflight --strict`)
 
-### CLI surface (proposed)
+### Phase 2 (delivered): Team Sync v2 orchestration and reconcile
 
-- `kimen remote add <name> …`
-- `kimen remote list`
-- `kimen sync status [--remote <name>]`
-- `kimen sync push [--remote <name>]`
-- `kimen sync pull [--remote <name>]`
+- orchestration-first default `kimen sync`
+- conflict intelligence (`sync changes` with key-level classification)
+- guided disjoint reconcile (`sync pull --reconcile`)
+- explicit overlapping-key conflict resolution (`sync resolve --take ...`)
+- improved remote auto-selection + terse operator output
 
-### Backend types (proposed)
+For implementation-level details and acceptance gates, see `docs/team-sync-v2-plan.md`.
 
-- **git**: store `vault.age` in a repo (ciphertext); manage push/pull via git
-- **fs**: store `vault.age` in a shared folder (Syncthing/Dropbox/etc.)
-- (later) **s3/http**: store bundles in a blob store (still ciphertext-only)
+## Directional next phases
 
-### Concurrency model (phase 1)
+### Phase 3 (directional): merge-friendly canonical store
 
-Choose one explicit model to avoid footguns:
+Purpose:
 
-1) **single-writer** (recommended v1 default)
-   - one operator/CI pipeline owns updates
-   - everyone else is read-only consumer
+- move beyond whole-vault bundle semantics for stronger multi-writer collaboration
 
-2) **lock/lease** (optional)
-   - before pushing, acquire a lock (implemented in the remote)
-   - avoids merge semantics while supporting multiple writers (serialized)
+Possible direction:
 
-This phase should also add safe mechanics for updating the local vault:
+- append-only encrypted events and/or per-replica shards
+- deterministic replay into derived local state
+- explicit conflict tools with inspectable history
 
-- pull → verify bundle decrypts → atomic swap of local vault file
+### Phase 4 (directional): optional hosted coordination
 
-## Phase 2: merge-friendly canonical store (Git-native multi-writer)
+Purpose:
 
-Purpose: enable collaborative writes without requiring locks or a central service.
+- improve team UX without changing local runtime guarantees
 
-This requires a new canonical storage model designed for merges. A proven pattern is:
+Possible scope:
 
-- **append-only encrypted events**
-- **per-replica shards** (each device appends to its own log file to minimize conflicts)
-- deterministic replay into a derived local index for fast reads
+- ciphertext-only storage/coordination
+- membership/key exchange assistance
+- lock/lease and audit aggregation for larger teams
 
-### Outcomes (phase 2)
+Non-goal:
 
-- Git merges become “normal”: multiple writers can push concurrently
-- local rebuild is possible: delete derived state and replay from events
-- conflict tooling can be explicit and inspectable
+- hosted plaintext runtime secret execution
 
-### Key design decisions (phase 2)
+## Near-term execution focus
 
-- **Object model**
-  - per-secret objects vs append-only events
-  - how deletes/renames are represented
-
-- **Encryption and metadata**
-  - which fields are plaintext (e.g. secret names) vs encrypted
-  - versioned record format for forward compatibility
-
-- **Membership changes**
-  - how recipients/devices are managed
-  - rewrap/rotation operations when membership changes
-
-## Phase 3: optional hosted coordination (ciphertext-only)
-
-Purpose: offer the best UX for teams that don’t want to self-manage Git workflows.
-
-This is not “Kimen in the cloud”. It is coordination:
-
-- ciphertext blob/object storage
-- membership management + key exchange assistance
-- locks/leases (if needed)
-- optional audit aggregation (non-secret metadata)
-
-The service should be:
-
-- optional and replaceable (self-hostable or bring-your-own)
-- never a runtime dependency (projections always local)
-- never a plaintext secret holder
-
-## What we should build next
-
-If we want team usage soon without overbuilding, the next practical step is Phase 1:
-
-- a remote abstraction
-- `sync push/pull/status`
-- Git backend for ciphertext bundles
-- single-writer defaults (plus optional locks later)
-
-Then we can design Phase 2 deliberately using patterns already proven in other local-first systems.
-
+- complete docs/API parity for all shipped sync behavior (README + docs)
+- keep fs/git sync e2e coverage green (`make sync-e2e-all`)
+- preserve automation contract stability as sync ergonomics evolve

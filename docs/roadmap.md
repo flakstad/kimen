@@ -95,9 +95,13 @@ Suggested execution:
 2) Start with static landing + lightweight docs routing.
 3) Add signup/onboarding flow stubs once hosted coordination scope is defined.
 
-## Team collaboration (directional)
+## Team collaboration (shipped + directional)
 
-For teams, Kimen can evolve along two compatible tracks:
+Shipped today:
+
+- Team Sync v1/v2 for `fs` and `git` remotes (`remote`, `sync`, `sync preflight`, `sync pull --reconcile`, `sync resolve`).
+
+Directional next tracks:
 
 - **Git-first remotes**: merge-friendly encrypted objects/events that work well with Git, plus tooling for conflicts, locks, and membership changes.
 - **Optional hosted coordination**: ciphertext sync + membership + audit aggregation, without hosting plaintext secrets or executing projections.
