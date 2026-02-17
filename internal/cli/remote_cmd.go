@@ -114,6 +114,7 @@ func newRemoteSetCommand() *cobra.Command {
 	var branch string
 	var bundlePath string
 	var deriveRecipient bool
+	var noDeriveRecipient bool
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -135,6 +136,9 @@ func newRemoteSetCommand() *cobra.Command {
 				if !deriveRecipient {
 					return remoteCommandError(cmd, jsonOut, errors.New("set at least one of --type, --path, --recipient, --identity, --branch, --bundle-path, --derive-recipient"))
 				}
+			}
+			if deriveRecipient && noDeriveRecipient {
+				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --no-derive-recipient"))
 			}
 			if deriveRecipient && recipientChanged {
 				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --recipient"))
@@ -169,7 +173,11 @@ func newRemoteSetCommand() *cobra.Command {
 			if identityChanged {
 				r.Identity = strings.TrimSpace(identity)
 			}
-			if deriveRecipient {
+			shouldDeriveRecipient := deriveRecipient
+			if !shouldDeriveRecipient && !noDeriveRecipient && !recipientChanged && identityChanged && strings.TrimSpace(r.Identity) != "" {
+				shouldDeriveRecipient = true
+			}
+			if shouldDeriveRecipient {
 				identityPath := strings.TrimSpace(r.Identity)
 				if identityPath == "" {
 					return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient requires --identity (or existing remote identity)"))
@@ -233,7 +241,8 @@ func newRemoteSetCommand() *cobra.Command {
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull (set empty string to clear)")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (set empty string for default)")
 	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (set empty string for default)")
-	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "derive recipient from identity file (requires --identity or existing identity)")
+	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "force deriving recipient from identity file (requires --identity or existing identity)")
+	cmd.Flags().BoolVar(&noDeriveRecipient, "no-derive-recipient", false, "disable automatic recipient derivation when --identity is provided")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
@@ -246,6 +255,7 @@ func newRemoteAddCommand() *cobra.Command {
 	var branch string
 	var bundlePath string
 	var deriveRecipient bool
+	var noDeriveRecipient bool
 	var jsonOut bool
 
 	cmd := &cobra.Command{
@@ -263,6 +273,9 @@ func newRemoteAddCommand() *cobra.Command {
 			remoteTypeFlag = normalizeRemoteType(remoteTypeFlag)
 			if remoteTypeFlag != "fs" && remoteTypeFlag != "git" {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("unsupported remote type %q (expected fs or git)", remoteTypeFlag))
+			}
+			if deriveRecipient && noDeriveRecipient {
+				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --no-derive-recipient"))
 			}
 			if deriveRecipient && strings.TrimSpace(recipient) != "" {
 				return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient cannot be combined with --recipient"))
@@ -284,8 +297,10 @@ func newRemoteAddCommand() *cobra.Command {
 			if findRemoteIndex(c.Remotes, name) >= 0 {
 				return remoteCommandError(cmd, jsonOut, fmt.Errorf("remote %q already exists", name))
 			}
-			if deriveRecipient {
-				identityPath := strings.TrimSpace(identity)
+			identityPath := strings.TrimSpace(identity)
+			recipient = strings.TrimSpace(recipient)
+			shouldDeriveRecipient := deriveRecipient || (!noDeriveRecipient && recipient == "" && identityPath != "")
+			if shouldDeriveRecipient {
 				if identityPath == "" {
 					return remoteCommandError(cmd, jsonOut, errors.New("--derive-recipient requires --identity"))
 				}
@@ -300,8 +315,8 @@ func newRemoteAddCommand() *cobra.Command {
 				Name:       name,
 				Type:       remoteTypeFlag,
 				Path:       path,
-				Recipient:  strings.TrimSpace(recipient),
-				Identity:   strings.TrimSpace(identity),
+				Recipient:  recipient,
+				Identity:   identityPath,
 				Branch:     strings.TrimSpace(branch),
 				BundlePath: strings.TrimSpace(bundlePath),
 			}
@@ -334,7 +349,8 @@ func newRemoteAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (default: main)")
 	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (default: vault.age)")
-	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "derive recipient from identity file (requires --identity)")
+	cmd.Flags().BoolVar(&deriveRecipient, "derive-recipient", false, "force deriving recipient from identity file (requires --identity)")
+	cmd.Flags().BoolVar(&noDeriveRecipient, "no-derive-recipient", false, "disable automatic recipient derivation when --identity is provided")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }

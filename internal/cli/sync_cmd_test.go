@@ -586,11 +586,10 @@ func TestCLI_RemoteAddAndSet_DeriveRecipientFromIdentity(t *testing.T) {
 		"remote", "add", "origin",
 		"--path", remoteDir,
 		"--identity", identityOne,
-		"--derive-recipient",
 		"--json",
 	}, nil)
 	if err != nil {
-		t.Fatalf("remote add --derive-recipient: %v (stderr=%s)", err, errBuf)
+		t.Fatalf("remote add with implicit recipient derivation: %v (stderr=%s)", err, errBuf)
 	}
 	addResp := parseJSONMap(t, out)
 	addRemote, ok := addResp["remote"].(map[string]any)
@@ -605,11 +604,10 @@ func TestCLI_RemoteAddAndSet_DeriveRecipientFromIdentity(t *testing.T) {
 	out, errBuf, err = runCLI([]string{
 		"remote", "set", "origin",
 		"--identity", identityTwo,
-		"--derive-recipient",
 		"--json",
 	}, nil)
 	if err != nil {
-		t.Fatalf("remote set --derive-recipient: %v (stderr=%s)", err, errBuf)
+		t.Fatalf("remote set with implicit recipient derivation: %v (stderr=%s)", err, errBuf)
 	}
 	setResp := parseJSONMap(t, out)
 	setRemote, ok := setResp["remote"].(map[string]any)
@@ -618,6 +616,24 @@ func TestCLI_RemoteAddAndSet_DeriveRecipientFromIdentity(t *testing.T) {
 	}
 	if setRemote["recipient"] != recipientTwo {
 		t.Fatalf("expected derived recipient in set response: %#v", setResp)
+	}
+
+	out, errBuf, err = runCLI([]string{
+		"remote", "set", "origin",
+		"--identity", identityOne,
+		"--no-derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote set --no-derive-recipient: %v (stderr=%s)", err, errBuf)
+	}
+	setResp = parseJSONMap(t, out)
+	setRemote, ok = setResp["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote payload in set response: %#v", setResp)
+	}
+	if setRemote["recipient"] != recipientTwo {
+		t.Fatalf("expected --no-derive-recipient to preserve existing recipient: %#v", setResp)
 	}
 
 	out, errBuf, err = runCLI([]string{
@@ -633,7 +649,7 @@ func TestCLI_RemoteAddAndSet_DeriveRecipientFromIdentity(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected remote payload in set response: %#v", setResp)
 	}
-	if setRemote["recipient"] != recipientTwo {
+	if setRemote["recipient"] != recipientOne {
 		t.Fatalf("expected recipient to stay derivable from existing identity: %#v", setResp)
 	}
 }
@@ -669,7 +685,6 @@ func TestCLI_RemoteDeriveRecipient_Validation(t *testing.T) {
 		"remote", "add", "main",
 		"--path", filepath.Join(dir, "main-remote"),
 		"--identity", identityPath,
-		"--derive-recipient",
 		"--json",
 	}, nil)
 	if err != nil {
@@ -690,6 +705,19 @@ func TestCLI_RemoteDeriveRecipient_Validation(t *testing.T) {
 	assertExitCode(t, err, exitcode.CodeRemoteFailed)
 
 	_, errOut, err = runCLI([]string{
+		"remote", "add", "conflict",
+		"--path", filepath.Join(dir, "conflict-remote"),
+		"--identity", identityPath,
+		"--derive-recipient",
+		"--no-derive-recipient",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote add with --derive-recipient + --no-derive-recipient to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+
+	_, errOut, err = runCLI([]string{
 		"remote", "set", "main",
 		"--recipient", recipient,
 		"--derive-recipient",
@@ -699,6 +727,37 @@ func TestCLI_RemoteDeriveRecipient_Validation(t *testing.T) {
 		t.Fatalf("expected remote set with --recipient + --derive-recipient to fail")
 	}
 	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+
+	_, errOut, err = runCLI([]string{
+		"remote", "set", "main",
+		"--derive-recipient",
+		"--no-derive-recipient",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected remote set with --derive-recipient + --no-derive-recipient to fail")
+	}
+	assertExitCode(t, err, exitcode.CodeRemoteFailed)
+
+	out, errBuf, err := runCLI([]string{
+		"remote", "add", "nodefault",
+		"--path", filepath.Join(dir, "nodefault-remote"),
+		"--identity", identityPath,
+		"--no-derive-recipient",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add --no-derive-recipient: %v (stderr=%s)", err, errBuf)
+	}
+	addResp := parseJSONMap(t, out)
+	addRemote, ok := addResp["remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote payload in add response: %#v", addResp)
+	}
+	recipientRaw, _ := addRemote["recipient"].(string)
+	if strings.TrimSpace(recipientRaw) != "" {
+		t.Fatalf("expected empty recipient with --no-derive-recipient: %#v", addResp)
+	}
 }
 
 func TestCLI_SyncPushConflictWhenRemoteChanged(t *testing.T) {
