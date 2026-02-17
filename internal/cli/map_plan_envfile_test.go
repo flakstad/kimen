@@ -55,6 +55,9 @@ func TestCLI_Map_Profile_Plan_Envfile(t *testing.T) {
 	if p["action"] != "plan" {
 		t.Fatalf("expected action=plan, got %#v", p)
 	}
+	if p["exit_code"] != float64(0) {
+		t.Fatalf("expected exit_code=0, got %#v", p)
+	}
 	if p["mode"] != "run" {
 		t.Fatalf("unexpected mode: %#v", p["mode"])
 	}
@@ -114,6 +117,9 @@ func TestCLI_ProjectPlan_JSON(t *testing.T) {
 	}
 	if p["action"] != "plan" {
 		t.Fatalf("expected action=plan, got %#v", p)
+	}
+	if p["exit_code"] != float64(0) {
+		t.Fatalf("expected exit_code=0, got %#v", p)
 	}
 	if p["mode"] != "run" {
 		t.Fatalf("unexpected mode: %#v", p["mode"])

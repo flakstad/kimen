@@ -247,7 +247,7 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 		t.Fatalf("plan --json: %v (stderr=%s)", err, errBuf)
 	}
 	planResp := parseJSONMap(t, out)
-	requireJSONKeys(t, planResp, "ok", "action", "mode", "env", "files", "env_paths", "cleanup")
+	requireJSONKeys(t, planResp, "ok", "action", "exit_code", "mode", "env", "files", "env_paths", "cleanup")
 	if planResp["action"] != "plan" || !jsonBool(planResp, "ok") {
 		t.Fatalf("unexpected plan payload: %#v", planResp)
 	}

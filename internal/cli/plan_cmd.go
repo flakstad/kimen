@@ -17,6 +17,7 @@ import (
 type planOutput struct {
 	OK           bool                     `json:"ok"`
 	Action       string                   `json:"action"`
+	ExitCode     int                      `json:"exit_code"`
 	Mode         string                   `json:"mode"`
 	Command      []string                 `json:"command,omitempty"`
 	Env          []projection.EnvMapping  `json:"env"`
@@ -180,13 +181,14 @@ func resolveAgainstMappings(againstMap, againstProfile string) (projection.Reque
 
 func planFromResolved(mode string, command []string, req projection.Request, envPaths []projection.EnvPathMapping, filesDir string) planOutput {
 	out := planOutput{
-		OK:      true,
-		Action:  "plan",
-		Mode:    mode,
-		Command: append([]string(nil), command...),
-		Env:     append([]projection.EnvMapping(nil), req.Envs...),
-		Files:   append([]projection.FileMapping(nil), req.Files...),
-		Stdin:   strings.TrimSpace(req.Stdin),
+		OK:       true,
+		Action:   "plan",
+		ExitCode: 0,
+		Mode:     mode,
+		Command:  append([]string(nil), command...),
+		Env:      append([]projection.EnvMapping(nil), req.Envs...),
+		Files:    append([]projection.FileMapping(nil), req.Files...),
+		Stdin:    strings.TrimSpace(req.Stdin),
 	}
 
 	switch mode {

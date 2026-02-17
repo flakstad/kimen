@@ -103,7 +103,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `plan --json` and `project plan --json`:
 
-- success: `{"ok":true,"action":"plan","mode":"run|render|envfile",...}`
+- success: `{"ok":true,"action":"plan","exit_code":0,"mode":"run|render|envfile",...}`
   - includes `command`, `env`, `files`, `stdin`, `env_paths`, optional `diff`
 - error: standard error envelope on `stderr`
 
@@ -120,7 +120,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `run --json`:
 
 - success:
-  - for `--dry-run`: emits plan payload JSON on `stdout` (`{"ok":true,"action":"plan",...}`)
+  - for `--dry-run`: emits plan payload JSON on `stdout` (`{"ok":true,"action":"plan","exit_code":0,...}`)
   - for normal execution: no success envelope (child process owns stdout/stderr)
 - setup/projection errors: standard error envelope on `stderr`
 - child command non-zero exit: forwarded child exit code

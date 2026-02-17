@@ -615,7 +615,7 @@ When diff flags are used, output includes:
 
 Automation notes:
 
-- `kimen plan --json` success payloads include `ok: true` and `action: "plan"`.
+- `kimen plan --json` success payloads include `ok: true`, `action: "plan"`, and `exit_code: 0`.
 - `kimen plan --json` now emits a JSON error envelope on stderr when planning fails.
 - plan failures use exit code `21`.
 
