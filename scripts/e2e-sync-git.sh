@@ -150,8 +150,8 @@ printf 'b-only' | "$BIN" secret set note_remote --stdin >/dev/null
 as_actor_a
 RECONCILE_CHANGES_JSON="$("$BIN" sync changes --remote team --json)"
 assert_contains "$RECONCILE_CHANGES_JSON" '"can_reconcile":true'
-RECONCILE_PULL_JSON="$("$BIN" sync pull --remote team --reconcile --json)"
-assert_contains "$RECONCILE_PULL_JSON" '"action":"sync_pull_reconcile"'
+AUTO_RECONCILE_JSON="$("$BIN" sync --remote team --json)"
+assert_contains "$AUTO_RECONCILE_JSON" '"decision":"pull_reconcile"'
 NOTE_LOCAL_AFTER_RECONCILE="$("$BIN" secret get note_local --unsafe-stdout)"
 NOTE_REMOTE_AFTER_RECONCILE="$("$BIN" secret get note_remote --unsafe-stdout)"
 if [[ "$NOTE_LOCAL_AFTER_RECONCILE" != "a-only" || "$NOTE_REMOTE_AFTER_RECONCILE" != "b-only" ]]; then

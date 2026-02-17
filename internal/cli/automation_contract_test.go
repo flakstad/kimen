@@ -657,6 +657,134 @@ func TestCLI_Contract_SyncOrchestrationJSONShape(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncOrchestrationReconcileDecision(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+	vaultA := filepath.Join(dir, "vault-a.db")
+	configA := filepath.Join(dir, "config-a.json")
+	vaultB := filepath.Join(dir, "vault-b.db")
+	configB := filepath.Join(dir, "config-b.json")
+
+	restoreA := withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("vault init (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set api_key a1 (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p1"))
+	if err != nil {
+		restoreA()
+		t.Fatalf("secret set db_pw p1 (actor A): %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("remote add (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("initial sync push (actor A): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("a2-local"))
+	restoreA()
+	if err != nil {
+		t.Fatalf("secret set api_key a2-local (actor A): %v", err)
+	}
+
+	restoreB := withEnv(map[string]string{
+		envVaultPath:  vaultB,
+		envConfigPath: configB,
+		envPassphrase: "pass",
+	})
+	_, _, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("vault init (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("remote add (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "pull"}, nil)
+	if err != nil {
+		restoreB()
+		t.Fatalf("sync pull (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "db_pw", "--stdin"}, strings.NewReader("p2-remote"))
+	if err != nil {
+		restoreB()
+		t.Fatalf("secret set db_pw p2-remote (actor B): %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	restoreB()
+	if err != nil {
+		t.Fatalf("sync push (actor B): %v", err)
+	}
+
+	restoreA = withEnv(map[string]string{
+		envVaultPath:  vaultA,
+		envConfigPath: configA,
+		envPassphrase: "pass",
+	})
+	out, errBuf, err := runCLI([]string{"sync", "--check", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync --check --json (actor A): %v (stderr=%s)", err, errBuf)
+	}
+	checkReport := parseJSONMap(t, out)
+	requireJSONKeys(t, checkReport, "ok", "action", "decision", "exit_code")
+	if checkReport["decision"] != "would_pull_reconcile" || !jsonBool(checkReport, "ok") {
+		restoreA()
+		t.Fatalf("unexpected sync orchestration check decision payload: %#v", checkReport)
+	}
+
+	out, errBuf, err = runCLI([]string{"sync", "--json"}, nil)
+	if err != nil {
+		restoreA()
+		t.Fatalf("sync --json (actor A): %v (stderr=%s)", err, errBuf)
+	}
+	report := parseJSONMap(t, out)
+	requireJSONKeys(t, report, "ok", "action", "mode", "decision", "exit_code", "steps", "status")
+	if report["decision"] != "pull_reconcile" || !jsonBool(report, "ok") {
+		restoreA()
+		t.Fatalf("unexpected sync orchestration reconcile payload: %#v", report)
+	}
+	steps, _ := report["steps"].([]any)
+	if len(steps) == 0 {
+		restoreA()
+		t.Fatalf("expected non-empty steps in orchestration reconcile payload: %#v", report)
+	}
+	last, _ := steps[len(steps)-1].(map[string]any)
+	if last["name"] != "sync_pull_reconcile" {
+		restoreA()
+		t.Fatalf("expected last step sync_pull_reconcile, got %#v", last)
+	}
+	restoreA()
+}
+
 func TestCLI_Contract_SyncOrchestrationConflictFailureOnStdout(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
@@ -735,7 +863,7 @@ func TestCLI_Contract_SyncOrchestrationConflictFailureOnStdout(t *testing.T) {
 	if jsonBool(report, "ok") || report["decision"] != "blocked" {
 		t.Fatalf("unexpected sync orchestration conflict payload: %#v", report)
 	}
-	if report["exit_code"] != float64(exitcode.CodeSyncConflict) || report["reason"] != "remote_changed" {
+	if report["exit_code"] != float64(exitcode.CodeSyncConflict) || report["reason"] != "overlapping_changes" {
 		t.Fatalf("unexpected sync orchestration conflict fields: %#v", report)
 	}
 }

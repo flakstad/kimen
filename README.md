@@ -24,6 +24,7 @@ Team Sync v1 is now implemented for `fs` and `git` remotes, including:
 - orchestration-first default `kimen sync` (with `--check` / `--dry-run` / `--json`)
 - `sync preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`
 - disjoint-merge pulls via `sync pull --reconcile`
+- orchestration auto-reconcile for disjoint local+remote edits (`kimen sync` selects reconcile path)
 - explicit overlap conflict handling via `sync resolve --take local|remote`
 - strict CI gating via `sync preflight --strict`
 - no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`

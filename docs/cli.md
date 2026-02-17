@@ -844,7 +844,8 @@ What it does:
   - `noop`: already aligned
   - `push`: local changes can be published safely
   - `pull`: remote changes can be applied safely
-  - `blocked`: manual reconciliation is required
+  - `pull_reconcile`: disjoint local+remote key changes are merged safely
+  - `blocked`: conflict or precondition requires manual intervention
 - Executes push/pull automatically unless `--check` or `--dry-run` is set.
 
 Common flags:

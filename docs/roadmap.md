@@ -78,6 +78,23 @@ These are scoped so the CLI remains the primary API and tests stay strong:
    - harden `bundle seal/open` flows for GitHub Actions usage
    - doc templates for common CI patterns
 
+## Parallel track: service UI + landing (separate repo)
+
+This is intentionally separate from the CLI/runtime repo:
+
+- **Marketing/landing site**:
+  - public positioning, use cases, docs entrypoints, install/get-started CTA
+  - likely static hosting (GitHub Pages or equivalent)
+- **Service signup/app shell UI**:
+  - auth/onboarding/signup flows for optional hosted coordination
+  - should not become a runtime dependency for local projections
+
+Suggested execution:
+
+1) Create separate repo for web surfaces (landing + app shell).
+2) Start with static landing + lightweight docs routing.
+3) Add signup/onboarding flow stubs once hosted coordination scope is defined.
+
 ## Team collaboration (directional)
 
 For teams, Kimen can evolve along two compatible tracks:

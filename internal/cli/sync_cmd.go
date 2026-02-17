@@ -411,6 +411,8 @@ func newSyncCommand() *cobra.Command {
 						result.Decision = "would_push"
 					case "pull":
 						result.Decision = "would_pull"
+					case "pull_reconcile":
+						result.Decision = "would_pull_reconcile"
 					}
 				}
 				return renderSyncAutoAndExit(cmd, result, jsonOut)
@@ -444,6 +446,22 @@ func newSyncCommand() *cobra.Command {
 					return renderSyncAutoAndExit(cmd, result, jsonOut)
 				}
 				step := runSyncPreflightCheck(syncAutoCheckSyncPull, buildSyncAutoPullArgs(remoteName))
+				if !step.OK {
+					return fail(step)
+				}
+				appendStep(step)
+				return renderSyncAutoAndExit(cmd, result, jsonOut)
+			case "pull_reconcile":
+				if dryRun {
+					step := runSyncPreflightCheck(syncPreflightCheckPullDryRun, buildSyncPreflightPullReconcileArgs(remoteName))
+					if !step.OK {
+						return fail(step)
+					}
+					appendStep(step)
+					result.Decision = "would_pull_reconcile"
+					return renderSyncAutoAndExit(cmd, result, jsonOut)
+				}
+				step := runSyncPreflightCheck(syncAutoCheckSyncReconcile, buildSyncAutoPullReconcileArgs(remoteName))
 				if !step.OK {
 					return fail(step)
 				}
@@ -2092,6 +2110,14 @@ func buildSyncPreflightPullArgs(remoteName string) []string {
 	return args
 }
 
+func buildSyncPreflightPullReconcileArgs(remoteName string) []string {
+	args := []string{"sync", "pull", "--dry-run", "--reconcile", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
 func buildSyncPreflightPushArgs(remoteName string) []string {
 	args := []string{"sync", "push", "--dry-run", "--json"}
 	if strings.TrimSpace(remoteName) != "" {
@@ -2110,6 +2136,14 @@ func buildSyncAutoPushArgs(remoteName string) []string {
 
 func buildSyncAutoPullArgs(remoteName string) []string {
 	args := []string{"sync", "pull", "--json"}
+	if strings.TrimSpace(remoteName) != "" {
+		args = append(args, "--remote", strings.TrimSpace(remoteName))
+	}
+	return args
+}
+
+func buildSyncAutoPullReconcileArgs(remoteName string) []string {
+	args := []string{"sync", "pull", "--reconcile", "--json"}
 	if strings.TrimSpace(remoteName) != "" {
 		args = append(args, "--remote", strings.TrimSpace(remoteName))
 	}
@@ -2171,14 +2205,20 @@ func chooseSyncAutoDecision(status syncStatusResult, localChanged, localChangeUn
 			return "pull", nil
 		}
 		if localChanged || localChangeUncertain {
-			if conflict.HasConflict {
+			if localChangeUncertain {
+				if conflict.HasConflict {
+					return "blocked", &syncConflictError{Details: conflict}
+				}
+				return "blocked", &syncConditionError{
+					Reason:            "manual_pull_required",
+					Message:           "remote pull required but local vault has unpushed changes; run `kimen sync pull` manually and re-apply local changes",
+					RecommendedAction: "sync_pull",
+				}
+			}
+			if conflict.HasConflict && conflict.Reason != "remote_changed" {
 				return "blocked", &syncConflictError{Details: conflict}
 			}
-			return "blocked", &syncConditionError{
-				Reason:            "manual_pull_required",
-				Message:           "remote pull required but local vault has unpushed changes; run `kimen sync pull` manually and re-apply local changes",
-				RecommendedAction: "sync_pull",
-			}
+			return "pull_reconcile", nil
 		}
 		return "pull", nil
 	}

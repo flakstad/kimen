@@ -132,6 +132,7 @@ Additions:
 
 - improved diagnostics for lock and remote state edge cases
 - better defaults around remote selection
+- default orchestration path now auto-attempts `sync pull --reconcile` when local and remote both changed
 - optional terse/human output tuning
 
 Acceptance gates:
