@@ -253,6 +253,98 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "bundle.agekey")
+	bundlePath := filepath.Join(dir, "vault.age")
+	outVaultPath := filepath.Join(dir, "opened.db")
+	remoteDir := filepath.Join(dir, "remote")
+	envfileOut := filepath.Join(dir, "app.env")
+	renderDir := filepath.Join(dir, "render")
+	initPrOut := filepath.Join(dir, "kimen-pr-safety.yml")
+	initDeployOut := filepath.Join(dir, "kimen-deploy.yml")
+	initSyncOut := filepath.Join(dir, "kimen-sync-gate.yml")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	assertSuccessEnvelope := func(command []string, action string) map[string]any {
+		t.Helper()
+		out, errBuf, err := runCLI(command, nil)
+		if err != nil {
+			t.Fatalf("%s: %v (stderr=%s)", strings.Join(command, " "), err, errBuf)
+		}
+		resp := parseJSONMap(t, out)
+		requireJSONKeys(t, resp, "ok", "action", "exit_code")
+		if !jsonBool(resp, "ok") {
+			t.Fatalf("expected ok=true for %s payload: %#v", strings.Join(command, " "), resp)
+		}
+		if resp["action"] != action {
+			t.Fatalf("expected action=%s for %s payload: %#v", action, strings.Join(command, " "), resp)
+		}
+		if resp["exit_code"] != float64(0) {
+			t.Fatalf("expected exit_code=0 for %s payload: %#v", strings.Join(command, " "), resp)
+		}
+		return resp
+	}
+
+	assertSuccessEnvelope([]string{"vault", "init", "--json"}, "vault_init")
+	assertSuccessEnvelope([]string{"vault", "info", "--json"}, "vault_info")
+
+	out, errBuf, err := runCLI([]string{"secret", "set", "api_key", "--stdin", "--json"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set with stdin: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	requireJSONKeys(t, resp, "ok", "action", "exit_code")
+	if resp["action"] != "set" || resp["exit_code"] != float64(0) {
+		t.Fatalf("unexpected secret set payload: %#v", resp)
+	}
+	assertSuccessEnvelope([]string{"secret", "list", "--json"}, "list")
+	assertSuccessEnvelope([]string{"secret", "get", "api_key", "--unsafe-stdout", "--json"}, "get")
+	assertSuccessEnvelope([]string{"secret", "mv", "api_key", "api_key_renamed", "--json"}, "mv")
+	assertSuccessEnvelope([]string{"secret", "rm", "api_key_renamed", "--json"}, "rm")
+
+	keygen := assertSuccessEnvelope([]string{"bundle", "keygen", "--out", identityPath, "--json"}, "bundle_keygen")
+	recipient, _ := keygen["recipient"].(string)
+	if recipient == "" {
+		t.Fatalf("expected recipient in bundle keygen payload: %#v", keygen)
+	}
+	assertSuccessEnvelope([]string{"bundle", "recipient", "--identity", identityPath, "--json"}, "bundle_recipient")
+	assertSuccessEnvelope([]string{"bundle", "seal", "--vault", vaultPath, "--out", bundlePath, "--recipient", recipient, "--json"}, "bundle_seal")
+	assertSuccessEnvelope([]string{"bundle", "open", "--in", bundlePath, "--out-vault", outVaultPath, "--identity", identityPath, "--overwrite", "--json"}, "bundle_open")
+
+	assertSuccessEnvelope([]string{"config", "path", "--json"}, "config_path")
+	assertSuccessEnvelope([]string{"config", "unlock", "set", "env", "--json"}, "config_unlock_set")
+	assertSuccessEnvelope([]string{"config", "unlock", "show", "--json"}, "config_unlock_show")
+	assertSuccessEnvelope([]string{"config", "unlock", "clear", "--json"}, "config_unlock_clear")
+
+	assertSuccessEnvelope([]string{"remote", "add", "origin", "--path", remoteDir, "--identity", identityPath, "--json"}, "remote_add")
+	assertSuccessEnvelope([]string{"remote", "get", "origin", "--json"}, "remote_get")
+	assertSuccessEnvelope([]string{"remote", "set", "origin", "--path", filepath.Join(remoteDir, "next"), "--json"}, "remote_set")
+	assertSuccessEnvelope([]string{"remote", "list", "--json"}, "remote_list")
+	assertSuccessEnvelope([]string{"remote", "rm", "origin", "--json"}, "remote_rm")
+
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set for envfile/render: %v", err)
+	}
+	assertSuccessEnvelope([]string{"envfile", "--env", "API_KEY=api_key", "--out", envfileOut, "--json"}, "envfile")
+	assertSuccessEnvelope([]string{"render", "--dir", renderDir, "--file", "cfg.txt=api_key", "--json"}, "render")
+
+	assertSuccessEnvelope([]string{"init", "ci-pr-safety", "--out", initPrOut, "--json"}, "init_ci_pr_safety")
+	assertSuccessEnvelope([]string{"init", "ci-deploy", "--out", initDeployOut, "--json"}, "init_ci_deploy")
+	assertSuccessEnvelope([]string{"init", "ci-sync-gate", "--out", initSyncOut, "--json"}, "init_ci_sync_gate")
+
+	assertSuccessEnvelope([]string{"version", "--json"}, "version")
+}
+
 func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
