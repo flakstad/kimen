@@ -251,6 +251,39 @@ func TestCLI_MapLint_EmptyMap_IsError(t *testing.T) {
 	}
 }
 
+func TestCLI_MapLint_InvalidProfileName(t *testing.T) {
+	out, _, err := runCLI([]string{"map", "lint", "--profile", "../bad", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected lint failure for invalid profile name")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodeMapLintFailed {
+		t.Fatalf("expected lint exit code %d, got %d", exitcode.CodeMapLintFailed, ec.Code)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	if ok, _ := report["ok"].(bool); ok {
+		t.Fatalf("expected ok=false, got %#v", report)
+	}
+	issues, _ := report["issues"].([]any)
+	if len(issues) != 1 {
+		t.Fatalf("expected single issue, got %#v", report)
+	}
+	issue, _ := issues[0].(map[string]any)
+	if issue["code"] != "invalid_input" {
+		t.Fatalf("expected invalid_input issue, got %#v", issue)
+	}
+	msg, _ := issue["message"].(string)
+	if !strings.Contains(msg, "invalid profile name") {
+		t.Fatalf("expected invalid profile name message, got %#v", issue)
+	}
+}
+
 func TestCLI_MapLint_EnvPathOverridesAndFileOnly_AreWarnings(t *testing.T) {
 	dir := t.TempDir()
 	mapPath := filepath.Join(dir, "warn-extra.kmap")

@@ -375,6 +375,7 @@ These codes apply to `secret set/list/get/rm/mv` and are useful for scripts/CI.
 What it does:
 
 - Lints a map file (or profile) without materializing any secrets.
+- Profile names must match `[A-Za-z0-9_.-]+`.
 
 Checks include:
 

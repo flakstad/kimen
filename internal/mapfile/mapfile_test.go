@@ -51,3 +51,21 @@ func TestResolveProfile_EnvDir(t *testing.T) {
 		t.Fatalf("unexpected path: %q", p)
 	}
 }
+
+func TestResolveProfile_InvalidName(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []string{"../prod", "prod/dev", "prod dev"} {
+		tc := tc
+		t.Run(tc, func(t *testing.T) {
+			t.Parallel()
+			_, err := ResolveProfile(tc)
+			if err == nil {
+				t.Fatalf("expected invalid profile name error for %q", tc)
+			}
+			if !strings.Contains(err.Error(), "invalid profile name") {
+				t.Fatalf("unexpected error for %q: %v", tc, err)
+			}
+		})
+	}
+}

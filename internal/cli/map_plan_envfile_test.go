@@ -156,6 +156,35 @@ func TestCLI_Plan_JSONErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestCLI_Plan_InvalidProfileName(t *testing.T) {
+	_, errBuf, err := runCLI([]string{
+		"plan",
+		"--profile", "../bad",
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected plan failure for invalid profile name")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodePlanFailed {
+		t.Fatalf("expected plan exit code %d, got %d", exitcode.CodePlanFailed, ec.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(errBuf), &payload); err != nil {
+		t.Fatalf("error json parse: %v (stderr=%q)", err, errBuf)
+	}
+	if payload["exit_code"] != float64(exitcode.CodePlanFailed) {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "invalid profile name") {
+		t.Fatalf("expected invalid profile name message, got %#v", payload)
+	}
+}
+
 func TestCLI_Envfile_JSONOutputAndErrorCodes(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

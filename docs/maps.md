@@ -52,6 +52,8 @@ Profiles are named map files. A profile name resolves to `<name>.kmap` in one of
 2) `./.kimen/profiles/<name>.kmap` (relative to the current working directory)
 3) `<UserConfigDir>/kimen/profiles/<name>.kmap`
 
+Profile names are restricted to: letters, digits, `.`, `_`, and `-`.
+
 Example:
 
 ```bash

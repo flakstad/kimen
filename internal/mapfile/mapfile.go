@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"kimen/internal/projection"
@@ -122,9 +123,15 @@ func splitKindAndRest(line string) (kind, rest string) {
 // - <UserConfigDir>/kimen/profiles/<name>.kmap
 const envProfileDir = "KIMEN_PROFILE_DIR"
 
+var profileNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
 func ResolveProfile(name string) (string, error) {
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return "", errors.New("empty profile name")
+	}
+	if !profileNameRE.MatchString(name) {
+		return "", fmt.Errorf("invalid profile name %q (allowed: letters, digits, ., _, -)", name)
 	}
 	filename := name + ".kmap"
 
