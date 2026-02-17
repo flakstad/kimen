@@ -74,6 +74,7 @@ type planErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newPlanCommand() *cobra.Command {
@@ -560,11 +561,37 @@ func planCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: exitcode.CodePlanFailed,
+			Reason:   planErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return exitcode.New(exitcode.CodePlanFailed, err)
+}
+
+func planErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "invalid --mode"):
+		return "invalid_mode"
+	case strings.Contains(msg, "invalid profile name"):
+		return "invalid_profile_name"
+	case strings.Contains(msg, "use only one of --map or --profile"):
+		return "conflicting_map_profile_inputs"
+	case strings.Contains(msg, "use only one of --against-map or --against-profile"):
+		return "conflicting_against_inputs"
+	case strings.Contains(msg, "against spec is invalid"):
+		return "invalid_against_spec"
+	case strings.Contains(msg, "envpath mappings require projected files"):
+		return "envpath_requires_projected_files"
+	case strings.Contains(msg, "envpath refers to missing projected file"):
+		return "envpath_missing_projected_file"
+	default:
+		return "plan_failed"
+	}
 }
 
 func validateEnvPaths(req projection.Request, envPaths []projection.EnvPathMapping) error {

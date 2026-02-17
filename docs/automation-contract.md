@@ -25,11 +25,13 @@ Commands that use a standard error envelope emit:
 {
   "ok": false,
   "error": "human-readable message",
-  "exit_code": 23
+  "exit_code": 23,
+  "reason": "machine_readable_reason"
 }
 ```
 
 This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `plan`, `envfile`, `run`, `render`, and `init` (when `--json` is set).
+`reason` is optional and command-specific.
 
 ## Command JSON shapes
 
@@ -112,16 +114,55 @@ General rule:
 - success: `{"ok":true,"action":"plan","exit_code":0,"mode":"run|render|envfile",...}`
   - includes `command`, `env`, `files`, `stdin`, `env_paths`, optional `diff`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `invalid_mode`
+    - `invalid_profile_name`
+    - `conflicting_map_profile_inputs`
+    - `conflicting_against_inputs`
+    - `invalid_against_spec`
+    - `envpath_requires_projected_files`
+    - `envpath_missing_projected_file`
+    - fallback: `plan_failed`
 
 `envfile --json`:
 
 - success: `{"ok":true,"action":"envfile","exit_code":0,"out":"...","count":N}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `secret_not_found`
+    - `vault_not_found`
+    - `wrong_passphrase`
+    - `missing_out`
+    - `stdin_not_supported`
+    - `missing_env_mappings`
+    - `missing_files_dir_for_envpath`
+    - `invalid_profile_name`
+    - `conflicting_map_profile_inputs`
+    - `envpath_requires_projected_files`
+    - `envpath_missing_projected_file`
+    - fallback: `envfile_failed`
 
 `render --json`:
 
 - success: `{"ok":true,"action":"render","exit_code":0,"out_dir":"...","file_count":N,...}`
 - error: standard error envelope on `stderr`
+  - `reason` values include:
+    - `secret_not_found`
+    - `vault_not_found`
+    - `wrong_passphrase`
+    - `conflicting_map_profile_inputs`
+    - `invalid_profile_name`
+    - `conflicting_stdin_inputs`
+    - `conflicting_render_target_inputs`
+    - `missing_render_target`
+    - `systemd_hints_requires_service`
+    - `missing_file_mappings`
+    - `invalid_systemd_service`
+    - `stdin_not_supported`
+    - `no_files_to_render`
+    - `envpath_requires_projected_files`
+    - `envpath_missing_projected_file`
+    - fallback: `projection_failed`
 
 `run --json`:
 
@@ -129,6 +170,17 @@ General rule:
   - for `--dry-run`: emits plan payload JSON on `stdout` (`{"ok":true,"action":"plan","exit_code":0,...}`)
   - for normal execution: no success envelope (child process owns stdout/stderr)
 - setup/projection errors: standard error envelope on `stderr`
+  - `reason` values include:
+    - `secret_not_found`
+    - `vault_not_found`
+    - `wrong_passphrase`
+    - `missing_command`
+    - `conflicting_map_profile_inputs`
+    - `invalid_profile_name`
+    - `conflicting_stdin_inputs`
+    - `envpath_requires_projected_files`
+    - `envpath_missing_projected_file`
+    - fallback: `projection_failed`
 - child command non-zero exit: forwarded child exit code
 
 `map lint --json`:

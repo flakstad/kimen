@@ -253,6 +253,66 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_ProjectionAndPlanErrorReasons(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"plan", "--mode", "nope", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected plan invalid mode failure")
+	}
+	assertExitCode(t, err, exitcode.CodePlanFailed)
+	planErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, planErr, "ok", "error", "exit_code", "reason")
+	if planErr["reason"] != "invalid_mode" {
+		t.Fatalf("unexpected plan reason: %#v", planErr)
+	}
+
+	_, errOut, err = runCLI([]string{"envfile", "--env", "API_KEY=api_key", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected envfile missing out failure")
+	}
+	assertExitCode(t, err, exitcode.CodeEnvfileFailed)
+	envfileErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, envfileErr, "ok", "error", "exit_code", "reason")
+	if envfileErr["reason"] != "missing_out" {
+		t.Fatalf("unexpected envfile reason: %#v", envfileErr)
+	}
+
+	_, errOut, err = runCLI([]string{"run", "--env", "API_KEY=missing", "--json", "--", "echo", "hello"}, nil)
+	if err == nil {
+		t.Fatalf("expected run missing secret failure")
+	}
+	assertExitCode(t, err, exitcode.CodeSecretNotFound)
+	runErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, runErr, "ok", "error", "exit_code", "reason")
+	if runErr["reason"] != "secret_not_found" {
+		t.Fatalf("unexpected run reason: %#v", runErr)
+	}
+
+	_, errOut, err = runCLI([]string{"render", "--file", "cfg.txt=api_key", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected render missing target failure")
+	}
+	assertExitCode(t, err, exitcode.CodeProjectionFailed)
+	renderErr := parseJSONMap(t, errOut)
+	requireJSONKeys(t, renderErr, "ok", "error", "exit_code", "reason")
+	if renderErr["reason"] != "missing_render_target" {
+		t.Fatalf("unexpected render reason: %#v", renderErr)
+	}
+}
+
 func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

@@ -524,6 +524,7 @@ Automation notes:
 - setup/projection failures use typed exit codes (`12`, `14`, `15`, `23`)
 - when the child command starts and exits non-zero, Kimen forwards the child exit code
 - `kimen run --json` emits structured error envelopes on stderr for setup/projection failures
+- run error envelopes include a machine-readable `reason` field for automation branching
 
 ### Value sources (`secret name` vs `exec:...`)
 
@@ -576,6 +577,7 @@ Automation notes:
 - render setup/projection failures use typed exit codes (`12`, `14`, `15`, `23`)
 - `kimen render --json` emits a JSON success object on stdout
 - on failure, `kimen render --json` emits a structured JSON error envelope on stderr
+- render error envelopes include a machine-readable `reason` field
 
 Maps and profiles:
 
@@ -618,6 +620,7 @@ Automation notes:
 - `kimen plan --json` success payloads include `ok: true`, `action: "plan"`, and `exit_code: 0`.
 - `kimen plan --json` now emits a JSON error envelope on stderr when planning fails.
 - plan failures use exit code `21`.
+- plan error envelopes include a machine-readable `reason` field.
 
 ## `kimen envfile`
 
@@ -642,6 +645,7 @@ Automation notes:
 - `kimen envfile --json` emits a JSON success object on stdout.
 - On failure, `--json` emits a JSON error envelope on stderr.
 - Generic envfile failures use exit code `22` (with secret/vault failures reusing typed secret codes).
+- envfile error envelopes include a machine-readable `reason` field.
 
 ### `kimen project …`
 

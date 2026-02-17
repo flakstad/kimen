@@ -31,6 +31,7 @@ type envfileErrorResult struct {
 	OK       bool   `json:"ok"`
 	Error    string `json:"error"`
 	ExitCode int    `json:"exit_code"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func newEnvfileCommand() *cobra.Command {
@@ -208,6 +209,7 @@ func envfileCommandError(cmd *cobra.Command, jsonOut bool, err error) error {
 			OK:       false,
 			Error:    err.Error(),
 			ExitCode: code,
+			Reason:   envfileErrorReason(err),
 		})
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
@@ -225,5 +227,40 @@ func envfileExitCode(err error) int {
 		return exitcode.CodeWrongPassphrase
 	default:
 		return exitcode.CodeEnvfileFailed
+	}
+}
+
+func envfileErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, vault.ErrSecretNotFound):
+		return "secret_not_found"
+	case errors.Is(err, vault.ErrVaultNotFound):
+		return "vault_not_found"
+	case errors.Is(err, vault.ErrWrongPassphrase):
+		return "wrong_passphrase"
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "--out is required"):
+		return "missing_out"
+	case strings.Contains(msg, "stdin projection is only supported for `kimen run`"):
+		return "stdin_not_supported"
+	case strings.Contains(msg, "no env mappings provided"):
+		return "missing_env_mappings"
+	case strings.Contains(msg, "--files-dir is required when using envpath mappings"):
+		return "missing_files_dir_for_envpath"
+	case strings.Contains(msg, "invalid profile name"):
+		return "invalid_profile_name"
+	case strings.Contains(msg, "use only one of --map or --profile"):
+		return "conflicting_map_profile_inputs"
+	case strings.Contains(msg, "envpath mappings require projected files"):
+		return "envpath_requires_projected_files"
+	case strings.Contains(msg, "envpath refers to missing projected file"):
+		return "envpath_missing_projected_file"
+	default:
+		return "envfile_failed"
 	}
 }

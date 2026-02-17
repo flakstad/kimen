@@ -172,6 +172,9 @@ func TestCLI_Plan_JSONErrorEnvelope(t *testing.T) {
 	if payload["exit_code"] != float64(exitcode.CodePlanFailed) {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
+	if payload["reason"] != "conflicting_against_inputs" {
+		t.Fatalf("expected reason=conflicting_against_inputs, got %#v", payload)
+	}
 }
 
 func TestCLI_Plan_InvalidProfileName(t *testing.T) {
@@ -196,6 +199,9 @@ func TestCLI_Plan_InvalidProfileName(t *testing.T) {
 	}
 	if payload["exit_code"] != float64(exitcode.CodePlanFailed) {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload["reason"] != "invalid_profile_name" {
+		t.Fatalf("expected reason=invalid_profile_name, got %#v", payload)
 	}
 	errMsg, _ := payload["error"].(string)
 	if !strings.Contains(errMsg, "invalid profile name") {
@@ -225,6 +231,9 @@ func TestCLI_Plan_InvalidMode(t *testing.T) {
 	}
 	if payload["exit_code"] != float64(exitcode.CodePlanFailed) {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload["reason"] != "invalid_mode" {
+		t.Fatalf("expected reason=invalid_mode, got %#v", payload)
 	}
 	errMsg, _ := payload["error"].(string)
 	if !strings.Contains(errMsg, "invalid --mode") {
@@ -284,6 +293,30 @@ func TestCLI_Envfile_JSONOutputAndErrorCodes(t *testing.T) {
 	}
 	if errPayload["exit_code"] != float64(exitcode.CodeSecretNotFound) {
 		t.Fatalf("unexpected error payload: %#v", errPayload)
+	}
+	if errPayload["reason"] != "secret_not_found" {
+		t.Fatalf("expected reason=secret_not_found, got %#v", errPayload)
+	}
+}
+
+func TestCLI_Envfile_JSONMissingOutReason(t *testing.T) {
+	_, errBuf, err := runCLI([]string{"envfile", "--env", "API_KEY=api_key", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected envfile failure when --out is missing")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodeEnvfileFailed {
+		t.Fatalf("expected envfile exit code %d, got %d", exitcode.CodeEnvfileFailed, ec.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(errBuf), &payload); err != nil {
+		t.Fatalf("error json parse: %v (stderr=%q)", err, errBuf)
+	}
+	if payload["reason"] != "missing_out" {
+		t.Fatalf("expected reason=missing_out, got %#v", payload)
 	}
 }
 

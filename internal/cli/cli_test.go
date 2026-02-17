@@ -376,6 +376,22 @@ func TestCLI_RunAndRender_JSONProjectionEnvelopes(t *testing.T) {
 	if runErr["exit_code"] != float64(exitcode.CodeSecretNotFound) {
 		t.Fatalf("unexpected run error response: %#v", runErr)
 	}
+	if runErr["reason"] != "secret_not_found" {
+		t.Fatalf("expected run reason=secret_not_found, got %#v", runErr)
+	}
+
+	_, renderErrOut, err := runCLI([]string{"render", "--file", "cfg.txt=api_key", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected render failure without --dir")
+	}
+	assertExitCode(t, err, exitcode.CodeProjectionFailed)
+	var renderErr map[string]any
+	if err := json.Unmarshal([]byte(renderErrOut), &renderErr); err != nil {
+		t.Fatalf("render error json parse: %v (stderr=%q)", err, renderErrOut)
+	}
+	if renderErr["reason"] != "missing_render_target" {
+		t.Fatalf("expected render reason=missing_render_target, got %#v", renderErr)
+	}
 }
 
 func TestCLI_Render_SystemdServiceMode(t *testing.T) {
