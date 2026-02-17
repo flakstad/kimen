@@ -23,6 +23,13 @@ const (
 	mapLintSeverityWarning = "warning"
 )
 
+const (
+	mapLintModeAll     = "all"
+	mapLintModeRun     = "run"
+	mapLintModeRender  = "render"
+	mapLintModeEnvfile = "envfile"
+)
+
 type mapLintIssue struct {
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
@@ -53,6 +60,7 @@ func newMapCommand() *cobra.Command {
 func newMapLintCommand() *cobra.Command {
 	var mapPath string
 	var profile string
+	var mode string
 	var jsonOut bool
 	var strict bool
 
@@ -86,13 +94,17 @@ func newMapLintCommand() *cobra.Command {
 			if strings.TrimSpace(resolvedPath) == "" {
 				return mapLintCommandError(cmd, jsonOut, mapLintIssue{Code: "invalid_input", Severity: mapLintSeverityError, Message: "empty map path"})
 			}
+			lintMode, err := normalizeMapLintMode(mode)
+			if err != nil {
+				return mapLintCommandError(cmd, jsonOut, mapLintIssue{Code: "invalid_input", Severity: mapLintSeverityError, Message: err.Error()})
+			}
 
 			m, err := mapfile.ParseFile(resolvedPath)
 			if err != nil {
 				return mapLintCommandError(cmd, jsonOut, mapLintIssue{Code: "invalid_map", Severity: mapLintSeverityError, Message: err.Error()})
 			}
 
-			issues := lintMap(m)
+			issues := lintMapForMode(m, lintMode)
 			if strings.TrimSpace(profile) != "" {
 				issues = append(issues, lintProfileResolutionWarnings(profile, resolvedPath)...)
 			}
@@ -133,12 +145,17 @@ func newMapLintCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file path to lint")
 	cmd.Flags().StringVar(&profile, "profile", "", "profile name resolving to a map file")
+	cmd.Flags().StringVar(&mode, "mode", mapLintModeAll, "lint mode (all|run|render|envfile)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	cmd.Flags().BoolVar(&strict, "strict", false, "treat warnings as failures")
 	return cmd
 }
 
 func lintMap(m mapfile.Map) []mapLintIssue {
+	return lintMapForMode(m, mapLintModeAll)
+}
+
+func lintMapForMode(m mapfile.Map, mode string) []mapLintIssue {
 	issues := make([]mapLintIssue, 0)
 
 	if mapHasNoMappings(m) {
@@ -229,7 +246,7 @@ func lintMap(m mapfile.Map) []mapLintIssue {
 		})
 	}
 
-	if len(m.EnvPaths) > 0 {
+	if len(m.EnvPaths) > 0 && (mode == mapLintModeAll || mode == mapLintModeEnvfile) {
 		issues = append(issues, mapLintIssue{
 			Code:     "envpath_requires_files_dir_for_envfile",
 			Severity: mapLintSeverityWarning,
@@ -237,14 +254,14 @@ func lintMap(m mapfile.Map) []mapLintIssue {
 		})
 	}
 
-	if strings.TrimSpace(m.Request.Stdin) != "" {
+	if strings.TrimSpace(m.Request.Stdin) != "" && (mode == mapLintModeAll || mode == mapLintModeRender || mode == mapLintModeEnvfile) {
 		issues = append(issues, mapLintIssue{
 			Code:     "stdin_run_only",
 			Severity: mapLintSeverityWarning,
 			Message:  "stdin mapping is only used by `kimen run` (ignored/invalid for render/envfile)",
 		})
 	}
-	if mapHasOnlyFileMappings(m) {
+	if mapHasOnlyFileMappings(m) && (mode == mapLintModeAll || mode == mapLintModeEnvfile) {
 		issues = append(issues, mapLintIssue{
 			Code:     "envfile_has_no_env_mappings",
 			Severity: mapLintSeverityWarning,
@@ -622,4 +639,17 @@ func mapLintCommandError(cmd *cobra.Command, jsonOut bool, issue mapLintIssue) e
 		fmt.Fprintf(cmd.ErrOrStderr(), "%s\n", issue.Message)
 	}
 	return exitcode.New(exitcode.CodeMapLintFailed, errors.New(issue.Message))
+}
+
+func normalizeMapLintMode(raw string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		mode = mapLintModeAll
+	}
+	switch mode {
+	case mapLintModeAll, mapLintModeRun, mapLintModeRender, mapLintModeEnvfile:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid --mode %q (expected all, run, render, or envfile)", raw)
+	}
 }

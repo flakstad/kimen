@@ -73,7 +73,15 @@ Use map linting to catch common mistakes before running projections:
 kimen map lint --map .kimen/profiles/linje-prod.kmap
 kimen map lint --profile linje-prod --json
 kimen map lint --profile linje-prod --strict
+kimen map lint --profile linje-prod --mode envfile
 ```
+
+`--mode` can be used to scope mode-specific warnings:
+
+- `all` (default): include cross-mode warnings
+- `run`: suppress warnings that only apply to render/envfile flows
+- `render`: include warnings relevant to render behavior
+- `envfile`: include warnings relevant to envfile behavior
 
 Current lint checks:
 

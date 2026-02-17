@@ -376,6 +376,7 @@ What it does:
 
 - Lints a map file (or profile) without materializing any secrets.
 - Profile names must match `[A-Za-z0-9_.-]+`.
+- Supports `--mode all|run|render|envfile` to scope mode-specific warnings.
 
 Checks include:
 
@@ -397,6 +398,7 @@ Examples:
 kimen map lint --map .kimen/profiles/linje-prod.kmap
 kimen map lint --profile linje-prod --json
 kimen map lint --profile linje-prod --strict
+kimen map lint --profile linje-prod --mode envfile
 ```
 
 Exit behavior:

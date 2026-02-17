@@ -339,6 +339,75 @@ func TestCLI_MapLint_EnvPathOverridesAndFileOnly_AreWarnings(t *testing.T) {
 	}
 }
 
+func TestCLI_MapLint_ModeSpecificWarnings(t *testing.T) {
+	dir := t.TempDir()
+	mapPath := filepath.Join(dir, "mode.kmap")
+	content := strings.Join([]string{
+		"file key.json=gcp_key",
+		"envpath GOOGLE_APPLICATION_CREDENTIALS=key.json",
+		"stdin token",
+	}, "\n") + "\n"
+	if err := os.WriteFile(mapPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"map", "lint", "--map", mapPath, "--mode", "run", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("map lint --mode run --json: %v (stderr=%s)", err, errBuf)
+	}
+	var runReport map[string]any
+	if err := json.Unmarshal([]byte(out), &runReport); err != nil {
+		t.Fatalf("json parse (run): %v", err)
+	}
+	if runReport["warning_count"] != float64(0) {
+		t.Fatalf("expected warning_count=0 for run mode, got %#v", runReport)
+	}
+
+	out, errBuf, err = runCLI([]string{"map", "lint", "--map", mapPath, "--mode", "envfile", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("map lint --mode envfile --json: %v (stderr=%s)", err, errBuf)
+	}
+	var envfileReport map[string]any
+	if err := json.Unmarshal([]byte(out), &envfileReport); err != nil {
+		t.Fatalf("json parse (envfile): %v", err)
+	}
+	if wc, _ := envfileReport["warning_count"].(float64); wc < 2 {
+		t.Fatalf("expected envfile mode warnings, got %#v", envfileReport)
+	}
+}
+
+func TestCLI_MapLint_InvalidMode(t *testing.T) {
+	dir := t.TempDir()
+	mapPath := filepath.Join(dir, "ok.kmap")
+	if err := os.WriteFile(mapPath, []byte("env API_KEY=api_key\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	out, _, err := runCLI([]string{"map", "lint", "--map", mapPath, "--mode", "nope", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected lint failure for invalid mode")
+	}
+	var ec *exitcode.Error
+	if !errors.As(err, &ec) {
+		t.Fatalf("expected exitcode.Error, got %T", err)
+	}
+	if ec.Code != exitcode.CodeMapLintFailed {
+		t.Fatalf("expected lint exit code %d, got %d", exitcode.CodeMapLintFailed, ec.Code)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	issues, _ := report["issues"].([]any)
+	if len(issues) != 1 {
+		t.Fatalf("expected one issue for invalid mode, got %#v", report)
+	}
+	issue, _ := issues[0].(map[string]any)
+	if issue["code"] != "invalid_input" {
+		t.Fatalf("expected invalid_input issue, got %#v", issue)
+	}
+}
+
 func TestCLI_MapLint_StrictTreatsWarningsAsFailure(t *testing.T) {
 	dir := t.TempDir()
 	mapPath := filepath.Join(dir, "warn-strict.kmap")
