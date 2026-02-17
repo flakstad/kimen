@@ -406,7 +406,7 @@ Exit behavior:
 - exits `0` when lint has no errors (warnings are allowed)
 - with `--strict`, warnings are treated as failures
 - exits `20` when lint fails
-- with `--json`, lint reports include `ok` and `action: "map_lint"` on stdout
+- with `--json`, lint reports include `ok`, `action: "map_lint"`, and `exit_code` on stdout
 
 ## `kimen doctor`
 
@@ -444,7 +444,7 @@ Exit behavior:
 - exits `0` when there are no doctor errors
 - with `--strict`, warnings are treated as failures
 - exits `27` when doctor fails
-- with `--json`, reports include `ok` and `action: "doctor"` on stdout
+- with `--json`, reports include `ok`, `action: "doctor"`, and `exit_code` on stdout
 
 ## `kimen version`
 

@@ -45,6 +45,9 @@ func TestCLI_Doctor_JSON_OK(t *testing.T) {
 	if report["action"] != "doctor" {
 		t.Fatalf("expected action=doctor, got %#v", report)
 	}
+	if report["exit_code"] != float64(0) {
+		t.Fatalf("expected exit_code=0, got %#v", report)
+	}
 }
 
 func TestCLI_Doctor_FailsOnMissingVault(t *testing.T) {
@@ -78,6 +81,9 @@ func TestCLI_Doctor_FailsOnMissingVault(t *testing.T) {
 	}
 	if report["action"] != "doctor" {
 		t.Fatalf("expected action=doctor, got %#v", report)
+	}
+	if report["exit_code"] != float64(exitcode.CodeDoctorFailed) {
+		t.Fatalf("expected exit_code=%d, got %#v", exitcode.CodeDoctorFailed, report)
 	}
 	checks, _ := report["checks"].([]any)
 	foundVaultError := false

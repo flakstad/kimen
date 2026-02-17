@@ -227,7 +227,7 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 		t.Fatalf("doctor --json: %v (stderr=%s)", err, errBuf)
 	}
 	doctorResp := parseJSONMap(t, out)
-	requireJSONKeys(t, doctorResp, "ok", "action", "strict", "error_count", "warning_count", "checks")
+	requireJSONKeys(t, doctorResp, "ok", "action", "exit_code", "strict", "error_count", "warning_count", "checks")
 	if doctorResp["action"] != "doctor" {
 		t.Fatalf("unexpected doctor payload: %#v", doctorResp)
 	}
@@ -237,7 +237,7 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 		t.Fatalf("map lint --json: %v (stderr=%s)", err, errBuf)
 	}
 	mapResp := parseJSONMap(t, out)
-	requireJSONKeys(t, mapResp, "ok", "action", "error_count", "warning_count")
+	requireJSONKeys(t, mapResp, "ok", "action", "exit_code", "error_count", "warning_count")
 	if mapResp["action"] != "map_lint" {
 		t.Fatalf("unexpected map lint payload: %#v", mapResp)
 	}

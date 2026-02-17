@@ -35,6 +35,7 @@ type doctorCheck struct {
 type doctorReport struct {
 	OK           bool          `json:"ok"`
 	Action       string        `json:"action"`
+	ExitCode     int           `json:"exit_code"`
 	Strict       bool          `json:"strict"`
 	ErrorCount   int           `json:"error_count"`
 	WarningCount int           `json:"warning_count"`
@@ -57,6 +58,11 @@ func newDoctorCommand() *cobra.Command {
 			report := runDoctorChecks(mapPath, profile, bundleIn, identityFile, allowMissingVault)
 			report.Strict = strict
 			report.OK = report.ErrorCount == 0 && (!strict || report.WarningCount == 0)
+			if report.OK {
+				report.ExitCode = 0
+			} else {
+				report.ExitCode = exitcode.CodeDoctorFailed
+			}
 			return emitDoctorReport(cmd, report, jsonOut)
 		},
 	}

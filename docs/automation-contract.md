@@ -128,13 +128,13 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `map lint --json`:
 
 - emits lint report on `stdout` in both success and failure cases:
-  - `{"ok":true|false,"action":"map_lint","error_count":N,"warning_count":N,"issues":[...]}`
+  - `{"ok":true|false,"action":"map_lint","exit_code":0|20,"error_count":N,"warning_count":N,"issues":[...]}`
 - no separate error envelope on `stderr`
 
 `doctor --json`:
 
 - success/failure report on `stdout`:
-  - `{"ok":true|false,"action":"doctor","strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
+  - `{"ok":true|false,"action":"doctor","exit_code":0|27,"strict":bool,"error_count":N,"warning_count":N,"checks":[...]}`
 - check entries include stable core checks (`config_*`, `passphrase_source`, `vault_*`, `mapping_*`, `bundle_*`) and per-remote checks like `remote_<name>_config|push|pull|transport|fs_dir|git_remote|git_branch|sync_state`
 - no separate error envelope on `stderr`
 

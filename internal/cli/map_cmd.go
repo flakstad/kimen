@@ -39,6 +39,7 @@ type mapLintIssue struct {
 type mapLintReport struct {
 	OK           bool           `json:"ok"`
 	Action       string         `json:"action"`
+	ExitCode     int            `json:"exit_code"`
 	Path         string         `json:"path,omitempty"`
 	EnvCount     int            `json:"env_count"`
 	FileCount    int            `json:"file_count"`
@@ -124,6 +125,11 @@ func newMapLintCommand() *cobra.Command {
 				ErrorCount:   errorCount,
 				WarningCount: warningCount,
 				Issues:       issues,
+			}
+			if report.OK {
+				report.ExitCode = 0
+			} else {
+				report.ExitCode = exitcode.CodeMapLintFailed
 			}
 
 			if jsonOut {
@@ -632,7 +638,13 @@ func mapLintCommandError(cmd *cobra.Command, jsonOut bool, issue mapLintIssue) e
 	if issue.Severity == "" {
 		issue.Severity = mapLintSeverityError
 	}
-	report := mapLintReport{OK: false, Action: "map_lint", ErrorCount: 1, Issues: []mapLintIssue{issue}}
+	report := mapLintReport{
+		OK:         false,
+		Action:     "map_lint",
+		ExitCode:   exitcode.CodeMapLintFailed,
+		ErrorCount: 1,
+		Issues:     []mapLintIssue{issue},
+	}
 	if jsonOut {
 		_ = json.NewEncoder(cmd.OutOrStdout()).Encode(report)
 	} else {

@@ -40,6 +40,9 @@ func TestCLI_MapLint_OK(t *testing.T) {
 	if report["action"] != "map_lint" {
 		t.Fatalf("expected action=map_lint, got %#v", report)
 	}
+	if report["exit_code"] != float64(0) {
+		t.Fatalf("expected exit_code=0, got %#v", report)
+	}
 	if report["warning_count"] != float64(0) {
 		t.Fatalf("expected warning_count=0, got %#v", report)
 	}
@@ -137,6 +140,9 @@ func TestCLI_MapLint_FindsIssuesAndReturnsLintExitCode(t *testing.T) {
 	}
 	if report["action"] != "map_lint" {
 		t.Fatalf("expected action=map_lint, got %#v", report)
+	}
+	if report["exit_code"] != float64(exitcode.CodeMapLintFailed) {
+		t.Fatalf("expected exit_code=%d, got %#v", exitcode.CodeMapLintFailed, report)
 	}
 	if report["error_count"] == float64(0) {
 		t.Fatalf("expected non-zero error_count, got %#v", report)
