@@ -135,6 +135,7 @@ Additions:
   - selection order: `KIMEN_REMOTE` -> unique sync-state remote -> `origin` -> only configured remote
 - default orchestration path now auto-attempts `sync pull --reconcile` when local and remote both changed
 - optional terse/human output tuning
+- remote bootstrap command (`sync init`) with recipient derivation + next-step guidance
 
 Acceptance gates:
 

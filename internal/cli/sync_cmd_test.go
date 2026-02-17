@@ -93,6 +93,172 @@ func TestCLI_RemoteLifecycle_JSONAndSyncCleanup(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncInit_JSONCreateAndDeriveRecipient(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	recipient := generateRecipient(t, identityPath)
+	out, errBuf, err := runCLI([]string{
+		"sync", "init",
+		"--remote", "origin",
+		"--path", remoteDir,
+		"--identity", identityPath,
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("sync init --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "sync_init" || !jsonBool(resp, "created") {
+		t.Fatalf("unexpected sync init response: %#v", resp)
+	}
+	if !jsonBool(resp, "derived_recipient") {
+		t.Fatalf("expected derived_recipient=true: %#v", resp)
+	}
+	if !jsonBool(resp, "check_ok") {
+		t.Fatalf("expected check_ok=true: %#v", resp)
+	}
+	if resp["recommended_action"] != "vault_init" {
+		t.Fatalf("expected recommended_action=vault_init: %#v", resp)
+	}
+	if resp["next_command"] != "kimen vault init" {
+		t.Fatalf("expected next_command for vault init: %#v", resp)
+	}
+	remoteCfg, ok := resp["remote_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote_config in sync init response: %#v", resp)
+	}
+	if remoteCfg["name"] != "origin" || remoteCfg["path"] != remoteDir {
+		t.Fatalf("unexpected remote_config payload: %#v", remoteCfg)
+	}
+	if remoteCfg["recipient"] != recipient {
+		t.Fatalf("expected derived recipient %q, got %#v", recipient, remoteCfg)
+	}
+
+	cfg := readConfig(t)
+	if len(cfg.Remotes) != 1 {
+		t.Fatalf("expected one remote after sync init: %#v", cfg.Remotes)
+	}
+	if cfg.Remotes[0].Recipient != recipient || cfg.Remotes[0].Identity != identityPath {
+		t.Fatalf("unexpected saved remote config after sync init: %#v", cfg.Remotes[0])
+	}
+}
+
+func TestCLI_SyncInit_UpdateResetsBaselineWhenEndpointChanges(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteA := filepath.Join(dir, "remote-a")
+	remoteB := filepath.Join(dir, "remote-b")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+	_ = generateRecipient(t, identityPath)
+
+	out, errBuf, err := runCLI([]string{
+		"sync", "init",
+		"--remote", "origin",
+		"--path", remoteA,
+		"--identity", identityPath,
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("sync init create: %v (stderr=%s)", err, errBuf)
+	}
+	createResp := parseJSONMap(t, out)
+	recipient, _ := createResp["remote_config"].(map[string]any)["recipient"].(string)
+	if strings.TrimSpace(recipient) == "" {
+		t.Fatalf("expected derived recipient in sync init create: %#v", createResp)
+	}
+
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	cfg := readConfig(t)
+	if strings.TrimSpace(cfg.Sync["origin"].LastSeenRev) == "" {
+		t.Fatalf("expected sync baseline before remote update: %#v", cfg.Sync)
+	}
+
+	out, errBuf, err = runCLI([]string{
+		"sync", "init",
+		"--remote", "origin",
+		"--update",
+		"--path", remoteB,
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("sync init update: %v (stderr=%s)", err, errBuf)
+	}
+	updateResp := parseJSONMap(t, out)
+	if !jsonBool(updateResp, "updated") || !jsonBool(updateResp, "baseline_reset") {
+		t.Fatalf("expected updated + baseline_reset from sync init update: %#v", updateResp)
+	}
+
+	cfg = readConfig(t)
+	if _, ok := cfg.Sync["origin"]; ok {
+		t.Fatalf("expected sync baseline cleared after endpoint change: %#v", cfg.Sync)
+	}
+	if len(cfg.Remotes) != 1 {
+		t.Fatalf("expected one remote after update: %#v", cfg.Remotes)
+	}
+	if cfg.Remotes[0].Path != remoteB {
+		t.Fatalf("expected remote path updated to %q, got %#v", remoteB, cfg.Remotes[0])
+	}
+	if cfg.Remotes[0].Recipient != recipient || cfg.Remotes[0].Identity != identityPath {
+		t.Fatalf("expected recipient/identity preserved on update: %#v", cfg.Remotes[0])
+	}
+}
+
+func TestCLI_SyncInit_ExistingRemoteRequiresUpdateFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"sync", "init", "--remote", "origin", "--path", remoteDir}, nil)
+	if err != nil {
+		t.Fatalf("sync init create: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "init", "--remote", "origin", "--path", remoteDir, "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync init duplicate remote failure without --update")
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["exit_code"] != float64(exitcode.CodeSyncFailed) {
+		t.Fatalf("unexpected sync init duplicate error payload: %#v", errResp)
+	}
+}
+
 func TestCLI_SyncRemoteSelection_PrefersOriginWhenMultiple(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

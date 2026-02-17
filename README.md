@@ -22,7 +22,7 @@ Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
 Team Sync v1 + v2 behavior is implemented for `fs` and `git` remotes, including:
 
 - orchestration-first default `kimen sync` (with `--check` / `--dry-run` / `--json`)
-- `sync preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`
+- `sync init/preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`
 - disjoint-merge pulls via `sync pull --reconcile`
 - orchestration auto-reconcile for disjoint local+remote edits (`kimen sync` selects reconcile path)
 - explicit overlap conflict handling via `sync resolve --take local|remote`
@@ -64,7 +64,7 @@ In practice, most projections read bytes from the local vault by secret name. Ki
 - Safe planning: `kimen plan` (no secret values)
 - CI scaffolding: `kimen init ci-pr-safety|ci-deploy|ci-sync-gate` (generate workflow starters)
 - CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
-- Local remote sync: `kimen remote add/get/set/list/rm` + orchestration/default sync (`kimen sync`) + explicit sync subcommands (`preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`) for `fs` and `git` remotes (push lock files apply to shared fs remotes)
+- Local remote sync: `kimen remote add/get/set/list/rm` + orchestration/default sync (`kimen sync`) + explicit sync subcommands (`init/preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`) for `fs` and `git` remotes (push lock files apply to shared fs remotes)
 
 ## Projections
 

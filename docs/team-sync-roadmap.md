@@ -27,6 +27,7 @@ This roadmap tracks delivered Team Sync milestones and what comes after v2.
 ### Phase 2 (delivered): Team Sync v2 orchestration and reconcile
 
 - orchestration-first default `kimen sync`
+- bootstrap command for remote setup + next-step guidance (`sync init`)
 - conflict intelligence (`sync changes` with key-level classification)
 - guided disjoint reconcile (`sync pull --reconcile`)
 - explicit overlapping-key conflict resolution (`sync resolve --take ...`)

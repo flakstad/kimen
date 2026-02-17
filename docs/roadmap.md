@@ -99,7 +99,7 @@ Suggested execution:
 
 Shipped today:
 
-- Team Sync v1/v2 for `fs` and `git` remotes (`remote`, `sync`, `sync preflight`, `sync pull --reconcile`, `sync resolve`).
+- Team Sync v1/v2 for `fs` and `git` remotes (`remote`, `sync`, `sync init`, `sync preflight`, `sync pull --reconcile`, `sync resolve`).
 
 Directional next tracks:
 

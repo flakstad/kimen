@@ -17,6 +17,7 @@ Kimen ships first-class team sync for `fs` and `git` remotes:
 - `kimen remote add/get/set/list/rm`
 - orchestration-first `kimen sync` (with `--check`, `--dry-run`, `--json`, `--terse`)
 - explicit subcommands for operators/automation:
+  - `sync init`
   - `sync preflight`
   - `sync status`
   - `sync conflicts`

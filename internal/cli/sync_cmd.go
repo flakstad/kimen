@@ -236,6 +236,23 @@ type syncResolveResult struct {
 	RecommendedAction      string   `json:"recommended_action,omitempty"`
 }
 
+type syncInitResult struct {
+	OK                bool              `json:"ok"`
+	Action            string            `json:"action"`
+	Remote            string            `json:"remote"`
+	Created           bool              `json:"created,omitempty"`
+	Updated           bool              `json:"updated,omitempty"`
+	DerivedRecipient  bool              `json:"derived_recipient,omitempty"`
+	BaselineReset     bool              `json:"baseline_reset,omitempty"`
+	CheckSkipped      bool              `json:"check_skipped,omitempty"`
+	CheckOK           bool              `json:"check_ok,omitempty"`
+	CheckError        string            `json:"check_error,omitempty"`
+	RecommendedAction string            `json:"recommended_action,omitempty"`
+	NextCommand       string            `json:"next_command,omitempty"`
+	RemoteConfig      *remoteConfig     `json:"remote_config,omitempty"`
+	Status            *syncStatusResult `json:"status,omitempty"`
+}
+
 type syncVaultSnapshot struct {
 	Hashes  map[string]string
 	Secrets map[string]vault.Secret
@@ -495,8 +512,235 @@ func newSyncCommand() *cobra.Command {
 	cmd.AddCommand(newSyncResetBaselineCommand())
 	cmd.AddCommand(newSyncUnlockCommand())
 	cmd.AddCommand(newSyncRestoreCommand())
+	cmd.AddCommand(newSyncInitCommand())
 	cmd.AddCommand(newSyncPushCommand())
 	cmd.AddCommand(newSyncPullCommand())
+	return cmd
+}
+
+func newSyncInitCommand() *cobra.Command {
+	var remoteNameFlag string
+	var remoteTypeFlag string
+	var path string
+	var recipient string
+	var identity string
+	var branch string
+	var bundlePath string
+	var update bool
+	var noCheck bool
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "init [name]",
+		Short: "Bootstrap a sync remote config and show the safest next command",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			remoteName := strings.TrimSpace(remoteNameFlag)
+			if len(args) == 1 {
+				argName := strings.TrimSpace(args[0])
+				if argName == "" {
+					return syncCommandError(cmd, jsonOut, errors.New("empty remote name"))
+				}
+				if remoteName != "" && remoteName != argName {
+					return syncCommandError(cmd, jsonOut, errors.New("remote name mismatch between arg and --remote"))
+				}
+				remoteName = argName
+			}
+			if remoteName == "" {
+				remoteName = "origin"
+			}
+			if !remoteNameRE.MatchString(remoteName) {
+				return syncCommandError(cmd, jsonOut, fmt.Errorf("invalid remote name %q", remoteName))
+			}
+
+			c, _, err := loadConfig()
+			if err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+
+			idx := findRemoteIndex(c.Remotes, remoteName)
+			exists := idx >= 0
+			if exists && !update {
+				return syncCommandError(cmd, jsonOut, fmt.Errorf("remote %q already exists (use --update)", remoteName))
+			}
+
+			var r remoteConfig
+			if exists {
+				r = c.Remotes[idx]
+			}
+			r.Name = remoteName
+			if cmd.Flags().Changed("type") {
+				r.Type = normalizeRemoteType(remoteTypeFlag)
+			} else if strings.TrimSpace(r.Type) == "" {
+				r.Type = "fs"
+			}
+			if cmd.Flags().Changed("path") {
+				r.Path = strings.TrimSpace(path)
+			}
+			if !exists && strings.TrimSpace(r.Path) == "" {
+				return syncCommandError(cmd, jsonOut, errors.New("--path is required"))
+			}
+			if cmd.Flags().Changed("recipient") {
+				r.Recipient = strings.TrimSpace(recipient)
+			}
+			if cmd.Flags().Changed("identity") {
+				r.Identity = strings.TrimSpace(identity)
+			}
+			if cmd.Flags().Changed("branch") {
+				r.Branch = strings.TrimSpace(branch)
+			}
+			if cmd.Flags().Changed("bundle-path") {
+				r.BundlePath = strings.TrimSpace(bundlePath)
+			}
+			if remoteType(r) != "git" && (cmd.Flags().Changed("branch") || cmd.Flags().Changed("bundle-path")) {
+				return syncCommandError(cmd, jsonOut, errors.New("--branch/--bundle-path are only valid for --type git"))
+			}
+
+			derivedRecipient := false
+			if !cmd.Flags().Changed("recipient") &&
+				strings.TrimSpace(r.Recipient) == "" &&
+				strings.TrimSpace(r.Identity) != "" {
+				id, err := bundle.LoadIdentity(strings.TrimSpace(r.Identity), false, nil)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, fmt.Errorf("derive recipient from identity: %w", err))
+				}
+				derived, err := bundle.RecipientForIdentity(id)
+				if err != nil {
+					return syncCommandError(cmd, jsonOut, fmt.Errorf("derive recipient from identity: %w", err))
+				}
+				r.Recipient = strings.TrimSpace(derived)
+				derivedRecipient = r.Recipient != ""
+			}
+
+			applyRemoteDefaults(&r)
+			if err := validateRemoteConfig(r); err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+
+			baselineReset := false
+			if exists && c.Sync != nil {
+				prev := c.Remotes[idx]
+				if syncRemoteEndpointSignature(prev) != syncRemoteEndpointSignature(r) {
+					if _, ok := c.Sync[remoteName]; ok {
+						delete(c.Sync, remoteName)
+						baselineReset = true
+					}
+					if len(c.Sync) == 0 {
+						c.Sync = nil
+					}
+				}
+			}
+
+			created := false
+			updated := false
+			if exists {
+				c.Remotes[idx] = r
+				updated = true
+			} else {
+				c.Remotes = append(c.Remotes, r)
+				sort.Slice(c.Remotes, func(i, j int) bool { return c.Remotes[i].Name < c.Remotes[j].Name })
+				created = true
+			}
+
+			if _, err := saveConfig(c); err != nil {
+				return syncCommandError(cmd, jsonOut, err)
+			}
+
+			result := syncInitResult{
+				OK:               true,
+				Action:           "sync_init",
+				Remote:           remoteName,
+				Created:          created,
+				Updated:          updated,
+				DerivedRecipient: derivedRecipient,
+				BaselineReset:    baselineReset,
+				RemoteConfig:     &r,
+			}
+
+			if noCheck {
+				result.CheckSkipped = true
+			} else {
+				statusStep := runSyncPreflightCheck(syncPreflightCheckStatus, buildSyncPreflightStatusArgs(remoteName, 0, false))
+				result.CheckOK = statusStep.OK
+				if statusStep.OK {
+					status, err := decodeSyncStatusPayload(statusStep.Payload)
+					if err != nil {
+						result.CheckOK = false
+						result.CheckError = err.Error()
+					} else {
+						result.Status = &status
+						result.RecommendedAction = strings.TrimSpace(status.RecommendedAction)
+						result.NextCommand = syncInitNextCommand(remoteName, result.RecommendedAction)
+					}
+				} else {
+					result.CheckError = strings.TrimSpace(statusStep.Error)
+					if result.CheckError == "" {
+						result.CheckError = "sync status check failed"
+					}
+					result.RecommendedAction = strings.TrimSpace(statusStep.RecommendedAction)
+					result.NextCommand = syncInitNextCommand(remoteName, result.RecommendedAction)
+				}
+			}
+
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+			}
+
+			if result.Created {
+				fmt.Fprintf(cmd.OutOrStdout(), "ok (sync remote %s created)\n", remoteName)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "ok (sync remote %s updated)\n", remoteName)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "type: %s\n", r.Type)
+			fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", r.Path)
+			if remoteType(r) == "git" {
+				fmt.Fprintf(cmd.OutOrStdout(), "branch: %s\n", r.Branch)
+				fmt.Fprintf(cmd.OutOrStdout(), "bundle-path: %s\n", r.BundlePath)
+			}
+			if strings.TrimSpace(r.Recipient) == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "recipient: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "recipient: %s\n", r.Recipient)
+			}
+			if strings.TrimSpace(r.Identity) == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "identity: (none)")
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "identity: %s\n", r.Identity)
+			}
+			if result.DerivedRecipient {
+				fmt.Fprintln(cmd.OutOrStdout(), "derived-recipient: true")
+			}
+			if result.BaselineReset {
+				fmt.Fprintln(cmd.OutOrStdout(), "sync-baseline-reset: true")
+			}
+			if result.CheckSkipped {
+				fmt.Fprintln(cmd.OutOrStdout(), "status-check: skipped (--no-check)")
+				return nil
+			}
+			if result.CheckOK && result.Status != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "status: ok (has_remote=%t has_local=%t needs_pull=%t can_push=%t)\n", result.Status.HasRemote, result.Status.HasLocal, result.Status.NeedsPull, result.Status.CanPush)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "status: warning (%s)\n", result.CheckError)
+			}
+			if strings.TrimSpace(result.RecommendedAction) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "recommended-action: %s\n", result.RecommendedAction)
+			}
+			if strings.TrimSpace(result.NextCommand) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "next: %s\n", result.NextCommand)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&remoteNameFlag, "remote", "", "remote name (defaults to origin)")
+	cmd.Flags().StringVar(&remoteTypeFlag, "type", "", "remote type (fs or git)")
+	cmd.Flags().StringVar(&path, "path", "", "remote path (fs dir/.age path or git repo URL/path)")
+	cmd.Flags().StringVar(&recipient, "recipient", "", "age recipient used for sync push")
+	cmd.Flags().StringVar(&identity, "identity", "", "age identity file used for sync pull")
+	cmd.Flags().StringVar(&branch, "branch", "", "git branch used for sync (default: main)")
+	cmd.Flags().StringVar(&bundlePath, "bundle-path", "", "git-relative bundle path (default: vault.age)")
+	cmd.Flags().BoolVar(&update, "update", false, "update existing remote instead of failing")
+	cmd.Flags().BoolVar(&noCheck, "no-check", false, "skip post-init sync status check")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
@@ -2592,6 +2836,42 @@ func copyStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func syncRemoteEndpointSignature(r remoteConfig) string {
+	rr := r
+	applyRemoteDefaults(&rr)
+	if remoteType(rr) == "git" {
+		return fmt.Sprintf(
+			"git|%s|%s|%s",
+			strings.TrimSpace(rr.Path),
+			strings.TrimSpace(rr.Branch),
+			strings.TrimSpace(rr.BundlePath),
+		)
+	}
+	return fmt.Sprintf("fs|%s", strings.TrimSpace(rr.Path))
+}
+
+func syncInitNextCommand(remoteName, recommendedAction string) string {
+	name := strings.TrimSpace(remoteName)
+	switch strings.TrimSpace(recommendedAction) {
+	case "sync_pull":
+		return fmt.Sprintf("kimen sync pull --remote %s", name)
+	case "sync_push":
+		return fmt.Sprintf("kimen sync push --remote %s", name)
+	case "wait_or_sync_unlock":
+		return fmt.Sprintf("kimen sync unlock --remote %s --yes", name)
+	case "configure_remote_recipient":
+		return fmt.Sprintf("kimen remote set %s --recipient <age-recipient>", name)
+	case "configure_remote_identity":
+		return fmt.Sprintf("kimen remote set %s --identity <path-to-age-identity>", name)
+	case "sync_reset_baseline_or_remote_recreate":
+		return fmt.Sprintf("kimen sync reset-baseline --remote %s --to-remote --yes", name)
+	case "vault_init":
+		return "kimen vault init"
+	default:
+		return ""
+	}
 }
 
 func resolvePassphraseIfConfigured() ([]byte, bool) {

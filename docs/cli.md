@@ -861,7 +861,7 @@ Common flags:
 Notes:
 
 - On orchestration failure with `--json`, Kimen emits a report on `stdout` (similar to `sync preflight`).
-- Existing explicit subcommands (`sync push/pull/changes/resolve/status/conflicts/...`) remain available for expert/debug workflows.
+- Existing explicit subcommands (`sync init/push/pull/changes/resolve/status/conflicts/...`) remain available for expert/debug workflows.
 - Remote selection when `--remote` is omitted uses this order:
   - `KIMEN_REMOTE` (if set)
   - uniquely inferred sync-state remote
@@ -877,6 +877,44 @@ kimen sync --terse
 kimen sync --check --json
 kimen sync --dry-run --json
 kimen sync --remote team --json
+```
+
+### `kimen sync init [name]`
+
+What it does:
+
+- Bootstraps (or updates with `--update`) a sync remote configuration in one command.
+- Supports both `fs` and `git` remotes.
+- If `--identity` is set and `--recipient` is omitted, derives recipient from the identity file automatically.
+- Runs a post-init `sync status` check (unless `--no-check`) and returns safest next-step guidance.
+
+Key flags:
+
+- `--remote` or positional `[name]` (defaults to `origin` when omitted)
+- `--type fs|git`
+- `--path ...`
+- `--identity ...`
+- `--recipient ...`
+- `--branch ...` and `--bundle-path ...` (git only)
+- `--update` (allow updating existing remote)
+- `--no-check` (skip post-init status check)
+
+Examples:
+
+```bash
+# Create fs remote and derive recipient from identity:
+kimen sync init --remote team --path /srv/kimen/team-vault --identity ~/.config/kimen/team.agekey
+
+# Create git remote:
+kimen sync init team \
+  --type git \
+  --path git@github.com:org/team-secrets.git \
+  --branch main \
+  --bundle-path vault.age \
+  --identity ~/.config/kimen/team.agekey
+
+# Update existing remote endpoint and refresh guidance:
+kimen sync init --remote team --update --path /srv/kimen/new-vault --json
 ```
 
 ### `kimen sync preflight`

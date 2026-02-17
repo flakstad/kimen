@@ -150,6 +150,53 @@ func TestCLI_Contract_SyncJSONShapes(t *testing.T) {
 	}
 }
 
+func TestCLI_Contract_SyncInitJSONShape(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+	})
+	defer restore()
+
+	recipient := generateRecipient(t, identityPath)
+	out, errBuf, err := runCLI([]string{
+		"sync", "init",
+		"--remote", "origin",
+		"--path", remoteDir,
+		"--identity", identityPath,
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("sync init --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	requireJSONKeys(t, resp, "ok", "action", "remote", "created", "remote_config")
+	if resp["action"] != "sync_init" || !jsonBool(resp, "created") {
+		t.Fatalf("unexpected sync init payload: %#v", resp)
+	}
+	if !jsonBool(resp, "derived_recipient") || !jsonBool(resp, "check_ok") {
+		t.Fatalf("expected derived recipient + successful check in sync init payload: %#v", resp)
+	}
+	if resp["recommended_action"] != "vault_init" {
+		t.Fatalf("expected recommended_action=vault_init in sync init payload: %#v", resp)
+	}
+	if resp["next_command"] != "kimen vault init" {
+		t.Fatalf("expected next_command for vault init in sync init payload: %#v", resp)
+	}
+	remoteCfg, ok := resp["remote_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected remote_config object in sync init payload: %#v", resp)
+	}
+	if remoteCfg["recipient"] != recipient {
+		t.Fatalf("expected derived recipient in remote_config: %#v", remoteCfg)
+	}
+}
+
 func TestCLI_Contract_StrictGateSequence(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")
