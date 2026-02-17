@@ -217,7 +217,7 @@ func TestCLI_Contract_CoreJSONActions(t *testing.T) {
 		t.Fatalf("version --json: %v (stderr=%s)", err, errBuf)
 	}
 	versionResp := parseJSONMap(t, out)
-	requireJSONKeys(t, versionResp, "ok", "action", "version", "raw_version", "commit", "date")
+	requireJSONKeys(t, versionResp, "ok", "action", "exit_code", "version", "raw_version", "commit", "date")
 	if versionResp["action"] != "version" || !jsonBool(versionResp, "ok") {
 		t.Fatalf("unexpected version payload: %#v", versionResp)
 	}

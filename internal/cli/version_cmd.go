@@ -12,6 +12,7 @@ import (
 type versionInfo struct {
 	OK         bool   `json:"ok"`
 	Action     string `json:"action"`
+	ExitCode   int    `json:"exit_code"`
 	Version    string `json:"version"`
 	RawVersion string `json:"raw_version"`
 	Commit     string `json:"commit"`
@@ -27,6 +28,7 @@ func newVersionCommand() *cobra.Command {
 			info := versionInfo{
 				OK:         true,
 				Action:     "version",
+				ExitCode:   0,
 				Version:    buildinfo.DisplayVersion(),
 				RawVersion: buildinfo.Version,
 				Commit:     buildinfo.Commit,

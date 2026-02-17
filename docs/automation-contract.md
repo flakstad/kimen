@@ -33,30 +33,35 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 ## Command JSON shapes
 
+General rule:
+
+- Success JSON payloads that include top-level `ok` also include `exit_code: 0`.
+- Commands that emit non-envelope/raw JSON (for example `config show`) are exceptions.
+
 `secret --json`:
 
-- success: `{"ok":true,"action":"set|list|get|rm|mv",...}`
+- success: `{"ok":true,"action":"set|list|get|rm|mv","exit_code":0,...}`
 - error: standard error envelope on `stderr`
 
 `vault --json`:
 
-- success: `{"ok":true,"action":"vault_init|vault_info",...}`
+- success: `{"ok":true,"action":"vault_init|vault_info","exit_code":0,...}`
 - error: standard error envelope on `stderr`
 
 `bundle --json`:
 
-- success: `{"ok":true,"action":"bundle_keygen|bundle_recipient|bundle_seal|bundle_open",...}`
+- success: `{"ok":true,"action":"bundle_keygen|bundle_recipient|bundle_seal|bundle_open","exit_code":0,...}`
 - error: standard error envelope on `stderr`
 
 `config`:
 
 - `config show` always emits config JSON on success
-- `config path --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...}`
+- `config path --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...,"exit_code":0,...}`
 - errors use standard error envelope on `stderr`
 
 `remote --json`:
 
-- success (`add|get|set|list|rm`): `{"ok":true,"action":"remote_add|remote_get|remote_set|remote_list|remote_rm",...}`
+- success (`add|get|set|list|rm`): `{"ok":true,"action":"remote_add|remote_get|remote_set|remote_list|remote_rm","exit_code":0,...}`
 - remote objects support:
   - `type=fs`: `path` is a directory/`.age` file path
   - `type=git`: `path` is repo URL/path, with `branch` and `bundle_path`
@@ -109,12 +114,12 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `envfile --json`:
 
-- success: `{"ok":true,"action":"envfile","out":"...","count":N}`
+- success: `{"ok":true,"action":"envfile","exit_code":0,"out":"...","count":N}`
 - error: standard error envelope on `stderr`
 
 `render --json`:
 
-- success: `{"ok":true,"action":"render","out_dir":"...","file_count":N,...}`
+- success: `{"ok":true,"action":"render","exit_code":0,"out_dir":"...","file_count":N,...}`
 - error: standard error envelope on `stderr`
 
 `run --json`:
@@ -140,12 +145,12 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `init --json`:
 
-- `init ci-sync-gate` success: `{"ok":true,"action":"init_ci_sync_gate","out":"..."}`
+- `init ci-sync-gate` success: `{"ok":true,"action":"init_ci_sync_gate","exit_code":0,"out":"..."}`
 - error: standard error envelope on `stderr`
 
 `version --json`:
 
-- success: `{"ok":true,"action":"version","version":"...","raw_version":"...","commit":"...","date":"..."}`
+- success: `{"ok":true,"action":"version","exit_code":0,"version":"...","raw_version":"...","commit":"...","date":"..."}`
 - error: generic command failure behavior
 
 ## Exit code matrix

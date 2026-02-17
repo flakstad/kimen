@@ -263,6 +263,9 @@ func TestCLI_Envfile_JSONOutputAndErrorCodes(t *testing.T) {
 	if okPayload["action"] != "envfile" || okPayload["out"] != outPath {
 		t.Fatalf("unexpected success payload: %#v", okPayload)
 	}
+	if okPayload["exit_code"] != float64(0) {
+		t.Fatalf("expected envfile exit_code=0, got %#v", okPayload)
+	}
 
 	_, errBuf, err = runCLI([]string{"envfile", "--env", "API_KEY=missing", "--out", outPath, "--json"}, nil)
 	if err == nil {

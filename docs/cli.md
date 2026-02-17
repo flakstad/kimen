@@ -462,7 +462,7 @@ kimen version --json
 
 JSON notes:
 
-- `kimen version --json` includes `ok: true`, `action: "version"`, and build metadata fields.
+- `kimen version --json` includes `ok: true`, `action: "version"`, `exit_code: 0`, and build metadata fields.
 
 ## Projections: `kimen run`, `kimen render`, `kimen project …`
 

@@ -20,6 +20,7 @@ import (
 type secretResult struct {
 	OK       bool     `json:"ok"`
 	Action   string   `json:"action"`
+	ExitCode int      `json:"exit_code"`
 	Name     string   `json:"name,omitempty"`
 	Type     string   `json:"type,omitempty"`
 	From     string   `json:"from,omitempty"`

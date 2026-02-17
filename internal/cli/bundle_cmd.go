@@ -16,6 +16,7 @@ import (
 type bundleResult struct {
 	OK             bool   `json:"ok"`
 	Action         string `json:"action"`
+	ExitCode       int    `json:"exit_code"`
 	IdentityPath   string `json:"identity_path,omitempty"`
 	Recipient      string `json:"recipient,omitempty"`
 	Vault          string `json:"vault,omitempty"`

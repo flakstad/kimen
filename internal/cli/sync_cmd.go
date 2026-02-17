@@ -24,6 +24,7 @@ import (
 type syncResult struct {
 	OK                bool     `json:"ok"`
 	Action            string   `json:"action"`
+	ExitCode          int      `json:"exit_code"`
 	Remote            string   `json:"remote"`
 	RemoteType        string   `json:"remote_type,omitempty"`
 	RemotePath        string   `json:"remote_path,omitempty"`
@@ -62,6 +63,7 @@ type syncResult struct {
 type syncStatusResult struct {
 	OK                bool     `json:"ok"`
 	Action            string   `json:"action"`
+	ExitCode          int      `json:"exit_code"`
 	Remote            string   `json:"remote"`
 	RemoteType        string   `json:"remote_type,omitempty"`
 	RemotePath        string   `json:"remote_path,omitempty"`
@@ -102,6 +104,7 @@ type syncErrorResult struct {
 type syncConflictResult struct {
 	OK                bool     `json:"ok"`
 	Action            string   `json:"action"`
+	ExitCode          int      `json:"exit_code"`
 	Remote            string   `json:"remote"`
 	RemoteType        string   `json:"remote_type,omitempty"`
 	RemotePath        string   `json:"remote_path,omitempty"`
@@ -132,6 +135,7 @@ type syncConflictResult struct {
 type syncResetBaselineResult struct {
 	OK          bool   `json:"ok"`
 	Action      string `json:"action"`
+	ExitCode    int    `json:"exit_code"`
 	Remote      string `json:"remote"`
 	Mode        string `json:"mode"`
 	PreviousRev string `json:"previous_rev,omitempty"`
@@ -141,6 +145,7 @@ type syncResetBaselineResult struct {
 type syncRestoreResult struct {
 	OK                bool   `json:"ok"`
 	Action            string `json:"action"`
+	ExitCode          int    `json:"exit_code"`
 	VaultPath         string `json:"vault_path"`
 	SourceBackupPath  string `json:"source_backup_path"`
 	CurrentBackupPath string `json:"current_backup_path,omitempty"`
@@ -149,6 +154,7 @@ type syncRestoreResult struct {
 type syncUnlockResult struct {
 	OK        bool   `json:"ok"`
 	Action    string `json:"action"`
+	ExitCode  int    `json:"exit_code"`
 	Remote    string `json:"remote"`
 	LockPath  string `json:"lock_path"`
 	Removed   bool   `json:"removed"`
@@ -203,6 +209,7 @@ type syncAutoResult struct {
 type syncChangesResult struct {
 	OK                    bool     `json:"ok"`
 	Action                string   `json:"action"`
+	ExitCode              int      `json:"exit_code"`
 	Remote                string   `json:"remote,omitempty"`
 	HasBaseline           bool     `json:"has_baseline"`
 	BaselineRev           string   `json:"baseline_rev,omitempty"`
@@ -225,6 +232,7 @@ type syncChangesResult struct {
 type syncResolveResult struct {
 	OK                     bool     `json:"ok"`
 	Action                 string   `json:"action"`
+	ExitCode               int      `json:"exit_code"`
 	Remote                 string   `json:"remote"`
 	RemoteRev              string   `json:"remote_rev,omitempty"`
 	LastSeenRev            string   `json:"last_seen_rev,omitempty"`
@@ -239,6 +247,7 @@ type syncResolveResult struct {
 type syncInitResult struct {
 	OK                bool              `json:"ok"`
 	Action            string            `json:"action"`
+	ExitCode          int               `json:"exit_code"`
 	Remote            string            `json:"remote"`
 	Created           bool              `json:"created,omitempty"`
 	Updated           bool              `json:"updated,omitempty"`

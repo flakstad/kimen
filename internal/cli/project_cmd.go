@@ -19,6 +19,7 @@ import (
 type projectionResult struct {
 	OK        bool     `json:"ok"`
 	Action    string   `json:"action"`
+	ExitCode  int      `json:"exit_code"`
 	OutDir    string   `json:"out_dir,omitempty"`
 	FileCount int      `json:"file_count,omitempty"`
 	Hints     []string `json:"hints,omitempty"`

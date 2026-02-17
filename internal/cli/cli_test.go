@@ -231,6 +231,9 @@ func TestCLI_SecretJSONOutput(t *testing.T) {
 	if setResp["action"] != "set" || setResp["name"] != "json_key" {
 		t.Fatalf("unexpected set response: %#v", setResp)
 	}
+	if setResp["exit_code"] != float64(0) {
+		t.Fatalf("expected secret set exit_code=0, got %#v", setResp)
+	}
 
 	out, errBuf, err = runCLI([]string{"secret", "list", "--json"}, nil)
 	if err != nil {
@@ -356,6 +359,9 @@ func TestCLI_RunAndRender_JSONProjectionEnvelopes(t *testing.T) {
 	}
 	if renderResp["action"] != "render" {
 		t.Fatalf("unexpected render response: %#v", renderResp)
+	}
+	if renderResp["exit_code"] != float64(0) {
+		t.Fatalf("expected render exit_code=0, got %#v", renderResp)
 	}
 
 	_, errOut, err := runCLI([]string{"run", "--env", "API_KEY=missing", "--json", "--", "echo", "hello"}, nil)
@@ -500,6 +506,9 @@ func TestCLI_VaultJSONAndTypedErrors(t *testing.T) {
 	if initResp["action"] != "vault_init" {
 		t.Fatalf("unexpected vault init response: %#v", initResp)
 	}
+	if initResp["exit_code"] != float64(0) {
+		t.Fatalf("expected vault init exit_code=0, got %#v", initResp)
+	}
 
 	out, errBuf, err = runCLI([]string{"vault", "info", "--json"}, nil)
 	if err != nil {
@@ -542,6 +551,9 @@ func TestCLI_BundleJSONAndTypedErrors(t *testing.T) {
 	}
 	if keygenResp["action"] != "bundle_keygen" {
 		t.Fatalf("unexpected bundle keygen response: %#v", keygenResp)
+	}
+	if keygenResp["exit_code"] != float64(0) {
+		t.Fatalf("expected bundle keygen exit_code=0, got %#v", keygenResp)
 	}
 	recipient, _ := keygenResp["recipient"].(string)
 	if recipient == "" {
@@ -623,6 +635,9 @@ func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	}
 	if pathResp["action"] != "config_path" {
 		t.Fatalf("unexpected config path response: %#v", pathResp)
+	}
+	if pathResp["exit_code"] != float64(0) {
+		t.Fatalf("expected config path exit_code=0, got %#v", pathResp)
 	}
 
 	out, errBuf, err = runCLI([]string{"config", "unlock", "set", "env", "--json"}, nil)
@@ -754,6 +769,9 @@ func TestCLI_Version(t *testing.T) {
 	}
 	if payload["action"] != "version" {
 		t.Fatalf("expected action=version, got %#v", payload)
+	}
+	if payload["exit_code"] != float64(0) {
+		t.Fatalf("expected exit_code=0 in version payload, got %#v", payload)
 	}
 	if payload["version"] == "" || payload["raw_version"] == "" {
 		t.Fatalf("unexpected version payload: %#v", payload)

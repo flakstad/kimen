@@ -30,9 +30,10 @@ const (
 )
 
 type initResult struct {
-	OK     bool   `json:"ok"`
-	Action string `json:"action"`
-	Out    string `json:"out"`
+	OK       bool   `json:"ok"`
+	Action   string `json:"action"`
+	ExitCode int    `json:"exit_code"`
+	Out      string `json:"out"`
 }
 
 type initErrorResult struct {

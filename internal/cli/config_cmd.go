@@ -12,11 +12,12 @@ import (
 )
 
 type configResult struct {
-	OK     bool     `json:"ok"`
-	Action string   `json:"action"`
-	Path   string   `json:"path,omitempty"`
-	Method string   `json:"method,omitempty"`
-	Exec   []string `json:"exec,omitempty"`
+	OK       bool     `json:"ok"`
+	Action   string   `json:"action"`
+	ExitCode int      `json:"exit_code"`
+	Path     string   `json:"path,omitempty"`
+	Method   string   `json:"method,omitempty"`
+	Exec     []string `json:"exec,omitempty"`
 }
 
 type configErrorResult struct {

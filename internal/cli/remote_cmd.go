@@ -19,6 +19,7 @@ var remoteNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 type remoteResult struct {
 	OK            bool           `json:"ok"`
 	Action        string         `json:"action"`
+	ExitCode      int            `json:"exit_code"`
 	Name          string         `json:"name,omitempty"`
 	Remote        *remoteConfig  `json:"remote,omitempty"`
 	Remotes       []remoteConfig `json:"remotes,omitempty"`

@@ -14,11 +14,12 @@ import (
 )
 
 type vaultResult struct {
-	OK     bool   `json:"ok"`
-	Action string `json:"action"`
-	Path   string `json:"path,omitempty"`
-	Format string `json:"format,omitempty"`
-	KDF    string `json:"kdf,omitempty"`
+	OK       bool   `json:"ok"`
+	Action   string `json:"action"`
+	ExitCode int    `json:"exit_code"`
+	Path     string `json:"path,omitempty"`
+	Format   string `json:"format,omitempty"`
+	KDF      string `json:"kdf,omitempty"`
 }
 
 type vaultErrorResult struct {

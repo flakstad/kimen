@@ -20,10 +20,11 @@ import (
 var simpleEnvValueRE = regexp.MustCompile(`^[A-Za-z0-9_./:@+\-]*$`)
 
 type envfileResult struct {
-	OK     bool   `json:"ok"`
-	Action string `json:"action"`
-	Out    string `json:"out"`
-	Count  int    `json:"count"`
+	OK       bool   `json:"ok"`
+	Action   string `json:"action"`
+	ExitCode int    `json:"exit_code"`
+	Out      string `json:"out"`
+	Count    int    `json:"count"`
 }
 
 type envfileErrorResult struct {
