@@ -40,8 +40,8 @@ jobs:
   sync-gate:
     runs-on: ubuntu-latest
     env:
-      KIMEN_VAULT: ${{ runner.temp }}/kimen/vault.db
-      KIMEN_CONFIG: ${{ runner.temp }}/kimen/config.toml
+      KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
+      KIMEN_CONFIG: ${{ github.workspace }}/.kimen-ci/config.toml
     steps:
       - uses: actions/checkout@v4
 

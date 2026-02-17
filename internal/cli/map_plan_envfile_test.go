@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -79,8 +80,11 @@ func TestCLI_Map_Profile_Plan_Envfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("unexpected perms: %v", info.Mode().Perm())
+	}
+	if runtime.GOOS == "windows" && info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("expected envfile to be writable on windows, got perms: %v", info.Mode().Perm())
 	}
 
 	// Dry-run does not print secret values.

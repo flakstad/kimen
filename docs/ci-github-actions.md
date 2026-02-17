@@ -95,7 +95,7 @@ jobs:
       - name: Open vault bundle
         env:
           KIMEN_AGE_IDENTITY: ${{ secrets.KIMEN_AGE_IDENTITY }}
-          KIMEN_VAULT: ${{ runner.temp }}/kimen/vault.db
+          KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
         run: |
           mkdir -p "$(dirname "$KIMEN_VAULT")"
           printf '%s\n' "$KIMEN_AGE_IDENTITY" \
@@ -177,7 +177,7 @@ jobs:
       - name: Open vault bundle
         env:
           KIMEN_AGE_IDENTITY: ${{ secrets.KIMEN_AGE_IDENTITY }}
-          KIMEN_VAULT: ${{ runner.temp }}/kimen/vault.db
+          KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
         run: |
           mkdir -p "$(dirname "$KIMEN_VAULT")"
           printf '%s\n' "$KIMEN_AGE_IDENTITY" | ./kimen bundle open --in vault.age --identity-stdin --out-vault "$KIMEN_VAULT" --overwrite

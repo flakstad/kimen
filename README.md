@@ -157,12 +157,18 @@ See also `docs/ci-github-actions.md`.
 ## Release (CalVer)
 
 Kimen releases use CalVer tags: `vYYYY.M.PATCH` (example: `v2026.2.1`).
+GitHub release automation triggers only for tags matching: `v[0-9][0-9][0-9][0-9].[0-9]*.[0-9]*`.
 
 Recommended release flow:
 
 ```bash
+# 1) Validate branch state
 make release-check
+
+# 2) Create annotated CalVer tag
 git tag -a v2026.2.1 -m "Release v2026.2.1"
+
+# 3) Push tag to cut release
 git push origin v2026.2.1
 ```
 
@@ -170,6 +176,13 @@ Or use the helper script:
 
 ```bash
 scripts/release-calver.sh v2026.2.1 --push
+```
+
+Verify:
+
+```bash
+git tag -l "v2026.*"
+gh run list --workflow release.yml --limit 5
 ```
 
 Pushing a matching tag triggers `.github/workflows/release.yml`, which runs GoReleaser using `.goreleaser.yaml` and publishes release artifacts.
