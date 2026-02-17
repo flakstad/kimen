@@ -49,6 +49,12 @@ func TestCLI_Map_Profile_Plan_Envfile(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &p); err != nil {
 		t.Fatalf("json parse: %v", err)
 	}
+	if ok, _ := p["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %#v", p)
+	}
+	if p["action"] != "plan" {
+		t.Fatalf("expected action=plan, got %#v", p)
+	}
 	if p["mode"] != "run" {
 		t.Fatalf("unexpected mode: %#v", p["mode"])
 	}
@@ -102,6 +108,12 @@ func TestCLI_ProjectPlan_JSON(t *testing.T) {
 	var p map[string]any
 	if err := json.Unmarshal([]byte(out), &p); err != nil {
 		t.Fatalf("json parse: %v", err)
+	}
+	if ok, _ := p["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %#v", p)
+	}
+	if p["action"] != "plan" {
+		t.Fatalf("expected action=plan, got %#v", p)
 	}
 	if p["mode"] != "run" {
 		t.Fatalf("unexpected mode: %#v", p["mode"])

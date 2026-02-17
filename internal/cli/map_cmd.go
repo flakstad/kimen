@@ -31,6 +31,7 @@ type mapLintIssue struct {
 
 type mapLintReport struct {
 	OK           bool           `json:"ok"`
+	Action       string         `json:"action"`
 	Path         string         `json:"path,omitempty"`
 	EnvCount     int            `json:"env_count"`
 	FileCount    int            `json:"file_count"`
@@ -103,6 +104,7 @@ func newMapLintCommand() *cobra.Command {
 			}
 			report := mapLintReport{
 				OK:           ok,
+				Action:       "map_lint",
 				Path:         resolvedPath,
 				EnvCount:     len(m.Request.Envs),
 				FileCount:    len(m.Request.Files),
@@ -613,7 +615,7 @@ func mapLintCommandError(cmd *cobra.Command, jsonOut bool, issue mapLintIssue) e
 	if issue.Severity == "" {
 		issue.Severity = mapLintSeverityError
 	}
-	report := mapLintReport{OK: false, ErrorCount: 1, Issues: []mapLintIssue{issue}}
+	report := mapLintReport{OK: false, Action: "map_lint", ErrorCount: 1, Issues: []mapLintIssue{issue}}
 	if jsonOut {
 		_ = json.NewEncoder(cmd.OutOrStdout()).Encode(report)
 	} else {

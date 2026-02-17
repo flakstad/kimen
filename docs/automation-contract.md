@@ -103,8 +103,8 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 
 `plan --json` and `project plan --json`:
 
-- success: plan object (no top-level `ok` field), e.g.:
-  - `mode`, `command`, `env`, `files`, `stdin`, `env_paths`, optional `diff`
+- success: `{"ok":true,"action":"plan","mode":"run|render|envfile",...}`
+  - includes `command`, `env`, `files`, `stdin`, `env_paths`, optional `diff`
 - error: standard error envelope on `stderr`
 
 `envfile --json`:
@@ -120,7 +120,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `run --json`:
 
 - success:
-  - for `--dry-run`: emits plan object JSON on `stdout`
+  - for `--dry-run`: emits plan payload JSON on `stdout` (`{"ok":true,"action":"plan",...}`)
   - for normal execution: no success envelope (child process owns stdout/stderr)
 - setup/projection errors: standard error envelope on `stderr`
 - child command non-zero exit: forwarded child exit code
@@ -128,7 +128,7 @@ This shape is used by `secret`, `vault`, `bundle`, `config`, `remote`, `sync`, `
 `map lint --json`:
 
 - emits lint report on `stdout` in both success and failure cases:
-  - `{"ok":true|false,"error_count":N,"warning_count":N,"issues":[...]}`
+  - `{"ok":true|false,"action":"map_lint","error_count":N,"warning_count":N,"issues":[...]}`
 - no separate error envelope on `stderr`
 
 `doctor --json`:

@@ -404,6 +404,7 @@ Exit behavior:
 - exits `0` when lint has no errors (warnings are allowed)
 - with `--strict`, warnings are treated as failures
 - exits `20` when lint fails
+- with `--json`, lint reports include `ok` and `action: "map_lint"` on stdout
 
 ## `kimen doctor`
 
@@ -607,6 +608,7 @@ When diff flags are used, output includes:
 
 Automation notes:
 
+- `kimen plan --json` success payloads include `ok: true` and `action: "plan"`.
 - `kimen plan --json` now emits a JSON error envelope on stderr when planning fails.
 - plan failures use exit code `21`.
 
