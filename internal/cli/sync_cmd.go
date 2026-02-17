@@ -820,6 +820,7 @@ func newSyncPreflightCommand() *cobra.Command {
 func newSyncChangesCommand() *cobra.Command {
 	var remoteName string
 	var jsonOut bool
+	var terse bool
 
 	cmd := &cobra.Command{
 		Use:   "changes",
@@ -898,6 +899,21 @@ func newSyncChangesCommand() *cobra.Command {
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 			}
+			if terse {
+				fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"remote=%s has_baseline=%t can_reconcile=%t local_changed=%d remote_changed=%d overlapping=%d conflicts=%d recommended_action=%s\n",
+					result.Remote,
+					result.HasBaseline,
+					result.CanReconcile,
+					len(result.LocalChangedKeys),
+					len(result.RemoteChangedKeys),
+					len(result.OverlappingKeys),
+					len(result.ConflictKeys),
+					result.RecommendedAction,
+				)
+				return nil
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "remote: %s\n", result.Remote)
 			fmt.Fprintf(cmd.OutOrStdout(), "has-baseline: %t\n", result.HasBaseline)
 			fmt.Fprintf(cmd.OutOrStdout(), "can-reconcile: %t\n", result.CanReconcile)
@@ -914,6 +930,7 @@ func newSyncChangesCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&remoteName, "remote", "", syncRemoteFlagHelp)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	cmd.Flags().BoolVar(&terse, "terse", false, "human output: emit a single-line summary")
 	return cmd
 }
 

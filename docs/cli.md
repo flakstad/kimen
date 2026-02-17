@@ -1041,6 +1041,7 @@ Notes:
 
 - Requires passphrase access because key-level analysis decrypts local and remote vault data.
 - `can_reconcile=true` means disjoint changes can be merged safely using `sync pull --reconcile`.
+- `--terse` emits a single-line human summary (`remote=... local_changed=... conflicts=...`).
 
 Examples:
 

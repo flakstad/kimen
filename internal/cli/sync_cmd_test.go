@@ -472,6 +472,59 @@ func TestCLI_SyncConflicts_TerseHumanOutput(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncChanges_TerseHumanOutput(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	identityPath := filepath.Join(dir, "sync.agekey")
+	remoteDir := filepath.Join(dir, "remote")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v1"))
+	if err != nil {
+		t.Fatalf("secret set v1: %v", err)
+	}
+	recipient := generateRecipient(t, identityPath)
+	_, _, err = runCLI([]string{
+		"remote", "add", "origin",
+		"--path", remoteDir,
+		"--recipient", recipient,
+		"--identity", identityPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+	_, _, err = runCLI([]string{"sync", "push"}, nil)
+	if err != nil {
+		t.Fatalf("sync push: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("v2-local"))
+	if err != nil {
+		t.Fatalf("secret set v2-local: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{"sync", "changes", "--terse"}, nil)
+	if err != nil {
+		t.Fatalf("sync changes --terse: %v (stderr=%s)", err, errBuf)
+	}
+	if !strings.Contains(out, "remote=origin") || !strings.Contains(out, "recommended_action=sync_push") {
+		t.Fatalf("unexpected sync changes --terse output: %q", out)
+	}
+	if strings.Count(strings.TrimSpace(out), "\n") != 0 {
+		t.Fatalf("expected single-line sync changes --terse output, got %q", out)
+	}
+}
+
 func TestCLI_RemoteGitDefaultsAndFieldValidation(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
