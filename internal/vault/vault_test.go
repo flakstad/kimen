@@ -250,3 +250,66 @@ func TestRenameSecret(t *testing.T) {
 		t.Fatalf("expected ErrSecretNotFound, got %v", err)
 	}
 }
+
+func TestRekey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.db")
+	oldPass := []byte("old-passphrase")
+	newPass := []byte("new-passphrase")
+
+	v, err := Init(path, oldPass)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := v.PutSecret(context.Background(), Secret{Name: "api_key", Value: []byte("value")}); err != nil {
+		t.Fatalf("PutSecret: %v", err)
+	}
+	if err := v.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := Rekey(path, oldPass, newPass); err != nil {
+		t.Fatalf("Rekey: %v", err)
+	}
+
+	_, err = Open(path, oldPass)
+	if !errors.Is(err, ErrWrongPassphrase) {
+		t.Fatalf("expected old passphrase to fail, got %v", err)
+	}
+
+	v, err = Open(path, newPass)
+	if err != nil {
+		t.Fatalf("Open with new passphrase: %v", err)
+	}
+	defer v.Close()
+
+	sec, err := v.GetSecret(context.Background(), "api_key")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if string(sec.Value) != "value" {
+		t.Fatalf("unexpected value: %q", string(sec.Value))
+	}
+	Burn(sec.Value)
+}
+
+func TestRekeyWrongPassphrase(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.db")
+	oldPass := []byte("old-passphrase")
+
+	v, err := Init(path, oldPass)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	_ = v.Close()
+
+	err = Rekey(path, []byte("wrong"), []byte("new-pass"))
+	if !errors.Is(err, ErrWrongPassphrase) {
+		t.Fatalf("expected ErrWrongPassphrase, got %v", err)
+	}
+}

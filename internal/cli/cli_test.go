@@ -545,6 +545,151 @@ func TestCLI_VaultJSONAndTypedErrors(t *testing.T) {
 	}
 }
 
+func TestCLI_VaultRekey_JSONAndBackup(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	oldPassFile := filepath.Join(dir, "old.pass")
+	newPassFile := filepath.Join(dir, "new.pass")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envPassphrase: "old-pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"secret", "set", "api_key", "--stdin"}, strings.NewReader("value"))
+	if err != nil {
+		t.Fatalf("secret set: %v", err)
+	}
+
+	if err := os.WriteFile(oldPassFile, []byte("old-pass\n"), 0o600); err != nil {
+		t.Fatalf("write old passphrase file: %v", err)
+	}
+	if err := os.WriteFile(newPassFile, []byte("new-pass\n"), 0o600); err != nil {
+		t.Fatalf("write new passphrase file: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{
+		"vault", "rekey",
+		"--old-passphrase-file", oldPassFile,
+		"--new-passphrase-file", newPassFile,
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("vault rekey --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "vault_rekey" || resp["path"] != vaultPath {
+		t.Fatalf("unexpected vault rekey payload: %#v", resp)
+	}
+	backupPath, _ := resp["backup_path"].(string)
+	if strings.TrimSpace(backupPath) == "" {
+		t.Fatalf("expected backup_path in vault rekey payload: %#v", resp)
+	}
+	if _, err := os.Stat(backupPath); err != nil {
+		t.Fatalf("expected backup file at %s: %v", backupPath, err)
+	}
+
+	restoreOld := withEnv(map[string]string{envPassphrase: "old-pass"})
+	_, _, err = runCLI([]string{"secret", "list"}, nil)
+	restoreOld()
+	if err == nil {
+		t.Fatalf("expected old passphrase to fail after rekey")
+	}
+	assertExitCode(t, err, exitcode.CodeWrongPassphrase)
+
+	restoreNew := withEnv(map[string]string{envPassphrase: "new-pass"})
+	out, errBuf, err = runCLI([]string{"secret", "list", "--json"}, nil)
+	restoreNew()
+	if err != nil {
+		t.Fatalf("secret list with new passphrase: %v (stderr=%s)", err, errBuf)
+	}
+	if !strings.Contains(out, "api_key") {
+		t.Fatalf("expected api_key in list after rekey, got %q", out)
+	}
+}
+
+func TestCLI_VaultRekey_DryRunAndWrongOldPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	oldPassFile := filepath.Join(dir, "old.pass")
+	newPassFile := filepath.Join(dir, "new.pass")
+	wrongPassFile := filepath.Join(dir, "wrong.pass")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envPassphrase: "old-pass",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+
+	if err := os.WriteFile(oldPassFile, []byte("old-pass\n"), 0o600); err != nil {
+		t.Fatalf("write old passphrase file: %v", err)
+	}
+	if err := os.WriteFile(newPassFile, []byte("new-pass\n"), 0o600); err != nil {
+		t.Fatalf("write new passphrase file: %v", err)
+	}
+	if err := os.WriteFile(wrongPassFile, []byte("wrong-pass\n"), 0o600); err != nil {
+		t.Fatalf("write wrong passphrase file: %v", err)
+	}
+
+	out, errBuf, err := runCLI([]string{
+		"vault", "rekey",
+		"--old-passphrase-file", oldPassFile,
+		"--new-passphrase-file", newPassFile,
+		"--dry-run",
+		"--json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("vault rekey --dry-run --json: %v (stderr=%s)", err, errBuf)
+	}
+	resp := parseJSONMap(t, out)
+	if resp["action"] != "vault_rekey" || !jsonBool(resp, "dry_run") {
+		t.Fatalf("unexpected dry-run payload: %#v", resp)
+	}
+	if !jsonBool(resp, "would_backup") {
+		t.Fatalf("expected would_backup=true in dry-run payload: %#v", resp)
+	}
+
+	matches, err := filepath.Glob(vaultPath + ".bak.*")
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("dry-run should not create backup files, found: %#v", matches)
+	}
+
+	_, errOut, err := runCLI([]string{
+		"vault", "rekey",
+		"--old-passphrase-file", wrongPassFile,
+		"--new-passphrase-file", newPassFile,
+		"--json",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected vault rekey failure for wrong old passphrase")
+	}
+	assertExitCode(t, err, exitcode.CodeWrongPassphrase)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != "wrong_passphrase" {
+		t.Fatalf("expected reason=wrong_passphrase, got %#v", errResp)
+	}
+
+	restoreOld := withEnv(map[string]string{envPassphrase: "old-pass"})
+	_, _, err = runCLI([]string{"secret", "list"}, nil)
+	restoreOld()
+	if err != nil {
+		t.Fatalf("expected old passphrase to remain valid after dry-run/wrong-old failure: %v", err)
+	}
+}
+
 func TestCLI_BundleJSONAndTypedErrors(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

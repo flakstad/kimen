@@ -175,6 +175,43 @@ func Open(path string, passphrase []byte) (*Vault, error) {
 	}, nil
 }
 
+// Rekey rewrites vault metadata so the DEK is wrapped with a KEK derived from
+// newPassphrase. Secret records remain encrypted with the same DEK.
+func Rekey(path string, oldPassphrase, newPassphrase []byte) error {
+	if len(newPassphrase) == 0 {
+		return errors.New("empty new passphrase")
+	}
+	v, err := Open(path, oldPassphrase)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+
+	kdf, kek, err := deriveKEK(newPassphrase)
+	if err != nil {
+		return err
+	}
+	defer Burn(kek)
+
+	wrappedDEK, err := wrapDEK(kek, v.dek, kdf.aad())
+	if err != nil {
+		return err
+	}
+	kdf.WrappedDEK = base64.RawStdEncoding.EncodeToString(wrappedDEK)
+	kdfJSON, err := json.Marshal(kdf)
+	if err != nil {
+		return err
+	}
+
+	return v.db.Update(func(tx *bbolt.Tx) error {
+		meta := tx.Bucket(bucketMeta)
+		if meta == nil {
+			return ErrInvalidVaultFile
+		}
+		return meta.Put(keyKDFParams, kdfJSON)
+	})
+}
+
 func (v *Vault) Close() error {
 	if v == nil {
 		return nil

@@ -76,6 +76,19 @@ func resolvePassphraseFromExec(args []string) ([]byte, error) {
 	return readLine(bytes.NewReader(out))
 }
 
+func readPassphraseFile(path string) ([]byte, error) {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return nil, errors.New("empty passphrase file path")
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readLine(f)
+}
+
 func readLine(r io.Reader) ([]byte, error) {
 	br := bufio.NewReader(r)
 	line, err := br.ReadString('\n')

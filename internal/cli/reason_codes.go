@@ -17,15 +17,21 @@ const (
 	reasonSecretFailed         = "secret_failed"
 
 	// Passphrase/config path helper reasons.
-	reasonEmptyPassphraseCommand  = "empty_passphrase_command"
-	reasonPassphraseCommandFailed = "passphrase_command_failed"
-	reasonMissingPassphrase       = "missing_passphrase"
-	reasonConfigPathUnavailable   = "config_path_unavailable"
+	reasonEmptyPassphraseCommand       = "empty_passphrase_command"
+	reasonPassphraseCommandFailed      = "passphrase_command_failed"
+	reasonMissingPassphrase            = "missing_passphrase"
+	reasonConflictingPassphraseSources = "conflicting_passphrase_sources"
+	reasonMissingNewPassphrase         = "missing_new_passphrase"
+	reasonEmptyNewPassphrase           = "empty_new_passphrase"
+	reasonNewPassphraseMismatch        = "new_passphrase_mismatch"
+	reasonNewPassphraseUnchanged       = "new_passphrase_unchanged"
+	reasonConfigPathUnavailable        = "config_path_unavailable"
 
 	// Vault command reasons.
-	reasonInvalidVaultFile = "invalid_vault_file"
-	reasonVaultExists      = "vault_exists"
-	reasonVaultFailed      = "vault_failed"
+	reasonInvalidVaultFile         = "invalid_vault_file"
+	reasonVaultExists              = "vault_exists"
+	reasonConflictingBackupOptions = "conflicting_backup_options"
+	reasonVaultFailed              = "vault_failed"
 
 	// Bundle command reasons.
 	reasonMissingOut              = "missing_out"
@@ -165,9 +171,15 @@ func allReasonCodes() []string {
 		reasonEmptyPassphraseCommand,
 		reasonPassphraseCommandFailed,
 		reasonMissingPassphrase,
+		reasonConflictingPassphraseSources,
+		reasonMissingNewPassphrase,
+		reasonEmptyNewPassphrase,
+		reasonNewPassphraseMismatch,
+		reasonNewPassphraseUnchanged,
 		reasonConfigPathUnavailable,
 		reasonInvalidVaultFile,
 		reasonVaultExists,
+		reasonConflictingBackupOptions,
 		reasonVaultFailed,
 		reasonMissingOut,
 		reasonMissingIn,

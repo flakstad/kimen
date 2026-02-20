@@ -56,13 +56,19 @@ General rule:
 
 `vault --json`:
 
-- success: `{"ok":true,"action":"vault_init|vault_info|vault_path","exit_code":0,...}`
+- success: `{"ok":true,"action":"vault_init|vault_info|vault_path|vault_rekey","exit_code":0,...}`
 - error: standard error envelope on `stderr`
   - `reason` values include:
     - `vault_not_found`
     - `wrong_passphrase`
     - `invalid_vault_file`
     - `vault_exists`
+    - `conflicting_passphrase_sources`
+    - `missing_new_passphrase`
+    - `empty_new_passphrase`
+    - `new_passphrase_mismatch`
+    - `new_passphrase_unchanged`
+    - `conflicting_backup_options`
     - fallback: `vault_failed`
 
 `bundle --json`:

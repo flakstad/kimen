@@ -412,6 +412,8 @@ func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	initPrOut := filepath.Join(dir, "kimen-pr-safety.yml")
 	initDeployOut := filepath.Join(dir, "kimen-deploy.yml")
 	initSyncOut := filepath.Join(dir, "kimen-sync-gate.yml")
+	oldPassFile := filepath.Join(dir, "old.pass")
+	newPassFile := filepath.Join(dir, "new.pass")
 
 	restore := withEnv(map[string]string{
 		envVaultPath:  vaultPath,
@@ -491,6 +493,19 @@ func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	assertSuccessEnvelope([]string{"init", "ci-pr-safety", "--out", initPrOut, "--json"}, "init_ci_pr_safety")
 	assertSuccessEnvelope([]string{"init", "ci-deploy", "--out", initDeployOut, "--json"}, "init_ci_deploy")
 	assertSuccessEnvelope([]string{"init", "ci-sync-gate", "--out", initSyncOut, "--json"}, "init_ci_sync_gate")
+
+	if err := os.WriteFile(oldPassFile, []byte("pass\n"), 0o600); err != nil {
+		t.Fatalf("write old passphrase file: %v", err)
+	}
+	if err := os.WriteFile(newPassFile, []byte("next-pass\n"), 0o600); err != nil {
+		t.Fatalf("write new passphrase file: %v", err)
+	}
+	assertSuccessEnvelope([]string{
+		"vault", "rekey",
+		"--old-passphrase-file", oldPassFile,
+		"--new-passphrase-file", newPassFile,
+		"--json",
+	}, "vault_rekey")
 
 	assertSuccessEnvelope([]string{"version", "--json"}, "version")
 }
