@@ -1872,7 +1872,7 @@ func newSyncRestoreCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&backupPath, "backup", "", "backup vault path to restore from")
-	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path to restore into (defaults to $KIMEN_VAULT or user config dir)")
+	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path to restore into (defaults to $KIMEN_VAULT, config.vault.path, or user config dir)")
 	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "skip creating a backup of the current vault before restore")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd

@@ -6,7 +6,7 @@ This document describes what each command does, how it works, and the typical us
 
 ## Conventions
 
-- Kimen defaults to a local vault path. You can override it with `--vault` or `KIMEN_VAULT`.
+- Kimen resolves vault path with this precedence: `--vault` > `KIMEN_VAULT` > `config.vault.path` > built-in user-config default.
 - Most commands that need secrets require an unlock passphrase:
   - `KIMEN_PASSPHRASE` (non-interactive)
   - `--passphrase-cmd "<command...>"` (read one line from command stdout)
@@ -177,6 +177,23 @@ kimen config show
 kimen config show --pretty=false
 ```
 
+### `kimen config vault set/show/clear`
+
+What it does:
+
+- `set`: configure a default vault path in local config (`config.vault.path`).
+- `show`: show configured default vault path.
+- `clear`: remove configured default vault path.
+
+Examples:
+
+```bash
+kimen config vault set ./.kimen/vault.db
+kimen config vault show
+kimen config vault show --json
+kimen config vault clear --json
+```
+
 ### `kimen config unlock set/show/clear`
 
 What it does:
@@ -198,6 +215,7 @@ kimen config unlock clear --json
 Automation notes:
 
 - `config path --json`, `config unlock set/show/clear --json` emit JSON success payloads.
+- `config vault set/show/clear --json` emit JSON success payloads.
 - `config show` is already JSON by default and emits JSON error envelopes on failure.
 - config failures use exit code `26`.
 
@@ -245,9 +263,24 @@ kimen vault info
 kimen vault info --json
 ```
 
+### `kimen vault path`
+
+What it does:
+
+- Shows the resolved vault path and source (`flag|env|config|default`).
+- Useful for debugging which vault a command will use.
+
+Examples:
+
+```bash
+kimen vault path
+kimen vault path --json
+kimen vault path --vault /tmp/other.vault.db --json
+```
+
 Automation notes:
 
-- `vault init --json` and `vault info --json` emit JSON success payloads.
+- `vault init --json`, `vault info --json`, and `vault path --json` emit JSON success payloads.
 - On failure with `--json`, vault commands emit JSON error envelopes on stderr.
 - vault failures use:
   - `14`: vault not found

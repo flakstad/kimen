@@ -167,7 +167,7 @@ func newBundleSealCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
+	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT, config.vault.path, or user config dir)")
 	cmd.Flags().StringVar(&outPath, "out", "", "output bundle path")
 	cmd.Flags().StringArrayVar(&recipients, "recipient", nil, "age recipient (repeatable)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
@@ -223,7 +223,7 @@ func newBundleOpenCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&inPath, "in", "", "input bundle path")
-	cmd.Flags().StringVar(&outVault, "out-vault", "", "output vault path (defaults to $KIMEN_VAULT or user config dir)")
+	cmd.Flags().StringVar(&outVault, "out-vault", "", "output vault path (defaults to $KIMEN_VAULT, config.vault.path, or user config dir)")
 	cmd.Flags().StringVar(&identityFile, "identity", "", "age identity file (private key)")
 	cmd.Flags().BoolVar(&identityStdin, "identity-stdin", false, "read age identity from stdin")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "overwrite existing vault file")

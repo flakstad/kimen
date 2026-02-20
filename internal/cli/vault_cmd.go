@@ -19,6 +19,7 @@ type vaultResult struct {
 	Action   string `json:"action"`
 	ExitCode int    `json:"exit_code"`
 	Path     string `json:"path,omitempty"`
+	Source   string `json:"source,omitempty"`
 	Format   string `json:"format,omitempty"`
 	KDF      string `json:"kdf,omitempty"`
 }
@@ -37,6 +38,7 @@ func newVaultCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newVaultInitCommand())
+	cmd.AddCommand(newVaultPathCommand())
 	cmd.AddCommand(newVaultInfoCommand())
 	return cmd
 }
@@ -86,7 +88,7 @@ func newVaultInitCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
+	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT, config.vault.path, or user config dir)")
 	cmd.Flags().BoolVar(&passphraseStdin, "passphrase-stdin", false, "read passphrase from stdin (single line)")
 	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
@@ -126,7 +128,35 @@ func newVaultInfoCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT or user config dir)")
+	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path (defaults to $KIMEN_VAULT, config.vault.path, or user config dir)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
+}
+
+func newVaultPathCommand() *cobra.Command {
+	var vaultPath string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "path",
+		Short: "Show the resolved vault path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, source, err := resolveVaultPath(vaultPath)
+			if err != nil {
+				return vaultCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(vaultResult{
+					OK:     true,
+					Action: "vault_path",
+					Path:   p,
+					Source: source,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "path: %s\nsource: %s\n", p, source)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&vaultPath, "vault", "", "vault path override")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }

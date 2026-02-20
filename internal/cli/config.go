@@ -12,9 +12,14 @@ import (
 const envConfigPath = "KIMEN_CONFIG"
 
 type config struct {
+	Vault   *vaultConfig          `json:"vault,omitempty"`
 	Unlock  *unlockConfig         `json:"unlock,omitempty"`
 	Remotes []remoteConfig        `json:"remotes,omitempty"`
 	Sync    map[string]syncConfig `json:"sync,omitempty"`
+}
+
+type vaultConfig struct {
+	Path string `json:"path,omitempty"`
 }
 
 type unlockConfig struct {

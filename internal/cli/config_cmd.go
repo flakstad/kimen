@@ -12,12 +12,13 @@ import (
 )
 
 type configResult struct {
-	OK       bool     `json:"ok"`
-	Action   string   `json:"action"`
-	ExitCode int      `json:"exit_code"`
-	Path     string   `json:"path,omitempty"`
-	Method   string   `json:"method,omitempty"`
-	Exec     []string `json:"exec,omitempty"`
+	OK        bool     `json:"ok"`
+	Action    string   `json:"action"`
+	ExitCode  int      `json:"exit_code"`
+	Path      string   `json:"path,omitempty"`
+	Method    string   `json:"method,omitempty"`
+	Exec      []string `json:"exec,omitempty"`
+	VaultPath string   `json:"vault_path,omitempty"`
 }
 
 type configErrorResult struct {
@@ -34,6 +35,7 @@ func newConfigCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newConfigPathCommand())
 	cmd.AddCommand(newConfigShowCommand())
+	cmd.AddCommand(newConfigVaultCommand())
 	cmd.AddCommand(newConfigUnlockCommand())
 	return cmd
 }
@@ -102,6 +104,118 @@ func newConfigUnlockCommand() *cobra.Command {
 	cmd.AddCommand(newConfigUnlockShowCommand())
 	cmd.AddCommand(newConfigUnlockClearCommand())
 	cmd.AddCommand(newConfigUnlockSetCommand())
+	return cmd
+}
+
+func newConfigVaultCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "vault",
+		Short: "Configure the default vault path",
+	}
+	cmd.AddCommand(newConfigVaultShowCommand())
+	cmd.AddCommand(newConfigVaultClearCommand())
+	cmd.AddCommand(newConfigVaultSetCommand())
+	return cmd
+}
+
+func newConfigVaultShowCommand() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "show",
+		Short: "Show the configured default vault path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, _, err := loadConfig()
+			if err != nil {
+				return configCommandError(cmd, jsonOut, err)
+			}
+			vaultPath := ""
+			if c.Vault != nil {
+				vaultPath = strings.TrimSpace(c.Vault.Path)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:        true,
+					Action:    "config_vault_show",
+					VaultPath: vaultPath,
+				})
+			}
+			if vaultPath == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "vault_path: (not set)")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "vault_path: %s\n", vaultPath)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
+}
+
+func newConfigVaultClearCommand() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "clear",
+		Short: "Remove configured default vault path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, _, err := loadConfig()
+			if err != nil {
+				return configCommandError(cmd, jsonOut, err)
+			}
+			c.Vault = nil
+			p, err := saveConfig(c)
+			if err != nil {
+				return configCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:        true,
+					Action:    "config_vault_clear",
+					Path:      p,
+					VaultPath: "",
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "ok (%s)\n", p)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
+	return cmd
+}
+
+func newConfigVaultSetCommand() *cobra.Command {
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "set <vault-path>",
+		Short: "Set the default vault path",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vaultPath := strings.TrimSpace(args[0])
+			if vaultPath == "" {
+				return configCommandError(cmd, jsonOut, errors.New("vault path cannot be empty"))
+			}
+
+			c, _, err := loadConfig()
+			if err != nil {
+				return configCommandError(cmd, jsonOut, err)
+			}
+			c.Vault = &vaultConfig{Path: vaultPath}
+			p, err := saveConfig(c)
+			if err != nil {
+				return configCommandError(cmd, jsonOut, err)
+			}
+			if jsonOut {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(configResult{
+					OK:        true,
+					Action:    "config_vault_set",
+					Path:      p,
+					VaultPath: vaultPath,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "ok (%s)\n", p)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }
 
@@ -255,6 +369,8 @@ func configErrorReason(err error) string {
 		return reasonUnknownUnlockMethod
 	case strings.Contains(msg, "exec method requires a command"):
 		return reasonMissingUnlockExecCommand
+	case strings.Contains(msg, "vault path cannot be empty"):
+		return reasonEmptyPath
 	case strings.Contains(msg, "invalid config json"):
 		return reasonInvalidConfigJSON
 	case strings.Contains(msg, "no user config dir"):

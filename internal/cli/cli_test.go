@@ -644,6 +644,17 @@ func TestCLI_BundleJSONAndTypedErrors(t *testing.T) {
 func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
+	configVaultPath := filepath.Join(dir, "config-default.vault.db")
+
+	prevVault, hadVault := os.LookupEnv(envVaultPath)
+	_ = os.Unsetenv(envVaultPath)
+	defer func() {
+		if hadVault {
+			_ = os.Setenv(envVaultPath, prevVault)
+		} else {
+			_ = os.Unsetenv(envVaultPath)
+		}
+	}()
 
 	restore := withEnv(map[string]string{
 		envConfigPath: configPath,
@@ -663,6 +674,54 @@ func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	}
 	if pathResp["exit_code"] != float64(0) {
 		t.Fatalf("expected config path exit_code=0, got %#v", pathResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"config", "vault", "set", configVaultPath, "--json"}, nil)
+	if err != nil {
+		t.Fatalf("config vault set --json: %v (stderr=%s)", err, errBuf)
+	}
+	var vaultSetResp map[string]any
+	if err := json.Unmarshal([]byte(out), &vaultSetResp); err != nil {
+		t.Fatalf("config vault set json parse: %v", err)
+	}
+	if vaultSetResp["action"] != "config_vault_set" || vaultSetResp["vault_path"] != configVaultPath {
+		t.Fatalf("unexpected config vault set response: %#v", vaultSetResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"config", "vault", "show", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("config vault show --json: %v (stderr=%s)", err, errBuf)
+	}
+	var vaultShowResp map[string]any
+	if err := json.Unmarshal([]byte(out), &vaultShowResp); err != nil {
+		t.Fatalf("config vault show json parse: %v", err)
+	}
+	if vaultShowResp["action"] != "config_vault_show" || vaultShowResp["vault_path"] != configVaultPath {
+		t.Fatalf("unexpected config vault show response: %#v", vaultShowResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"vault", "path", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("vault path --json: %v (stderr=%s)", err, errBuf)
+	}
+	var vaultPathResp map[string]any
+	if err := json.Unmarshal([]byte(out), &vaultPathResp); err != nil {
+		t.Fatalf("vault path json parse: %v", err)
+	}
+	if vaultPathResp["action"] != "vault_path" || vaultPathResp["path"] != configVaultPath || vaultPathResp["source"] != "config" {
+		t.Fatalf("unexpected vault path response: %#v", vaultPathResp)
+	}
+
+	out, errBuf, err = runCLI([]string{"config", "vault", "clear", "--json"}, nil)
+	if err != nil {
+		t.Fatalf("config vault clear --json: %v (stderr=%s)", err, errBuf)
+	}
+	var vaultClearResp map[string]any
+	if err := json.Unmarshal([]byte(out), &vaultClearResp); err != nil {
+		t.Fatalf("config vault clear json parse: %v", err)
+	}
+	if vaultClearResp["action"] != "config_vault_clear" {
+		t.Fatalf("unexpected config vault clear response: %#v", vaultClearResp)
 	}
 
 	out, errBuf, err = runCLI([]string{"config", "unlock", "set", "env", "--json"}, nil)
@@ -715,6 +774,61 @@ func TestCLI_ConfigJSONAndTypedErrors(t *testing.T) {
 	}
 	if errResp["reason"] != "unknown_unlock_method" {
 		t.Fatalf("expected reason=unknown_unlock_method, got %#v", errResp)
+	}
+}
+
+func TestCLI_VaultPathPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	configVault := filepath.Join(dir, "from-config.vault.db")
+	envVault := filepath.Join(dir, "from-env.vault.db")
+	flagVault := filepath.Join(dir, "from-flag.vault.db")
+
+	prevVault, hadVault := os.LookupEnv(envVaultPath)
+	_ = os.Unsetenv(envVaultPath)
+	defer func() {
+		if hadVault {
+			_ = os.Setenv(envVaultPath, prevVault)
+		} else {
+			_ = os.Unsetenv(envVaultPath)
+		}
+	}()
+
+	restore := withEnv(map[string]string{
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+	})
+	defer restore()
+
+	_, errBuf, err := runCLI([]string{"config", "vault", "set", configVault}, nil)
+	if err != nil {
+		t.Fatalf("config vault set: %v (stderr=%s)", err, errBuf)
+	}
+
+	_, errBuf, err = runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init (config default): %v (stderr=%s)", err, errBuf)
+	}
+	if _, err := os.Stat(configVault); err != nil {
+		t.Fatalf("expected vault at config path, stat err=%v", err)
+	}
+
+	restoreEnvVault := withEnv(map[string]string{envVaultPath: envVault})
+	_, errBuf, err = runCLI([]string{"vault", "init"}, nil)
+	restoreEnvVault()
+	if err != nil {
+		t.Fatalf("vault init (env override): %v (stderr=%s)", err, errBuf)
+	}
+	if _, err := os.Stat(envVault); err != nil {
+		t.Fatalf("expected vault at env path, stat err=%v", err)
+	}
+
+	_, errBuf, err = runCLI([]string{"vault", "init", "--vault", flagVault}, nil)
+	if err != nil {
+		t.Fatalf("vault init (flag override): %v (stderr=%s)", err, errBuf)
+	}
+	if _, err := os.Stat(flagVault); err != nil {
+		t.Fatalf("expected vault at flag path, stat err=%v", err)
 	}
 }
 

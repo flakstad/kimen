@@ -441,6 +441,7 @@ func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	}
 
 	assertSuccessEnvelope([]string{"vault", "init", "--json"}, "vault_init")
+	assertSuccessEnvelope([]string{"vault", "path", "--json"}, "vault_path")
 	assertSuccessEnvelope([]string{"vault", "info", "--json"}, "vault_info")
 
 	out, errBuf, err := runCLI([]string{"secret", "set", "api_key", "--stdin", "--json"}, strings.NewReader("value"))
@@ -467,6 +468,9 @@ func TestCLI_Contract_NonSyncSuccessEnvelopesIncludeExitCode(t *testing.T) {
 	assertSuccessEnvelope([]string{"bundle", "open", "--in", bundlePath, "--out-vault", outVaultPath, "--identity", identityPath, "--overwrite", "--json"}, "bundle_open")
 
 	assertSuccessEnvelope([]string{"config", "path", "--json"}, "config_path")
+	assertSuccessEnvelope([]string{"config", "vault", "set", filepath.Join(dir, "vault.default.db"), "--json"}, "config_vault_set")
+	assertSuccessEnvelope([]string{"config", "vault", "show", "--json"}, "config_vault_show")
+	assertSuccessEnvelope([]string{"config", "vault", "clear", "--json"}, "config_vault_clear")
 	assertSuccessEnvelope([]string{"config", "unlock", "set", "env", "--json"}, "config_unlock_set")
 	assertSuccessEnvelope([]string{"config", "unlock", "show", "--json"}, "config_unlock_show")
 	assertSuccessEnvelope([]string{"config", "unlock", "clear", "--json"}, "config_unlock_clear")

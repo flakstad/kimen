@@ -56,7 +56,7 @@ General rule:
 
 `vault --json`:
 
-- success: `{"ok":true,"action":"vault_init|vault_info","exit_code":0,...}`
+- success: `{"ok":true,"action":"vault_init|vault_info|vault_path","exit_code":0,...}`
 - error: standard error envelope on `stderr`
   - `reason` values include:
     - `vault_not_found`
@@ -83,7 +83,9 @@ General rule:
 `config`:
 
 - `config show` always emits config JSON on success
-- `config path --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...,"exit_code":0,...}`
+- `config path --json`, `config vault set/show/clear --json`, `config unlock set/show/clear --json` emit `{"ok":true,"action":...,"exit_code":0,...}`
+  - vault actions: `config_vault_set|config_vault_show|config_vault_clear`
+  - unlock actions: `config_unlock_set|config_unlock_show|config_unlock_clear`
 - errors use standard error envelope on `stderr`
   - `reason` values include:
     - `unknown_unlock_method`
