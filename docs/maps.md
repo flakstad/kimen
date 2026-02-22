@@ -20,6 +20,8 @@ Rules:
 - `envpath` resolves to `$KIMEN_FILES_DIR/<relpath>` (or `<files-dir>/<relpath>` when specified).
 - `envpath` is intended to point at a file that is also projected via `file …`.
 - `<value>` is usually a vault secret name, but can also be an alternate source:
+  - `secret:<name>`: explicit secret reference (equivalent to bare secret name)
+  - `const:<literal>`: inline literal bytes (no vault lookup)
   - `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
     - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
 
@@ -29,6 +31,7 @@ Example (`.kimen/profiles/linje-prod.kmap`):
 # env vars
 env LINJE_API_TOKEN=linje.prod.api_token
 env MAILERSEND_TOKEN=linje.prod.mailersend_token
+env PORT=const:6060
 
 # files
 file key.json=linje.prod.gcp_sa_key_json

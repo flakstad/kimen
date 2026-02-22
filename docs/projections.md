@@ -13,6 +13,8 @@ Kimen can also produce projected bytes *at projection time* from other **sources
 Currently supported sources:
 
 - `secret name` (default): read from the local vault
+- `secret:<name>`: explicit secret reference (same behavior as bare secret name)
+- `const:<literal>`: inline literal bytes (no vault lookup)
 - `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
   - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
 

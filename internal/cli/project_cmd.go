@@ -140,10 +140,10 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 	cmd.Flags().StringVar(&passphraseCmd, "passphrase-cmd", "", "execute command to obtain passphrase (reads one line from stdout)")
 	cmd.Flags().StringVar(&mapPath, "map", "", "map file with env/file mappings")
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
-	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name [or secret:<name>], const:<literal>, or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name [or secret:<name>], const:<literal>, or exec:<command...>)")
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
-	cmd.Flags().StringVar(&stdin, "stdin", "", "project a value into the command stdin (<value> or exec:<command...>)")
+	cmd.Flags().StringVar(&stdin, "stdin", "", "project a value into the command stdin (<value>, secret:<name>, const:<literal>, or exec:<command...>)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory for projected files (defaults to a temp dir for this run)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print a plan and exit without running the command")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON where applicable (dry-run plan and structured errors)")
@@ -258,7 +258,7 @@ func newRenderCommand() *cobra.Command {
 	cmd.Flags().StringVar(&systemdService, "systemd-service", "", "render to a systemd-friendly runtime path (<runtime-dir>/kimen/<service>)")
 	cmd.Flags().StringVar(&runtimeDir, "runtime-dir", "/run", "base runtime directory used with --systemd-service")
 	cmd.Flags().BoolVar(&printSystemdHints, "print-systemd-hints", false, "print service wiring hints when using --systemd-service")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name [or secret:<name>], const:<literal>, or exec:<command...>)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd
 }

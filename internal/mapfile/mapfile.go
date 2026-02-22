@@ -18,6 +18,7 @@ import (
 // Examples:
 //
 //	env LINJE_API_TOKEN=linje.prod.api_token
+//	env PORT=const:5050
 //	file key.json=gcp.sa_key_json
 //	stdin exec:some-command
 //	envpath GOOGLE_APPLICATION_CREDENTIALS=key.json

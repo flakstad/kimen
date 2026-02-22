@@ -12,6 +12,8 @@ import (
 )
 
 const execValuePrefix = "exec:"
+const secretValuePrefix = "secret:"
+const constValuePrefix = "const:"
 
 func ResolveValue(ctx context.Context, r vault.Reader, spec string) ([]byte, error) {
 	spec = strings.TrimSpace(spec)
@@ -36,7 +38,20 @@ func ResolveValue(ctx context.Context, r vault.Reader, spec string) ([]byte, err
 		return stripOneTrailingNewline(out), nil
 	}
 
-	sec, err := r.GetSecret(ctx, spec)
+	if strings.HasPrefix(spec, constValuePrefix) {
+		// const: keeps bytes inline in the map/flag value instead of reading from vault.
+		return []byte(strings.TrimPrefix(spec, constValuePrefix)), nil
+	}
+
+	secretName := spec
+	if strings.HasPrefix(spec, secretValuePrefix) {
+		secretName = strings.TrimSpace(strings.TrimPrefix(spec, secretValuePrefix))
+		if secretName == "" {
+			return nil, errors.New("empty secret name in value spec")
+		}
+	}
+
+	sec, err := r.GetSecret(ctx, secretName)
 	if err != nil {
 		return nil, err
 	}
@@ -52,4 +67,3 @@ func stripOneTrailingNewline(b []byte) []byte {
 	}
 	return b
 }
-

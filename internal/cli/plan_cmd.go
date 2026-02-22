@@ -138,10 +138,10 @@ func newPlanCommand() *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "named profile resolving to a map file")
 	cmd.Flags().StringVar(&againstMap, "against-map", "", "compare current plan against another map file")
 	cmd.Flags().StringVar(&againstProfile, "against-profile", "", "compare current plan against another profile")
-	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name or exec:<command...>)")
-	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&envMappings, "env", nil, "env mapping VAR=<value> (repeatable; <value> is secret name [or secret:<name>], const:<literal>, or exec:<command...>)")
+	cmd.Flags().StringArrayVar(&fileMappings, "file", nil, "file mapping relpath=<value> (repeatable; <value> is secret name [or secret:<name>], const:<literal>, or exec:<command...>)")
 	cmd.Flags().StringArrayVar(&envPathMappings, "envpath", nil, "envpath mapping VAR=relpath (repeatable)")
-	cmd.Flags().StringVar(&stdin, "stdin", "", "show a stdin projection source (<value> or exec:<command...>)")
+	cmd.Flags().StringVar(&stdin, "stdin", "", "show a stdin projection source (<value>, secret:<name>, const:<literal>, or exec:<command...>)")
 	cmd.Flags().StringVar(&filesDir, "files-dir", "", "directory used to resolve envpath values (defaults to $KIMEN_FILES_DIR or a temp dir for run mode)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output JSON")
 	return cmd

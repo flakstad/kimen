@@ -153,6 +153,13 @@ Run a command with projected secrets (env + files):
 kimen run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
 ```
 
+Value sources:
+
+- bare value (default): secret name lookup
+- `secret:<name>`: explicit secret lookup
+- `const:<literal>`: inline literal value
+- `exec:<command...>`: derive value from command stdout
+
 Create a map/profile (optional, recommended for real projects):
 
 ```bash

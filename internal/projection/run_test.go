@@ -173,6 +173,54 @@ func TestRunCommand_StdinProjection(t *testing.T) {
 			t.Fatalf("unexpected stdout: %q", got)
 		}
 	})
+
+	t.Run("secret-prefix", func(t *testing.T) {
+		req, err := ParseRequest(nil, nil, "secret:foo")
+		if err != nil {
+			t.Fatalf("ParseRequest: %v", err)
+		}
+		v := fakeVault{m: map[string][]byte{"foo": []byte("hello")}}
+
+		var out bytes.Buffer
+		var errBuf bytes.Buffer
+		cmd := []string{os.Args[0], "-test.run=TestHelperProcess", "--", "stdin"}
+		err = RunCommand(context.Background(), v, RunSpec{
+			Command: cmd,
+			Request: req,
+			Stdout:  &out,
+			Stderr:  &errBuf,
+		})
+		if err != nil {
+			t.Fatalf("RunCommand: %v (stderr=%s)", err, errBuf.String())
+		}
+		if got := strings.TrimSpace(out.String()); got != "STDIN=hello" {
+			t.Fatalf("unexpected stdout: %q", got)
+		}
+	})
+
+	t.Run("const-prefix", func(t *testing.T) {
+		req, err := ParseRequest(nil, nil, "const:literal-stdin")
+		if err != nil {
+			t.Fatalf("ParseRequest: %v", err)
+		}
+		v := fakeVault{m: map[string][]byte{}}
+
+		var out bytes.Buffer
+		var errBuf bytes.Buffer
+		cmd := []string{os.Args[0], "-test.run=TestHelperProcess", "--", "stdin"}
+		err = RunCommand(context.Background(), v, RunSpec{
+			Command: cmd,
+			Request: req,
+			Stdout:  &out,
+			Stderr:  &errBuf,
+		})
+		if err != nil {
+			t.Fatalf("RunCommand: %v (stderr=%s)", err, errBuf.String())
+		}
+		if got := strings.TrimSpace(out.String()); got != "STDIN=literal-stdin" {
+			t.Fatalf("unexpected stdout: %q", got)
+		}
+	})
 }
 
 func TestRunCommand_ExecSource_EnvAndFiles(t *testing.T) {
@@ -183,6 +231,46 @@ func TestRunCommand_ExecSource_EnvAndFiles(t *testing.T) {
 	execBar := fmt.Sprintf("exec:%s -test.run=TestHelperProcess -- execout world", os.Args[0])
 
 	req, err := ParseRequest([]string{"FOO=" + execFoo}, []string{"cfg.txt=" + execBar}, "")
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+
+	v := fakeVault{m: map[string][]byte{}}
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := []string{os.Args[0], "-test.run=TestHelperProcess", "--", "envfile"}
+	err = RunCommand(context.Background(), v, RunSpec{
+		Command: cmd,
+		Request: req,
+		Stdin:   strings.NewReader(""),
+		Stdout:  &out,
+		Stderr:  &errBuf,
+	})
+	if err != nil {
+		t.Fatalf("RunCommand: %v (stderr=%s)", err, errBuf.String())
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	got := make(map[string]string)
+	for _, ln := range lines {
+		k, v, ok := strings.Cut(ln, "=")
+		if ok {
+			got[k] = v
+		}
+	}
+	if got["FOO"] != "hello" {
+		t.Fatalf("FOO mismatch: %q", got["FOO"])
+	}
+	if got["FILE"] != "world" {
+		t.Fatalf("FILE mismatch: %q", got["FILE"])
+	}
+}
+
+func TestRunCommand_ConstSource_EnvAndFiles(t *testing.T) {
+	restore := setEnv("GO_WANT_HELPER_PROCESS", "1")
+	defer restore()
+
+	req, err := ParseRequest([]string{"FOO=const:hello"}, []string{"cfg.txt=const:world"}, "")
 	if err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}

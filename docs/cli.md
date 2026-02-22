@@ -560,12 +560,14 @@ Automation notes:
 - `kimen run --json` emits structured error envelopes on stderr for setup/projection failures
 - run error envelopes include a machine-readable `reason` field for automation branching
 
-### Value sources (`secret name` vs `exec:...`)
+### Value sources (`secret`, `const`, `exec`)
 
 Wherever Kimen accepts a value on the right-hand side (e.g. `--env VAR=...`, `--file path=...`, `--stdin ...`), the default is a vault secret name.
 
 Kimen also supports deriving values at projection time:
 
+- `secret:<name>`: explicit secret reference (equivalent to bare secret name)
+- `const:<literal>`: inline literal bytes (no vault lookup)
 - `exec:<command...>`: run a local command and use its stdout (with one trailing newline stripped)
   - Note: arguments are split on whitespace (no shell parsing/quoting). Use a wrapper script for complex cases.
 
