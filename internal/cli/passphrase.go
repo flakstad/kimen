@@ -15,6 +15,10 @@ import (
 
 const envPassphrase = "KIMEN_PASSPHRASE"
 
+var openTTY = func() (*os.File, error) {
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
 func resolvePassphrase(passphraseCmdFlag string, passphraseStdinFlag bool) ([]byte, error) {
 	if p := os.Getenv(envPassphrase); p != "" {
 		return []byte(p), nil
@@ -38,7 +42,7 @@ func resolvePassphrase(passphraseCmdFlag string, passphraseStdinFlag bool) ([]by
 	if c.Unlock != nil {
 		switch strings.ToLower(strings.TrimSpace(c.Unlock.Method)) {
 		case "", "prompt":
-			// fall through to prompt
+			return promptPassphrase()
 		case "env":
 			return nil, fmt.Errorf("unlock.method=env but %s is not set", envPassphrase)
 		case "stdin":
@@ -53,19 +57,7 @@ func resolvePassphrase(passphraseCmdFlag string, passphraseStdinFlag bool) ([]by
 		}
 	}
 
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprint(os.Stderr, "Passphrase: ")
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return nil, err
-		}
-		if len(b) == 0 {
-			return nil, errors.New("empty passphrase")
-		}
-		return b, nil
-	}
-	return nil, errors.New("no passphrase provided (set KIMEN_PASSPHRASE, use --passphrase-stdin/--passphrase-cmd, or configure `kimen config unlock ...`)")
+	return promptPassphrase()
 }
 
 func resolvePassphraseFromExec(args []string) ([]byte, error) {
@@ -100,4 +92,45 @@ func readLine(r io.Reader) ([]byte, error) {
 		return nil, errors.New("empty passphrase")
 	}
 	return []byte(line), nil
+}
+
+func promptPassphrase() ([]byte, error) {
+	return promptPassphraseWith(os.Stdin, os.Stderr, openTTY, term.IsTerminal, term.ReadPassword)
+}
+
+func promptPassphraseWith(
+	stdin *os.File,
+	stderr io.Writer,
+	openTTYFn func() (*os.File, error),
+	isTerminalFn func(int) bool,
+	readPasswordFn func(int) ([]byte, error),
+) ([]byte, error) {
+	promptOnFD := func(fd int, out io.Writer) ([]byte, error) {
+		fmt.Fprint(out, "Passphrase: ")
+		b, err := readPasswordFn(fd)
+		fmt.Fprintln(out)
+		if err != nil {
+			return nil, err
+		}
+		if len(b) == 0 {
+			return nil, errors.New("empty passphrase")
+		}
+		return b, nil
+	}
+
+	if stdin != nil && isTerminalFn(int(stdin.Fd())) {
+		return promptOnFD(int(stdin.Fd()), stderr)
+	}
+
+	if openTTYFn != nil {
+		tty, err := openTTYFn()
+		if err == nil && tty != nil {
+			defer tty.Close()
+			if isTerminalFn(int(tty.Fd())) {
+				return promptOnFD(int(tty.Fd()), tty)
+			}
+		}
+	}
+
+	return nil, errors.New("no passphrase provided (set KIMEN_PASSPHRASE, use --passphrase-stdin/--passphrase-cmd, or configure `kimen config unlock ...`)")
 }
