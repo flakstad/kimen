@@ -121,6 +121,54 @@ func TestRunCommand_ExitCodeForwarding(t *testing.T) {
 	}
 }
 
+func TestRunCommand_BeforeExecRunsBeforeChild(t *testing.T) {
+	restore := setEnv("GO_WANT_HELPER_PROCESS", "1")
+	defer restore()
+
+	req, err := ParseRequest(nil, nil, "")
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	v := fakeVault{m: map[string][]byte{}}
+
+	marker := filepath.Join(t.TempDir(), "marker.txt")
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := []string{os.Args[0], "-test.run=TestHelperProcess", "--", "checkfile", marker}
+	err = RunCommand(context.Background(), v, RunSpec{
+		Command: cmd,
+		Request: req,
+		Stdout:  &out,
+		Stderr:  &errBuf,
+		BeforeExec: func() error {
+			return os.WriteFile(marker, []byte("ok"), 0o600)
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunCommand: %v (stderr=%s)", err, errBuf.String())
+	}
+}
+
+func TestRunCommand_BeforeExecError(t *testing.T) {
+	req, err := ParseRequest(nil, nil, "")
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	v := fakeVault{m: map[string][]byte{}}
+
+	expected := errors.New("before-exec failed")
+	err = RunCommand(context.Background(), v, RunSpec{
+		Command: []string{os.Args[0], "-test.run=TestHelperProcess", "--", "exit", "0"},
+		Request: req,
+		BeforeExec: func() error {
+			return expected
+		},
+	})
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected before-exec error, got %v", err)
+	}
+}
+
 func TestRunCommand_StdinProjection(t *testing.T) {
 	restore := setEnv("GO_WANT_HELPER_PROCESS", "1")
 	defer restore()
@@ -361,6 +409,15 @@ func TestHelperProcess(t *testing.T) {
 		}
 		code, _ := strconv.Atoi(args[i+1])
 		os.Exit(code)
+	case "checkfile":
+		if i+1 >= len(args) {
+			os.Exit(2)
+		}
+		if _, err := os.Stat(args[i+1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
 	default:
 		fmt.Fprintln(os.Stderr, "unknown helper mode")
 		os.Exit(2)

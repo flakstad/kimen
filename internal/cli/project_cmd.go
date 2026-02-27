@@ -117,7 +117,12 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 			if err != nil {
 				return projectionCommandError(cmd, jsonOut, err)
 			}
-			defer v.Close()
+			vaultClosed := false
+			defer func() {
+				if !vaultClosed {
+					_ = v.Close()
+				}
+			}()
 
 			err = projection.RunCommand(cmd.Context(), v, projection.RunSpec{
 				Command:  args,
@@ -127,6 +132,13 @@ func newRunCommand(use, missingCommandMsg string) *cobra.Command {
 				Stdout:   cmd.OutOrStdout(),
 				Stderr:   cmd.ErrOrStderr(),
 				Stdin:    cmd.InOrStdin(),
+				BeforeExec: func() error {
+					if err := v.Close(); err != nil {
+						return err
+					}
+					vaultClosed = true
+					return nil
+				},
 			})
 			if err != nil {
 				return projectionCommandError(cmd, jsonOut, err)

@@ -24,6 +24,10 @@ type RunSpec struct {
 	Stdin    io.Reader
 	Stdout   io.Writer
 	Stderr   io.Writer
+	// BeforeExec runs after projection is fully resolved and before starting
+	// the child process. Callers can use this to release resources such as
+	// vault file locks for long-running commands.
+	BeforeExec func() error
 }
 
 func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
@@ -96,6 +100,12 @@ func RunCommand(ctx context.Context, r vault.Reader, spec RunSpec) error {
 		env = normalizeWindowsEnv(env)
 	}
 	cmd.Env = applyEnvOverrides(env, envExtra, runtime.GOOS == "windows")
+
+	if spec.BeforeExec != nil {
+		if err := spec.BeforeExec(); err != nil {
+			return err
+		}
+	}
 
 	err := cmd.Run()
 	if err == nil {
