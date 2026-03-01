@@ -404,6 +404,40 @@ func TestCLI_SyncRemoteSelection_UsesUniqueSyncStateRemote(t *testing.T) {
 	}
 }
 
+func TestCLI_SyncRemoteSelection_SingleRemoteWithInvalidEnvFails(t *testing.T) {
+	dir := t.TempDir()
+	vaultPath := filepath.Join(dir, "vault.db")
+	configPath := filepath.Join(dir, "config.json")
+	remoteDir := filepath.Join(dir, "remote-origin")
+
+	restore := withEnv(map[string]string{
+		envVaultPath:  vaultPath,
+		envConfigPath: configPath,
+		envPassphrase: "pass",
+		envRemoteName: "missing",
+	})
+	defer restore()
+
+	_, _, err := runCLI([]string{"vault", "init"}, nil)
+	if err != nil {
+		t.Fatalf("vault init: %v", err)
+	}
+	_, _, err = runCLI([]string{"remote", "add", "origin", "--path", remoteDir}, nil)
+	if err != nil {
+		t.Fatalf("remote add origin: %v", err)
+	}
+
+	_, errOut, err := runCLI([]string{"sync", "status", "--json"}, nil)
+	if err == nil {
+		t.Fatalf("expected sync status to fail for invalid %s with a single configured remote", envRemoteName)
+	}
+	assertExitCode(t, err, exitcode.CodeSyncFailed)
+	errResp := parseJSONMap(t, errOut)
+	if errResp["reason"] != reasonRemoteNotFoundFromEnv {
+		t.Fatalf("expected reason %q, got %#v", reasonRemoteNotFoundFromEnv, errResp)
+	}
+}
+
 func TestCLI_SyncStatus_TerseHumanOutput(t *testing.T) {
 	dir := t.TempDir()
 	vaultPath := filepath.Join(dir, "vault.db")

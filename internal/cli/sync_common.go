@@ -82,10 +82,6 @@ func resolveRemote(c config, name string) (remoteConfig, error) {
 	if len(c.Remotes) == 0 {
 		return remoteConfig{}, errors.New("no remotes configured")
 	}
-	if len(c.Remotes) == 1 {
-		return c.Remotes[0], nil
-	}
-
 	if envRemote := strings.TrimSpace(os.Getenv(envRemoteName)); envRemote != "" {
 		i := findRemoteIndex(c.Remotes, envRemote)
 		if i < 0 {
@@ -100,6 +96,10 @@ func resolveRemote(c config, name string) (remoteConfig, error) {
 
 	if i := findRemoteIndex(c.Remotes, "origin"); i >= 0 {
 		return c.Remotes[i], nil
+	}
+
+	if len(c.Remotes) == 1 {
+		return c.Remotes[0], nil
 	}
 
 	return remoteConfig{}, errors.New("multiple remotes configured; use --remote or set KIMEN_REMOTE")
