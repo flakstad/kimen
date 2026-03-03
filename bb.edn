@@ -1,4 +1,4 @@
-{:paths ["src" "test"]
+{:paths ["src" "test" "resources"]
  :tasks
  {run {:doc "Run kimen CLI"
        :override-builtin true

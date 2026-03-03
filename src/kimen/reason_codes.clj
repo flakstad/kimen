@@ -48,6 +48,12 @@
 (def reason-config-path-unavailable "config_path_unavailable")
 (def reason-config-failed "config_failed")
 
+(def reason-doctor-failed "doctor_failed")
+(def reason-init-failed "init_failed")
+(def reason-invalid-remote-type "invalid_remote_type")
+(def reason-output-is-directory "output_is_directory")
+(def reason-output-exists "output_exists")
+
 (defn all-reason-codes
   []
   [reason-vault-not-found
@@ -90,4 +96,9 @@
    reason-missing-unlock-exec-command
    reason-invalid-config-json
    reason-config-path-unavailable
-   reason-config-failed])
+   reason-config-failed
+   reason-doctor-failed
+   reason-init-failed
+   reason-invalid-remote-type
+   reason-output-is-directory
+   reason-output-exists])

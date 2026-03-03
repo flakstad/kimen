@@ -2,6 +2,8 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [kimen.commands.doctor :as doctor]
+    [kimen.commands.init :as init]
     [kimen.commands.map-lint :as map-lint]
     [kimen.commands.plan :as plan]
     [kimen.commands.version :as version]
@@ -48,6 +50,10 @@
      "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
+     "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
+     "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json]"
+     "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
      ""]))
 
 (defn- json-line
@@ -614,6 +620,218 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-doctor-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :strict? false
+               :allow-missing-vault? false
+               :map-path nil
+               :profile nil
+               :bundle-in nil
+               :identity nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--strict")
+          (recur (rest args) (assoc opts :strict? true))
+
+          (= a "--allow-missing-vault")
+          (recur (rest args) (assoc opts :allow-missing-vault? true))
+
+          (or (= a "--map") (str/starts-with? a "--map="))
+          (let [[v next-args err] (parse-flag-value args "--map")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :map-path v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--bundle-in") (str/starts-with? a "--bundle-in="))
+          (let [[v next-args err] (parse-flag-value args "--bundle-in")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :bundle-in v))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-init-ci-pr-safety-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-pr-safety-workflow-path}
+                     (init/default-ci-pr-safety-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--command") (str/starts-with? a "--command="))
+          (let [[v next-args err] (parse-flag-value args "--command")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :command v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-init-ci-deploy-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-deploy-workflow-path}
+                     (init/default-ci-deploy-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--deploy-command") (str/starts-with? a "--deploy-command="))
+          (let [[v next-args err] (parse-flag-value args "--deploy-command")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :deploy-command v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-init-ci-sync-gate-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-sync-gate-workflow-path}
+                     (init/default-ci-sync-gate-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--remote-name") (str/starts-with? a "--remote-name="))
+          (let [[v next-args err] (parse-flag-value args "--remote-name")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-name v))))
+
+          (or (= a "--remote-type") (str/starts-with? a "--remote-type="))
+          (let [[v next-args err] (parse-flag-value args "--remote-type")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-type v))))
+
+          (or (= a "--remote-path") (str/starts-with? a "--remote-path="))
+          (let [[v next-args err] (parse-flag-value args "--remote-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-path v))))
+
+          (or (= a "--remote-branch") (str/starts-with? a "--remote-branch="))
+          (let [[v next-args err] (parse-flag-value args "--remote-branch")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-branch v))))
+
+          (or (= a "--remote-bundle-path") (str/starts-with? a "--remote-bundle-path="))
+          (let [[v next-args err] (parse-flag-value args "--remote-bundle-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-bundle-path v))))
+
+          (or (= a "--local-bundle") (str/starts-with? a "--local-bundle="))
+          (let [[v next-args err] (parse-flag-value args "--local-bundle")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :local-bundle v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--stale-threshold") (str/starts-with? a "--stale-threshold="))
+          (let [[v next-args err] (parse-flag-value args "--stale-threshold")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :stale-threshold v))))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -1558,6 +1776,109 @@
         (catch Exception e
           (envfile-error-result json? e))))))
 
+(defn- doctor-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-doctor-failed)]
+    (if json?
+      (error-json exit-code/code-doctor-failed reason (.getMessage e))
+      (error-text exit-code/code-doctor-failed (.getMessage e)))))
+
+(defn- init-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-init-failed)]
+    (if json?
+      (error-json exit-code/code-init-failed reason (.getMessage e))
+      (error-text exit-code/code-init-failed (.getMessage e)))))
+
+(defn- handle-doctor
+  [ctx args]
+  (let [[opts parse-error] (parse-doctor-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (doctor-error-result json? (ex-info parse-error {:reason reasons/reason-doctor-failed}))
+
+      :else
+      (try
+        (let [report (-> (doctor/run-doctor-checks {:ctx ctx
+                                                    :map-path (:map-path opts)
+                                                    :profile (:profile opts)
+                                                    :bundle-in (:bundle-in opts)
+                                                    :identity (:identity opts)
+                                                    :allow-missing-vault? (:allow-missing-vault? opts)})
+                         (doctor/finalize-report (:strict? opts)))
+              exit-code (:exit_code report)]
+          (if json?
+            (result {:exit-code exit-code
+                     :stdout (json-line report)})
+            (result {:exit-code exit-code
+                     :stdout (str (doctor/render-report-text report) "\n")})))
+        (catch Exception e
+          (doctor-error-result json? e))))))
+
+(defn- handle-init-ci-pr-safety
+  [args]
+  (let [[opts parse-error] (parse-init-ci-pr-safety-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (init-error-result json? (ex-info parse-error {:reason reasons/reason-init-failed}))
+
+      :else
+      (try
+        (let [payload (init/init-ci-pr-safety! opts)]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (format "ok (%s)\n" (:out payload))})))
+        (catch Exception e
+          (init-error-result json? e))))))
+
+(defn- handle-init-ci-deploy
+  [args]
+  (let [[opts parse-error] (parse-init-ci-deploy-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (init-error-result json? (ex-info parse-error {:reason reasons/reason-init-failed}))
+
+      :else
+      (try
+        (let [payload (init/init-ci-deploy! opts)]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (format "ok (%s)\n" (:out payload))})))
+        (catch Exception e
+          (init-error-result json? e))))))
+
+(defn- handle-init-ci-sync-gate
+  [args]
+  (let [[opts parse-error] (parse-init-ci-sync-gate-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (init-error-result json? (ex-info parse-error {:reason reasons/reason-init-failed}))
+
+      :else
+      (try
+        (let [payload (init/init-ci-sync-gate! opts)]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (format "ok (%s)\n" (:out payload))})))
+        (catch Exception e
+          (init-error-result json? e))))))
+
+(defn- handle-init
+  [args]
+  (let [args (vec args)]
+    (cond
+      (= "ci-pr-safety" (first args)) (handle-init-ci-pr-safety (rest args))
+      (= "ci-deploy" (first args)) (handle-init-ci-deploy (rest args))
+      (= "ci-sync-gate" (first args)) (handle-init-ci-sync-gate (rest args))
+      :else (error-text 1 "unknown init command"))))
+
 (defn run
   [ctx argv]
   (let [raw-args (vec argv)
@@ -1593,6 +1914,12 @@
 
       (= "envfile" (first args))
       (handle-envfile ctx (rest args))
+
+      (= "doctor" (first args))
+      (handle-doctor ctx (rest args))
+
+      (= "init" (first args))
+      (handle-init (rest args))
 
       (and (= "map" (first args)) (= "lint" (second args)))
       (handle-map-lint ctx (drop 2 args))

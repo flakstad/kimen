@@ -507,3 +507,86 @@
                    {:config-path cfg-path})]
       (is (= exit-code/code-envfile-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"stdin_not_supported\"")))))
+
+(deftest doctor-json-ok-and-missing-vault
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        map-path (str (.getPath dir) "/app.kmap")
+        pass-cmd "printf test-passphrase"]
+    (spit map-path "env API_KEY=api_key\n")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--map" map-path "--json"] {}
+                                                     {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"action\":\"doctor\""))
+      (is (str/includes? stdout "\"ok\":true")))
+
+    (let [missing (str (.getPath dir) "/missing-vault.db")]
+      (run-cli ["config" "vault" "set" missing "--json"] {} {:config-path cfg-path})
+      (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})]
+        (is (= exit-code/code-doctor-failed exit-code))
+        (is (str/includes? stdout "\"ok\":false"))
+        (is (str/includes? stdout "\"name\":\"vault_file\""))
+        (is (str/includes? stdout "\"status\":\"error\"")))
+      (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--allow-missing-vault" "--json"] {} {:config-path cfg-path})]
+        (is (= 0 exit-code))
+        (is (str/includes? stdout "\"ok\":true"))))))
+
+(deftest doctor-strict-fails-on-warnings
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        map-path (str (.getPath dir) "/warn.kmap")
+        pass-cmd "printf test-passphrase"]
+    (spit map-path "file conf/api.txt=api_key\n")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--map" map-path "--strict" "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= exit-code/code-doctor-failed exit-code))
+      (is (str/includes? stdout "\"ok\":false"))
+      (is (str/includes? stdout "\"warning_count\":")))))
+
+(deftest init-ci-pr-safety-json-writes-workflow
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        out-path (str (.getPath dir) "/.github/workflows/kimen-pr-safety.yml")
+        {:keys [exit-code stdout stderr]}
+        (run-cli ["init" "ci-pr-safety"
+                  "--out" out-path
+                  "--profile" "qa"
+                  "--command" "echo lint-check"
+                  "--json"]
+                 {})]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (str/includes? stdout "\"action\":\"init_ci_pr_safety\""))
+    (is (str/includes? stdout out-path))
+    (let [body (slurp out-path)]
+      (is (str/includes? body "name: kimen-pr-safety"))
+      (is (str/includes? body "default: \"qa\""))
+      (is (str/includes? body "default: \"echo lint-check\"")))))
+
+(deftest init-ci-sync-gate-errors-and-force-overwrite
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        out-path (str (.getPath dir) "/kimen-sync-gate.yml")]
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["init" "ci-sync-gate" "--out" out-path "--remote-type" "http" "--json"] {})]
+      (is (= exit-code/code-init-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_remote_type\"")))
+
+    (spit out-path "existing\n")
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["init" "ci-sync-gate" "--out" out-path "--json"] {})]
+      (is (= exit-code/code-init-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"output_exists\"")))
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["init" "ci-sync-gate" "--out" out-path "--force" "--json"] {})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"init_ci_sync_gate\""))
+      (is (str/includes? (slurp out-path) "name: kimen-sync-gate")))))
