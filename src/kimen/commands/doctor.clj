@@ -133,6 +133,79 @@
           (add-check state "bundle_decrypt" doctor-status-warning "bundle file present but no identity provided; decryptability not verified")
           state)))))
 
+(defn- maybe-url?
+  [s]
+  (boolean (and (string? s)
+                (or (str/includes? s "://")
+                    (re-find #"^[^/]+@[^:]+:.+$" s)))))
+
+(defn- remote-checks
+  [state cfg cfg-valid?]
+  (if-not cfg-valid?
+    (add-check state "remote_config" doctor-status-error "cannot validate remotes because config is invalid")
+    (let [remotes (if (vector? (get cfg "remotes"))
+                    (get cfg "remotes")
+                    [])]
+      (if (empty? remotes)
+        (add-check state "remote_config" doctor-status-ok "no remotes configured; skipping remote checks")
+        (reduce
+          (fn [state remote]
+            (let [name (or (some-> (get remote "name") str/trim not-empty) "unnamed")
+                  type (some-> (get remote "type") str/lower-case str/trim)
+                  path (some-> (get remote "path") str/trim)
+                  branch (some-> (get remote "branch") str/trim)
+                  recipient (some-> (get remote "recipient") str/trim)
+                  identity (some-> (get remote "identity") str/trim)
+                  state
+                  (case type
+                    "fs"
+                    (cond
+                      (str/blank? path)
+                      (add-check state (str "remote_" name "_fs_dir") doctor-status-error "fs remote path is empty")
+
+                      (.exists (io/file path))
+                      (add-check state (str "remote_" name "_fs_dir") doctor-status-ok path)
+
+                      :else
+                      (add-check state (str "remote_" name "_fs_dir") doctor-status-warning (format "fs remote path does not exist yet: %s" path)))
+
+                    "git"
+                    (let [state
+                          (cond
+                            (str/blank? path)
+                            (add-check state (str "remote_" name "_git_remote") doctor-status-error "git remote path is empty")
+
+                            (maybe-url? path)
+                            (add-check state (str "remote_" name "_git_remote") doctor-status-ok path)
+
+                            (.exists (io/file path))
+                            (add-check state (str "remote_" name "_git_remote") doctor-status-ok path)
+
+                            :else
+                            (add-check state (str "remote_" name "_git_remote") doctor-status-error (format "git remote not found: %s" path)))]
+                      (if (str/blank? branch)
+                        (add-check state (str "remote_" name "_git_branch") doctor-status-warning "git remote branch not set (defaulting to main)")
+                        (add-check state (str "remote_" name "_git_branch") doctor-status-ok branch)))
+
+                    (add-check state (str "remote_" name "_type") doctor-status-error (format "unknown remote type %s" (pr-str (or type "")))))
+                  state
+                  (if (str/blank? recipient)
+                    (add-check state (str "remote_" name "_recipient") doctor-status-warning "remote recipient is not configured")
+                    (add-check state (str "remote_" name "_recipient") doctor-status-ok recipient))
+                  state
+                  (cond
+                    (str/blank? identity)
+                    (add-check state (str "remote_" name "_identity") doctor-status-warning "remote identity is not configured")
+
+                    (.exists (io/file identity))
+                    (add-check state (str "remote_" name "_identity") doctor-status-ok identity)
+
+                    :else
+                    (add-check state (str "remote_" name "_identity") doctor-status-warning (format "remote identity file not found: %s" identity)))]
+              state))
+          state
+          remotes)))))
+
 (defn run-doctor-checks
   [{:keys [ctx map-path profile bundle-in identity allow-missing-vault?]}]
   (let [state {:checks []
@@ -182,7 +255,8 @@
               (catch Exception e
                 (add-check state "vault_metadata" doctor-status-error (.getMessage e))))))
         state (mapping-checks state {:map-path map-path :profile profile})
-        state (bundle-checks state {:bundle-in bundle-in :identity identity})]
+        state (bundle-checks state {:bundle-in bundle-in :identity identity})
+        state (remote-checks state cfg cfg-valid?)]
     state))
 
 (defn finalize-report

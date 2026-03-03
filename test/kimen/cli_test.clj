@@ -639,6 +639,43 @@
       (is (str/includes? stdout "\"name\":\"bundle_identity\""))
       (is (str/includes? stdout "\"status\":\"error\"")))))
 
+(deftest doctor-remote-checks
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        missing-fs (str (.getPath dir) "/remote-missing")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (spit cfg-path
+          (format "{\"vault\":{\"path\":%s},\"remotes\":[{\"name\":\"origin\",\"type\":\"fs\",\"path\":%s}]}\n"
+                  (pr-str vault-path)
+                  (pr-str missing-fs)))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"name\":\"remote_origin_fs_dir\""))
+      (is (str/includes? stdout "\"status\":\"warning\"")))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--strict" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-doctor-failed exit-code))
+      (is (str/includes? stdout "\"ok\":false"))))
+
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        missing-git (str (.getPath dir) "/missing.git")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (spit cfg-path
+          (format "{\"vault\":{\"path\":%s},\"remotes\":[{\"name\":\"origin\",\"type\":\"git\",\"path\":%s}]}\n"
+                  (pr-str vault-path)
+                  (pr-str missing-git)))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-doctor-failed exit-code))
+      (is (str/includes? stdout "\"name\":\"remote_origin_git_remote\""))
+      (is (str/includes? stdout "\"status\":\"error\"")))))
+
 (deftest init-template-render-defaults-match-checked-in-workflows
   (let [pr-workflow (slurp ".github/workflows/kimen-pr-safety-template.yml")
         deploy-workflow (slurp ".github/workflows/kimen-deploy-template.yml")
