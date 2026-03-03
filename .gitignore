@@ -1,7 +1,10 @@
 .worktrees/
 dist/
 tmp/
+target/
+.cpcache/
+.lsp/
+.clj-kondo/
 *.test
 *.out
 .DS_Store
-

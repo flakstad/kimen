@@ -1,0 +1,12 @@
+{:paths ["src" "test"]
+ :tasks
+ {run {:doc "Run kimen CLI"
+       :override-builtin true
+       :requires ([kimen.main :as main])
+       :task (System/exit (int (main/main! *command-line-args*)))}
+  test {:doc "Run tests"
+        :requires ([kimen.test-runner :as test-runner])
+        :task (System/exit (int (test-runner/main!)))}
+  smoke {:doc "Smoke-check version --json"
+         :requires ([kimen.main :as main])
+         :task (System/exit (int (main/main! ["version" "--json"])))}}}

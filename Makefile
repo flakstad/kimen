@@ -1,6 +1,6 @@
 BINARY_NAME=kimen
 
-.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot
+.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot clj-run clj-test bb-run bb-test
 
 # Go caches:
 # - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
@@ -83,3 +83,15 @@ release-check: vet test build sync-e2e-all
 
 release-snapshot: prep-cache
 	goreleaser release --snapshot --clean
+
+clj-run:
+	clojure -M:run
+
+clj-test:
+	clojure -M:test
+
+bb-run:
+	bb run -- version --json
+
+bb-test:
+	bb test
