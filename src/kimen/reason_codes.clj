@@ -19,6 +19,16 @@
 (def reason-invalid-relative-path "invalid_relative_path")
 (def reason-invalid-mapping "invalid_mapping")
 (def reason-invalid-env-var "invalid_env_var")
+(def reason-projection-failed "projection_failed")
+(def reason-missing-command "missing_command")
+(def reason-missing-file-mappings "missing_file_mappings")
+(def reason-missing-render-target "missing_render_target")
+(def reason-no-files-to-render "no_files_to_render")
+
+(def reason-envfile-failed "envfile_failed")
+(def reason-missing-out "missing_out")
+(def reason-missing-env-mappings "missing_env_mappings")
+(def reason-missing-files-dir-for-envpath "missing_files_dir_for_envpath")
 
 (def reason-empty-passphrase-command "empty_passphrase_command")
 (def reason-passphrase-command-failed "passphrase_command_failed")
@@ -53,6 +63,15 @@
    reason-invalid-relative-path
    reason-invalid-mapping
    reason-invalid-env-var
+   reason-projection-failed
+   reason-missing-command
+   reason-missing-file-mappings
+   reason-missing-render-target
+   reason-no-files-to-render
+   reason-envfile-failed
+   reason-missing-out
+   reason-missing-env-mappings
+   reason-missing-files-dir-for-envpath
    reason-empty-passphrase-command
    reason-passphrase-command-failed
    reason-missing-passphrase

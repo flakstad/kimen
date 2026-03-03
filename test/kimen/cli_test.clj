@@ -10,9 +10,9 @@
    (run-cli argv files {}))
   ([argv files ctx]
    (cli/run (merge {:read-file (fn [path]
-                                 (if-let [s (get files path)]
-                                   s
-                                   (throw (ex-info (str "open " path ": no such file") {:path path}))))}
+                                 (if (contains? files path)
+                                   (get files path)
+                                   (slurp path)))}
                    ctx)
             argv)))
 
@@ -193,3 +193,37 @@
                                               {:config-path cfg-path})]
       (is (= exit-code/code-wrong-passphrase exit-code))
       (is (str/includes? stderr "\"reason\":\"wrong_passphrase\"")))))
+
+(deftest run-render-envfile-happy-path
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        map-path (str (.getPath dir) "/dev.kmap")
+        out-dir (str (.getPath dir) "/render")
+        envfile-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"
+        map-src (str "env API_KEY=api_key\n"
+                     "file conf/api.txt=api_key\n"
+                     "envpath API_KEY_PATH=conf/api.txt\n")]
+    (spit map-path map-src)
+
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout]} (run-cli ["run" "--map" map-path "--json" "--dry-run" "--" "echo" "ok"] {} {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"plan\"")))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["render" "--map" map-path "--dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"render\""))
+      (is (= "shh" (slurp (str out-dir "/conf/api.txt")))))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["envfile" "--map" map-path "--out" envfile-path "--files-dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"envfile\""))
+      (let [body (slurp envfile-path)]
+        (is (str/includes? body "API_KEY=shh"))
+        (is (str/includes? body (str "API_KEY_PATH=" out-dir "/conf/api.txt")))))))

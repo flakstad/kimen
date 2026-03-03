@@ -8,7 +8,9 @@
     [kimen.config :as config]
     [kimen.exit-code :as exit-code]
     [kimen.json :as json]
+    [kimen.mapfile :as mapfile]
     [kimen.passphrase :as passphrase]
+    [kimen.projection :as projection]
     [kimen.reason-codes :as reasons]
     [kimen.vault-path :as vault-path]
     [kimen.vault.v2 :as vault-v2])
@@ -38,6 +40,9 @@
      "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
      "  kimen secret rm <name> [--vault <path>] [--json]"
      "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
+     "  kimen run --map <path> [--json] [--dry-run] [-- <command> [args...]]"
+     "  kimen render --map <path> --dir <path> [--json]"
+     "  kimen envfile --map <path> --out <path> [--files-dir <path>] [--json]"
      "  kimen map lint --map <path> [--mode all|run|render|envfile] [--json]"
      "  kimen plan --map <path> [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
@@ -311,6 +316,159 @@
 
           :else
           (recur (rest args) (update opts :rest conj a)))))))
+
+(defn- parse-run-opts
+  [args]
+  (let [[opt-args command] (split-before-double-dash args)]
+    (loop [args opt-args
+           opts {:json? false
+                 :dry-run? false
+                 :map-path nil
+                 :vault-path nil
+                 :passphrase-cmd nil
+                 :passphrase-stdin? false
+                 :command (vec command)}]
+      (if (empty? args)
+        [opts nil]
+        (let [a (first args)]
+          (cond
+            (= a "--json")
+            (recur (rest args) (assoc opts :json? true))
+
+            (= a "--dry-run")
+            (recur (rest args) (assoc opts :dry-run? true))
+
+            (= a "--passphrase-stdin")
+            (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+            (or (= a "--map") (str/starts-with? a "--map="))
+            (let [[v next-args err] (parse-flag-value args "--map")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :map-path v))))
+
+            (or (= a "--vault") (str/starts-with? a "--vault="))
+            (let [[v next-args err] (parse-flag-value args "--vault")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :vault-path v))))
+
+            (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+            (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :passphrase-cmd v))))
+
+            (str/starts-with? a "-")
+            [opts (str "unknown flag " a)]
+
+            :else
+            [opts (str "unexpected argument " (pr-str a))]))))))
+
+(defn- parse-render-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :map-path nil
+               :out-dir nil
+               :vault-path nil
+               :passphrase-cmd nil
+               :passphrase-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--map") (str/starts-with? a "--map="))
+          (let [[v next-args err] (parse-flag-value args "--map")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :map-path v))))
+
+          (or (= a "--dir") (str/starts-with? a "--dir="))
+          (let [[v next-args err] (parse-flag-value args "--dir")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-dir v))))
+
+          (or (= a "--vault") (str/starts-with? a "--vault="))
+          (let [[v next-args err] (parse-flag-value args "--vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :vault-path v))))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-envfile-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :map-path nil
+               :out-path nil
+               :files-dir nil
+               :vault-path nil
+               :passphrase-cmd nil
+               :passphrase-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--map") (str/starts-with? a "--map="))
+          (let [[v next-args err] (parse-flag-value args "--map")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :map-path v))))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-path v))))
+
+          (or (= a "--files-dir") (str/starts-with? a "--files-dir="))
+          (let [[v next-args err] (parse-flag-value args "--files-dir")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :files-dir v))))
+
+          (or (= a "--vault") (str/starts-with? a "--vault="))
+          (let [[v next-args err] (parse-flag-value args "--vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :vault-path v))))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
 
 (defn- plan-error
   [json? reason message]
@@ -961,6 +1119,191 @@
       (= "mv" (first args)) (handle-secret-mv ctx (rest args))
       :else (error-text 1 "unknown secret command"))))
 
+(defn- projection-error-code
+  [reason]
+  (case reason
+    "secret_not_found" exit-code/code-secret-not-found
+    "vault_not_found" exit-code/code-vault-not-found
+    "wrong_passphrase" exit-code/code-wrong-passphrase
+    exit-code/code-projection-failed))
+
+(defn- envfile-error-code
+  [reason]
+  (case reason
+    "secret_not_found" exit-code/code-secret-not-found
+    "vault_not_found" exit-code/code-vault-not-found
+    "wrong_passphrase" exit-code/code-wrong-passphrase
+    exit-code/code-envfile-failed))
+
+(defn- projection-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-projection-failed)
+        code (projection-error-code reason)]
+    (if json?
+      (error-json code reason (.getMessage e))
+      (error-text code (.getMessage e)))))
+
+(defn- envfile-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-envfile-failed)
+        code (envfile-error-code reason)]
+    (if json?
+      (error-json code reason (.getMessage e))
+      (error-text code (.getMessage e)))))
+
+(defn- parse-map!
+  [ctx map-path]
+  (let [source ((:read-file ctx) map-path)]
+    (mapfile/parse-string source)))
+
+(defn- make-secret-lookup
+  [vault-path passphrase]
+  (fn [secret-name]
+    (:value (vault-v2/get-secret vault-path passphrase secret-name))))
+
+(defn- validate-envpaths!
+  [request env-paths files-dir reason-on-missing-files-dir]
+  (when (and (seq env-paths) (empty? (:files request)))
+    (throw (ex-info "envpath mappings require file projections"
+                    {:reason reasons/reason-envpath-requires-projected-files})))
+  (when (and reason-on-missing-files-dir (seq env-paths) (str/blank? files-dir))
+    (throw (ex-info "missing files dir for envpath mappings"
+                    {:reason reasons/reason-missing-files-dir-for-envpath})))
+  (let [file-paths (set (map :rel-path (:files request)))]
+    (doseq [{:keys [rel-path]} env-paths]
+      (when-not (contains? file-paths rel-path)
+        (throw (ex-info (format "envpath mapping points to missing file %s" (pr-str rel-path))
+                        {:reason reasons/reason-envpath-missing-projected-file}))))))
+
+(defn- runtime-temp-dir
+  []
+  (str (java.nio.file.Files/createTempDirectory "kimen-files-" (make-array java.nio.file.attribute.FileAttribute 0))))
+
+(defn- handle-run
+  [ctx args]
+  (let [[opts parse-error] (parse-run-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (projection-error-result json? (ex-info parse-error {:reason reasons/reason-projection-failed}))
+
+      (str/blank? (:map-path opts))
+      (projection-error-result json? (ex-info "missing --map" {:reason reasons/reason-projection-failed}))
+
+      :else
+      (try
+        (let [source ((:read-file ctx) (:map-path opts))]
+          (if (:dry-run? opts)
+            (let [payload (plan/plan-from-source {:source source
+                                                  :mode "run"
+                                                  :command (:command opts)})]
+              (if json?
+                (success-json payload)
+                (result {:exit-code 0
+                         :stdout (str (plan/render-plan-text payload) "\n")})))
+            (let [{:keys [request env-paths]} (mapfile/parse-string source)
+                  _ (when (empty? (:command opts))
+                      (throw (ex-info "missing command" {:reason reasons/reason-missing-command})))
+                  vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
+                  pp (resolve-passphrase! ctx opts)
+                  lookup (make-secret-lookup vault-path pp)
+                  auto-files-dir (runtime-temp-dir)
+                  files-dir (when (seq (:files request)) auto-files-dir)
+                  _ (validate-envpaths! request env-paths files-dir false)
+                  _ (when files-dir
+                      (projection/render-files! {:lookup-secret lookup} files-dir (:files request)))
+                  env-overrides (projection/env-overrides {:lookup-secret lookup
+                                                           :files-dir files-dir}
+                                                          request
+                                                          env-paths)
+                  stdin-value (projection/stdin-value {:lookup-secret lookup} request)
+                  {:keys [exit out err]} (projection/run-child! (:command opts) env-overrides stdin-value)]
+              (when (seq out)
+                (print out)
+                (flush))
+              (when (seq err)
+                (binding [*out* *err*]
+                  (print err)
+                  (flush)))
+              (when auto-files-dir
+                (projection/delete-dir-recursive! auto-files-dir))
+              (result {:exit-code exit}))))
+        (catch Exception e
+          (projection-error-result json? e))))))
+(defn- handle-render
+  [ctx args]
+  (let [[opts parse-error] (parse-render-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (projection-error-result json? (ex-info parse-error {:reason reasons/reason-projection-failed}))
+
+      (str/blank? (:map-path opts))
+      (projection-error-result json? (ex-info "missing --map" {:reason reasons/reason-projection-failed}))
+
+      (str/blank? (:out-dir opts))
+      (projection-error-result json? (ex-info "missing render target" {:reason reasons/reason-missing-render-target}))
+
+      :else
+      (try
+        (let [{:keys [request env-paths]} (parse-map! ctx (:map-path opts))
+              _ (validate-envpaths! request env-paths (:out-dir opts) false)
+              _ (when (empty? (:files request))
+                  (throw (ex-info "no files to render" {:reason reasons/reason-no-files-to-render})))
+              vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
+              pp (resolve-passphrase! ctx opts)
+              lookup (make-secret-lookup vault-path pp)
+              n (projection/render-files! {:lookup-secret lookup} (:out-dir opts) (:files request))]
+          (if json?
+            (success-json {:ok true
+                           :action "render"
+                           :exit_code 0
+                           :out_dir (:out-dir opts)
+                           :file_count n})
+            (result {:exit-code 0
+                     :stdout "ok\n"})))
+        (catch Exception e
+          (projection-error-result json? e))))))
+
+(defn- handle-envfile
+  [ctx args]
+  (let [[opts parse-error] (parse-envfile-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (envfile-error-result json? (ex-info parse-error {:reason reasons/reason-envfile-failed}))
+
+      (str/blank? (:map-path opts))
+      (envfile-error-result json? (ex-info "missing --map" {:reason reasons/reason-envfile-failed}))
+
+      (str/blank? (:out-path opts))
+      (envfile-error-result json? (ex-info "missing --out" {:reason reasons/reason-missing-out}))
+
+      :else
+      (try
+        (let [{:keys [request env-paths]} (parse-map! ctx (:map-path opts))
+              _ (when (empty? (:envs request))
+                  (throw (ex-info "missing env mappings" {:reason reasons/reason-missing-env-mappings})))
+              _ (validate-envpaths! request env-paths (:files-dir opts) true)
+              vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
+              pp (resolve-passphrase! ctx opts)
+              lookup (make-secret-lookup vault-path pp)
+              env-map (projection/env-overrides {:lookup-secret lookup
+                                                 :files-dir (:files-dir opts)}
+                                                request
+                                                env-paths)
+              _ (projection/write-envfile! (:out-path opts) env-map)]
+          (if json?
+            (success-json {:ok true
+                           :action "envfile"
+                           :exit_code 0
+                           :out (:out-path opts)
+                           :count (count (:envs request))})
+            (result {:exit-code 0
+                     :stdout "ok\n"})))
+        (catch Exception e
+          (envfile-error-result json? e))))))
+
 (defn run
   [ctx argv]
   (let [raw-args (vec argv)
@@ -987,6 +1330,15 @@
 
       (= "secret" (first args))
       (handle-secret ctx (rest args))
+
+      (= "run" (first args))
+      (handle-run ctx (rest args))
+
+      (= "render" (first args))
+      (handle-render ctx (rest args))
+
+      (= "envfile" (first args))
+      (handle-envfile ctx (rest args))
 
       (and (= "map" (first args)) (= "lint" (second args)))
       (handle-map-lint ctx (drop 2 args))
