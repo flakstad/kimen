@@ -333,6 +333,31 @@
     (is (str/includes? stdout "\"action\":\"plan\""))
     (is (str/includes? stdout "\"command\":[\"echo\",\"hello\"]"))))
 
+(deftest project-run-and-render-aliases-work
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        out-dir (str (.getPath dir) "/render")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["project" "run" "--json" "--dry-run" "--env" "API_KEY=const:shh" "--" "echo" "ok"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"action\":\"plan\"")))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["project" "render" "--file" "conf/api.txt=const:shh" "--dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"action\":\"render\""))
+      (is (= "shh" (slurp (str out-dir "/conf/api.txt")))))))
+
 (deftest inline-mappings-work-without-map
   (let [{:keys [exit-code stdout stderr]}
         (run-cli ["plan"

@@ -45,6 +45,8 @@
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
      "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
      "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
 
@@ -1548,6 +1550,12 @@
 
       (= "plan" (first args))
       (handle-plan ctx (rest args))
+
+      (and (= "project" (first args)) (= "run" (second args)))
+      (handle-run ctx (drop 2 args))
+
+      (and (= "project" (first args)) (= "render" (second args)))
+      (handle-render ctx (drop 2 args))
 
       (and (= "project" (first args)) (= "plan" (second args)))
       (handle-plan ctx (drop 2 args))
