@@ -5,6 +5,7 @@
 
 (def env-var-re #"^[A-Za-z_][A-Za-z0-9_]*$")
 (def profile-name-re #"^[A-Za-z0-9_.-]+$")
+(def env-profile-dir "KIMEN_PROFILE_DIR")
 
 (defn- invalid!
   ([msg]
@@ -134,3 +135,31 @@
 (defn parse-file
   [path]
   (parse-string (slurp (io/file path))))
+
+(defn resolve-profile
+  [name]
+  (let [name (some-> name str str/trim)]
+    (when-not (valid-profile-name? name)
+      (throw (ex-info (format "invalid profile name %s (allowed: letters, digits, ., _, -)" (pr-str name))
+                      {:reason "invalid_profile_name"})))
+    (let [filename (str name ".kmap")
+          candidates (->> [(some-> (System/getenv env-profile-dir) str/trim not-empty)
+                           (str (io/file ".kimen/profiles"))
+                           (let [cfg-home (or (some-> (System/getenv "XDG_CONFIG_HOME") str/trim not-empty)
+                                              (some-> (System/getProperty "user.home") str/trim not-empty (str "/.config")))]
+                             (when cfg-home
+                               (str (io/file cfg-home "kimen/profiles"))))]
+                          (remove nil?)
+                          (map #(str (io/file % filename)))
+                          vec)
+          hit (some (fn [p]
+                      (when (.exists (io/file p))
+                        p))
+                    candidates)]
+      (if hit
+        hit
+        (throw (ex-info (format "profile %s not found (set %s or create .kimen/profiles/%s)"
+                                (pr-str name)
+                                env-profile-dir
+                                filename)
+                        {:reason "invalid_profile_name"}))))))

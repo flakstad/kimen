@@ -14,6 +14,8 @@
 
 (def reason-plan-failed "plan_failed")
 (def reason-invalid-mode "invalid_mode")
+(def reason-conflicting-map-profile-inputs "conflicting_map_profile_inputs")
+(def reason-invalid-profile-name "invalid_profile_name")
 (def reason-envpath-requires-projected-files "envpath_requires_projected_files")
 (def reason-envpath-missing-projected-file "envpath_missing_projected_file")
 (def reason-invalid-relative-path "invalid_relative_path")
@@ -58,6 +60,8 @@
    reason-secret-failed
    reason-plan-failed
    reason-invalid-mode
+   reason-conflicting-map-profile-inputs
+   reason-invalid-profile-name
    reason-envpath-requires-projected-files
    reason-envpath-missing-projected-file
    reason-invalid-relative-path

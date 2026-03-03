@@ -16,6 +16,17 @@
                    ctx)
             argv)))
 
+(defn- with-system-property
+  [k v f]
+  (let [prev (System/getProperty k)]
+    (try
+      (System/setProperty k v)
+      (f)
+      (finally
+        (if (some? prev)
+          (System/setProperty k prev)
+          (System/clearProperty k))))))
+
 (deftest version-json-shape
   (let [{:keys [exit-code stdout stderr]} (run-cli ["version" "--json"] {})]
     (is (= 0 exit-code))
@@ -227,3 +238,60 @@
       (let [body (slurp envfile-path)]
         (is (str/includes? body "API_KEY=shh"))
         (is (str/includes? body (str "API_KEY_PATH=" out-dir "/conf/api.txt")))))))
+
+(deftest profile-inputs-work-and-errors-are-typed
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        home-dir (str (.getPath dir) "/home")
+        profile-dir (str home-dir "/.config/kimen/profiles")
+        profile-path (str profile-dir "/linje-prod.kmap")
+        map-src "env API_KEY=api_key\n"]
+    (.mkdirs (java.io.File. profile-dir))
+    (spit profile-path map-src)
+
+    (with-system-property
+      "user.home"
+      home-dir
+      (fn []
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["map" "lint" "--profile" "linje-prod" "--json"] {})]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (str/includes? stdout "\"action\":\"map_lint\""))
+          (is (str/includes? stdout "\"ok\":true")))
+
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["plan" "--profile" "linje-prod" "--json" "--" "echo" "hi"] {})]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (str/includes? stdout "\"action\":\"plan\""))
+          (is (str/includes? stdout "\"command\":[\"echo\",\"hi\"]"))))))
+
+  (let [{:keys [exit-code stderr]} (run-cli ["plan" "--profile" "../bad" "--json"] {})]
+    (is (= exit-code/code-plan-failed exit-code))
+    (is (str/includes? stderr "\"reason\":\"invalid_profile_name\""))))
+
+(deftest map-and-profile-conflicts-are-reported-per-command
+  (let [out-dir (str (.getPath (java.io.File/createTempFile "kimen-render" ".tmp")) "-dir")
+        out-path (str (.getPath (java.io.File/createTempFile "kimen-envfile" ".tmp")) "-env")]
+    (let [{:keys [exit-code stderr]} (run-cli ["plan" "--map" "a.kmap" "--profile" "dev" "--json"] {})]
+      (is (= exit-code/code-plan-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_map_profile_inputs\"")))
+
+    (let [{:keys [exit-code stderr]} (run-cli ["run" "--map" "a.kmap" "--profile" "dev" "--json" "--dry-run" "--" "echo" "ok"] {})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_map_profile_inputs\"")))
+
+    (let [{:keys [exit-code stderr]} (run-cli ["render" "--map" "a.kmap" "--profile" "dev" "--dir" out-dir "--json"] {})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_map_profile_inputs\"")))
+
+    (let [{:keys [exit-code stderr]} (run-cli ["envfile" "--map" "a.kmap" "--profile" "dev" "--out" out-path "--json"] {})]
+      (is (= exit-code/code-envfile-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_map_profile_inputs\"")))))
+
+(deftest project-plan-alias-matches-plan-command
+  (let [map-src "env API_KEY=api_key\n"
+        {:keys [exit-code stdout stderr]} (run-cli ["project" "plan" "--map" "dev.kmap" "--json" "--" "echo" "hello"]
+                                                   {"dev.kmap" map-src})]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (str/includes? stdout "\"action\":\"plan\""))
+    (is (str/includes? stdout "\"command\":[\"echo\",\"hello\"]"))))

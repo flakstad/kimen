@@ -40,11 +40,12 @@
      "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
      "  kimen secret rm <name> [--vault <path>] [--json]"
      "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
-     "  kimen run --map <path> [--json] [--dry-run] [-- <command> [args...]]"
-     "  kimen render --map <path> --dir <path> [--json]"
-     "  kimen envfile --map <path> --out <path> [--files-dir <path>] [--json]"
-     "  kimen map lint --map <path> [--mode all|run|render|envfile] [--json]"
-     "  kimen plan --map <path> [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen run [--map <path>|--profile <name>] [--json] [--dry-run] [-- <command> [args...]]"
+     "  kimen render [--map <path>|--profile <name>] --dir <path> [--json]"
+     "  kimen envfile [--map <path>|--profile <name>] --out <path> [--files-dir <path>] [--json]"
+     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--json]"
+     "  kimen plan [--map <path>|--profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen project plan [--map <path>|--profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
 
 (defn- json-line
@@ -120,12 +121,15 @@
         [left (rest args)]
         (recur (conj left (first args)) (rest args))))))
 
+(declare resolve-map-path!)
+
 (defn- parse-map-lint-opts
   [args]
   (loop [args args
          opts {:json? false
                :mode "all"
-               :map-path nil}]
+               :map-path nil
+               :profile nil}]
     (if (empty? args)
       [opts nil]
       (let [a (first args)]
@@ -145,6 +149,12 @@
               [opts err]
               (recur next-args (assoc opts :map-path v))))
 
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
 
@@ -158,6 +168,7 @@
            opts {:json? false
                  :mode "run"
                  :map-path nil
+                 :profile nil
                  :command (vec command)}]
       (if (empty? args)
         [opts nil]
@@ -177,6 +188,12 @@
               (if err
                 [opts err]
                 (recur next-args (assoc opts :map-path v))))
+
+            (or (= a "--profile") (str/starts-with? a "--profile="))
+            (let [[v next-args err] (parse-flag-value args "--profile")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :profile v))))
 
             (str/starts-with? a "-")
             [opts (str "unknown flag " a)]
@@ -324,6 +341,7 @@
            opts {:json? false
                  :dry-run? false
                  :map-path nil
+                 :profile nil
                  :vault-path nil
                  :passphrase-cmd nil
                  :passphrase-stdin? false
@@ -346,6 +364,12 @@
               (if err
                 [opts err]
                 (recur next-args (assoc opts :map-path v))))
+
+            (or (= a "--profile") (str/starts-with? a "--profile="))
+            (let [[v next-args err] (parse-flag-value args "--profile")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :profile v))))
 
             (or (= a "--vault") (str/starts-with? a "--vault="))
             (let [[v next-args err] (parse-flag-value args "--vault")]
@@ -370,6 +394,7 @@
   (loop [args args
          opts {:json? false
                :map-path nil
+               :profile nil
                :out-dir nil
                :vault-path nil
                :passphrase-cmd nil
@@ -389,6 +414,12 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :map-path v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
 
           (or (= a "--dir") (str/starts-with? a "--dir="))
           (let [[v next-args err] (parse-flag-value args "--dir")]
@@ -419,6 +450,7 @@
   (loop [args args
          opts {:json? false
                :map-path nil
+               :profile nil
                :out-path nil
                :files-dir nil
                :vault-path nil
@@ -439,6 +471,12 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :map-path v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
 
           (or (= a "--out") (str/starts-with? a "--out="))
           (let [[v next-args err] (parse-flag-value args "--out")]
@@ -656,12 +694,10 @@
           parse-error
           (map-lint/invalid-input-report mode parse-error)
 
-          (str/blank? (:map-path opts))
-          (map-lint/invalid-input-report mode "missing --map")
-
           :else
           (try
-            (let [source ((:read-file ctx) (:map-path opts))]
+            (let [resolved-path (resolve-map-path! opts reasons/reason-plan-failed)
+                  source ((:read-file ctx) resolved-path)]
               (map-lint/lint-source {:source source :mode mode}))
             (catch Exception e
               (map-lint/invalid-input-report mode (.getMessage e)))))
@@ -681,12 +717,10 @@
       parse-error
       (plan-error json? reasons/reason-plan-failed parse-error)
 
-      (str/blank? (:map-path opts))
-      (plan-error json? reasons/reason-plan-failed "missing --map")
-
       :else
       (try
-        (let [source ((:read-file ctx) (:map-path opts))
+        (let [resolved-path (resolve-map-path! opts reasons/reason-plan-failed)
+              source ((:read-file ctx) resolved-path)
               payload (plan/plan-from-source {:source source
                                               :mode (:mode opts)
                                               :command (:command opts)})]
@@ -1151,9 +1185,32 @@
       (error-json code reason (.getMessage e))
       (error-text code (.getMessage e)))))
 
+(defn- resolve-map-path!
+  [opts missing-reason]
+  (let [map-path (some-> (:map-path opts) str/trim not-empty)
+        profile (some-> (:profile opts) str/trim not-empty)
+        resolved-path
+        (cond
+          (and map-path profile)
+          (throw (ex-info "conflicting --map and --profile inputs"
+                          {:reason reasons/reason-conflicting-map-profile-inputs}))
+
+          map-path
+          map-path
+
+          profile
+          (mapfile/resolve-profile profile)
+
+          :else
+          nil)]
+    (when (nil? resolved-path)
+      (throw (ex-info "missing --map or --profile" {:reason missing-reason})))
+    resolved-path))
+
 (defn- parse-map!
-  [ctx map-path]
-  (let [source ((:read-file ctx) map-path)]
+  [ctx opts missing-reason]
+  (let [resolved-path (resolve-map-path! opts missing-reason)
+        source ((:read-file ctx) resolved-path)]
     (mapfile/parse-string source)))
 
 (defn- make-secret-lookup
@@ -1187,12 +1244,10 @@
       parse-error
       (projection-error-result json? (ex-info parse-error {:reason reasons/reason-projection-failed}))
 
-      (str/blank? (:map-path opts))
-      (projection-error-result json? (ex-info "missing --map" {:reason reasons/reason-projection-failed}))
-
       :else
       (try
-        (let [source ((:read-file ctx) (:map-path opts))]
+        (let [resolved-path (resolve-map-path! opts reasons/reason-projection-failed)
+              source ((:read-file ctx) resolved-path)]
           (if (:dry-run? opts)
             (let [payload (plan/plan-from-source {:source source
                                                   :mode "run"
@@ -1238,15 +1293,12 @@
       parse-error
       (projection-error-result json? (ex-info parse-error {:reason reasons/reason-projection-failed}))
 
-      (str/blank? (:map-path opts))
-      (projection-error-result json? (ex-info "missing --map" {:reason reasons/reason-projection-failed}))
-
       (str/blank? (:out-dir opts))
       (projection-error-result json? (ex-info "missing render target" {:reason reasons/reason-missing-render-target}))
 
       :else
       (try
-        (let [{:keys [request env-paths]} (parse-map! ctx (:map-path opts))
+        (let [{:keys [request env-paths]} (parse-map! ctx opts reasons/reason-projection-failed)
               _ (validate-envpaths! request env-paths (:out-dir opts) false)
               _ (when (empty? (:files request))
                   (throw (ex-info "no files to render" {:reason reasons/reason-no-files-to-render})))
@@ -1273,15 +1325,12 @@
       parse-error
       (envfile-error-result json? (ex-info parse-error {:reason reasons/reason-envfile-failed}))
 
-      (str/blank? (:map-path opts))
-      (envfile-error-result json? (ex-info "missing --map" {:reason reasons/reason-envfile-failed}))
-
       (str/blank? (:out-path opts))
       (envfile-error-result json? (ex-info "missing --out" {:reason reasons/reason-missing-out}))
 
       :else
       (try
-        (let [{:keys [request env-paths]} (parse-map! ctx (:map-path opts))
+        (let [{:keys [request env-paths]} (parse-map! ctx opts reasons/reason-envfile-failed)
               _ (when (empty? (:envs request))
                   (throw (ex-info "missing env mappings" {:reason reasons/reason-missing-env-mappings})))
               _ (validate-envpaths! request env-paths (:files-dir opts) true)
@@ -1345,6 +1394,9 @@
 
       (= "plan" (first args))
       (handle-plan ctx (rest args))
+
+      (and (= "project" (first args)) (= "plan" (second args)))
+      (handle-plan ctx (drop 2 args))
 
       :else
       (result {:exit-code 1
