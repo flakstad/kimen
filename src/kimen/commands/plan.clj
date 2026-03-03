@@ -29,15 +29,11 @@
         (fail! reasons/reason-envpath-missing-projected-file
                (format "envpath mapping points to missing file %s" (pr-str rel-path)))))))
 
-(defn plan-from-source
-  [{:keys [source mode command]}]
+(defn plan-from-mappings
+  [{:keys [request env-paths mode command]}]
   (let [mode (validate-mode! mode)
-        parsed (try
-                 (mapfile/parse-string source)
-                 (catch Exception e
-                   (fail! reasons/reason-plan-failed (.getMessage e))))
-        _ (validate-envpaths! parsed)
-        {:keys [request env-paths]} parsed
+        _ (validate-envpaths! {:request request
+                               :env-paths env-paths})
         {:keys [envs files stdin]} request]
     {:ok true
      :action "plan"
@@ -58,6 +54,18 @@
                          :path rel-path})
                       env-paths)
      :cleanup {:projected_files_dir (if (seq files) "temp_dir" "none")}}))
+
+(defn plan-from-source
+  [{:keys [source mode command]}]
+  (let [{:keys [request env-paths]}
+        (try
+          (mapfile/parse-string source)
+          (catch Exception e
+            (fail! reasons/reason-plan-failed (.getMessage e))))]
+    (plan-from-mappings {:request request
+                         :env-paths env-paths
+                         :mode mode
+                         :command command})))
 
 (defn render-plan-text
   [{:keys [mode env files stdin env_paths command]}]

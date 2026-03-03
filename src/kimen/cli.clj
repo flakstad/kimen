@@ -40,12 +40,12 @@
      "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
      "  kimen secret rm <name> [--vault <path>] [--json]"
      "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
-     "  kimen run [--map <path>|--profile <name>] [--json] [--dry-run] [-- <command> [args...]]"
-     "  kimen render [--map <path>|--profile <name>] --dir <path> [--json]"
-     "  kimen envfile [--map <path>|--profile <name>] --out <path> [--files-dir <path>] [--json]"
+     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
      "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--json]"
-     "  kimen plan [--map <path>|--profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-     "  kimen project plan [--map <path>|--profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
 
 (defn- json-line
@@ -122,6 +122,7 @@
         (recur (conj left (first args)) (rest args))))))
 
 (declare resolve-map-path!)
+(declare resolve-mappings!)
 
 (defn- parse-map-lint-opts
   [args]
@@ -169,6 +170,10 @@
                  :mode "run"
                  :map-path nil
                  :profile nil
+                 :env-mappings []
+                 :file-mappings []
+                 :envpath-mappings []
+                 :stdin-spec nil
                  :command (vec command)}]
       (if (empty? args)
         [opts nil]
@@ -194,6 +199,30 @@
               (if err
                 [opts err]
                 (recur next-args (assoc opts :profile v))))
+
+            (or (= a "--env") (str/starts-with? a "--env="))
+            (let [[v next-args err] (parse-flag-value args "--env")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :env-mappings conj v))))
+
+            (or (= a "--file") (str/starts-with? a "--file="))
+            (let [[v next-args err] (parse-flag-value args "--file")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :file-mappings conj v))))
+
+            (or (= a "--envpath") (str/starts-with? a "--envpath="))
+            (let [[v next-args err] (parse-flag-value args "--envpath")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :envpath-mappings conj v))))
+
+            (or (= a "--stdin") (str/starts-with? a "--stdin="))
+            (let [[v next-args err] (parse-flag-value args "--stdin")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :stdin-spec v))))
 
             (str/starts-with? a "-")
             [opts (str "unknown flag " a)]
@@ -342,6 +371,11 @@
                  :dry-run? false
                  :map-path nil
                  :profile nil
+                 :env-mappings []
+                 :file-mappings []
+                 :envpath-mappings []
+                 :stdin-spec nil
+                 :files-dir nil
                  :vault-path nil
                  :passphrase-cmd nil
                  :passphrase-stdin? false
@@ -371,6 +405,36 @@
                 [opts err]
                 (recur next-args (assoc opts :profile v))))
 
+            (or (= a "--env") (str/starts-with? a "--env="))
+            (let [[v next-args err] (parse-flag-value args "--env")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :env-mappings conj v))))
+
+            (or (= a "--file") (str/starts-with? a "--file="))
+            (let [[v next-args err] (parse-flag-value args "--file")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :file-mappings conj v))))
+
+            (or (= a "--envpath") (str/starts-with? a "--envpath="))
+            (let [[v next-args err] (parse-flag-value args "--envpath")]
+              (if err
+                [opts err]
+                (recur next-args (update opts :envpath-mappings conj v))))
+
+            (or (= a "--stdin") (str/starts-with? a "--stdin="))
+            (let [[v next-args err] (parse-flag-value args "--stdin")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :stdin-spec v))))
+
+            (or (= a "--files-dir") (str/starts-with? a "--files-dir="))
+            (let [[v next-args err] (parse-flag-value args "--files-dir")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :files-dir v))))
+
             (or (= a "--vault") (str/starts-with? a "--vault="))
             (let [[v next-args err] (parse-flag-value args "--vault")]
               (if err
@@ -395,6 +459,7 @@
          opts {:json? false
                :map-path nil
                :profile nil
+               :file-mappings []
                :out-dir nil
                :vault-path nil
                :passphrase-cmd nil
@@ -420,6 +485,12 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--file") (str/starts-with? a "--file="))
+          (let [[v next-args err] (parse-flag-value args "--file")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :file-mappings conj v))))
 
           (or (= a "--dir") (str/starts-with? a "--dir="))
           (let [[v next-args err] (parse-flag-value args "--dir")]
@@ -451,6 +522,9 @@
          opts {:json? false
                :map-path nil
                :profile nil
+               :env-mappings []
+               :file-mappings []
+               :envpath-mappings []
                :out-path nil
                :files-dir nil
                :vault-path nil
@@ -477,6 +551,24 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--env") (str/starts-with? a "--env="))
+          (let [[v next-args err] (parse-flag-value args "--env")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :env-mappings conj v))))
+
+          (or (= a "--file") (str/starts-with? a "--file="))
+          (let [[v next-args err] (parse-flag-value args "--file")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :file-mappings conj v))))
+
+          (or (= a "--envpath") (str/starts-with? a "--envpath="))
+          (let [[v next-args err] (parse-flag-value args "--envpath")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :envpath-mappings conj v))))
 
           (or (= a "--out") (str/starts-with? a "--out="))
           (let [[v next-args err] (parse-flag-value args "--out")]
@@ -719,11 +811,11 @@
 
       :else
       (try
-        (let [resolved-path (resolve-map-path! opts reasons/reason-plan-failed)
-              source ((:read-file ctx) resolved-path)
-              payload (plan/plan-from-source {:source source
-                                              :mode (:mode opts)
-                                              :command (:command opts)})]
+        (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-plan-failed)
+              payload (plan/plan-from-mappings {:request request
+                                                :env-paths env-paths
+                                                :mode (:mode opts)
+                                                :command (:command opts)})]
           (if json?
             (success-json payload)
             (result {:exit-code 0
@@ -1203,15 +1295,65 @@
 
           :else
           nil)]
-    (when (nil? resolved-path)
+    (when (and (nil? resolved-path) (some? missing-reason))
       (throw (ex-info "missing --map or --profile" {:reason missing-reason})))
     resolved-path))
 
-(defn- parse-map!
-  [ctx opts missing-reason]
-  (let [resolved-path (resolve-map-path! opts missing-reason)
-        source ((:read-file ctx) resolved-path)]
-    (mapfile/parse-string source)))
+(defn- normalize-mapfile-reason
+  [reason default-reason]
+  (if (string? reason)
+    reason
+    (case reason
+      :invalid-relative-path reasons/reason-invalid-relative-path
+      :invalid-mapping reasons/reason-invalid-mapping
+      :invalid-env-var reasons/reason-invalid-env-var
+      default-reason)))
+
+(defn- wrap-mapfile-ex
+  [e default-reason]
+  (let [reason (normalize-mapfile-reason (:reason (ex-data e)) default-reason)]
+    (ex-info (.getMessage e) {:reason reason} e)))
+
+(defn- parse-map-source!
+  [source default-reason]
+  (try
+    (mapfile/parse-string source)
+    (catch clojure.lang.ExceptionInfo e
+      (throw (wrap-mapfile-ex e default-reason)))))
+
+(defn- parse-inline-mappings!
+  [opts default-reason]
+  (try
+    {:request (mapfile/parse-request (:env-mappings opts)
+                                     (:file-mappings opts)
+                                     (:stdin-spec opts))
+     :env-paths (mapfile/parse-envpath-mappings (:envpath-mappings opts))}
+    (catch clojure.lang.ExceptionInfo e
+      (throw (wrap-mapfile-ex e default-reason)))))
+
+(defn- resolve-mappings!
+  [ctx opts default-reason]
+  (let [resolved-path (resolve-map-path! opts nil)
+        from-map
+        (if resolved-path
+          (parse-map-source! ((:read-file ctx) resolved-path) default-reason)
+          {:request {:envs []
+                     :files []
+                     :stdin nil}
+           :env-paths []})
+        from-flags (parse-inline-mappings! opts default-reason)
+        map-stdin (some-> (get-in from-map [:request :stdin]) str/trim not-empty)
+        flag-stdin (some-> (get-in from-flags [:request :stdin]) str/trim not-empty)]
+    (when (and map-stdin flag-stdin)
+      (throw (ex-info "stdin projection specified multiple times (map/profile and flags)"
+                      {:reason reasons/reason-invalid-mapping})))
+    {:request {:envs (vec (concat (get-in from-map [:request :envs])
+                                  (get-in from-flags [:request :envs])))
+               :files (vec (concat (get-in from-map [:request :files])
+                                   (get-in from-flags [:request :files])))
+               :stdin (or flag-stdin map-stdin)}
+     :env-paths (vec (concat (:env-paths from-map)
+                             (:env-paths from-flags)))}))
 
 (defn- make-secret-lookup
   [vault-path passphrase]
@@ -1246,24 +1388,25 @@
 
       :else
       (try
-        (let [resolved-path (resolve-map-path! opts reasons/reason-projection-failed)
-              source ((:read-file ctx) resolved-path)]
+        (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-projection-failed)]
           (if (:dry-run? opts)
-            (let [payload (plan/plan-from-source {:source source
-                                                  :mode "run"
-                                                  :command (:command opts)})]
+            (let [payload (plan/plan-from-mappings {:request request
+                                                    :env-paths env-paths
+                                                    :mode "run"
+                                                    :command (:command opts)})]
               (if json?
                 (success-json payload)
                 (result {:exit-code 0
                          :stdout (str (plan/render-plan-text payload) "\n")})))
-            (let [{:keys [request env-paths]} (mapfile/parse-string source)
-                  _ (when (empty? (:command opts))
+            (let [_ (when (empty? (:command opts))
                       (throw (ex-info "missing command" {:reason reasons/reason-missing-command})))
                   vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
                   pp (resolve-passphrase! ctx opts)
                   lookup (make-secret-lookup vault-path pp)
-                  auto-files-dir (runtime-temp-dir)
-                  files-dir (when (seq (:files request)) auto-files-dir)
+                  requested-files-dir (some-> (:files-dir opts) str/trim not-empty)
+                  auto-files-dir (when (and (seq (:files request)) (nil? requested-files-dir))
+                                   (runtime-temp-dir))
+                  files-dir (or requested-files-dir auto-files-dir)
                   _ (validate-envpaths! request env-paths files-dir false)
                   _ (when files-dir
                       (projection/render-files! {:lookup-secret lookup} files-dir (:files request)))
@@ -1298,7 +1441,10 @@
 
       :else
       (try
-        (let [{:keys [request env-paths]} (parse-map! ctx opts reasons/reason-projection-failed)
+        (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-projection-failed)
+              _ (when (some-> (:stdin request) str/trim not-empty)
+                  (throw (ex-info "stdin projection is only supported for `kimen run`"
+                                  {:reason reasons/reason-stdin-not-supported})))
               _ (validate-envpaths! request env-paths (:out-dir opts) false)
               _ (when (empty? (:files request))
                   (throw (ex-info "no files to render" {:reason reasons/reason-no-files-to-render})))
@@ -1330,8 +1476,11 @@
 
       :else
       (try
-        (let [{:keys [request env-paths]} (parse-map! ctx opts reasons/reason-envfile-failed)
-              _ (when (empty? (:envs request))
+        (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-envfile-failed)
+              _ (when (some-> (:stdin request) str/trim not-empty)
+                  (throw (ex-info "stdin projection is only supported for `kimen run`"
+                                  {:reason reasons/reason-stdin-not-supported})))
+              _ (when (and (empty? (:envs request)) (empty? env-paths))
                   (throw (ex-info "missing env mappings" {:reason reasons/reason-missing-env-mappings})))
               _ (validate-envpaths! request env-paths (:files-dir opts) true)
               vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
@@ -1347,7 +1496,7 @@
                            :action "envfile"
                            :exit_code 0
                            :out (:out-path opts)
-                           :count (count (:envs request))})
+                           :count (count env-map)})
             (result {:exit-code 0
                      :stdout "ok\n"})))
         (catch Exception e

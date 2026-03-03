@@ -26,6 +26,7 @@
 (def reason-missing-file-mappings "missing_file_mappings")
 (def reason-missing-render-target "missing_render_target")
 (def reason-no-files-to-render "no_files_to_render")
+(def reason-stdin-not-supported "stdin_not_supported")
 
 (def reason-envfile-failed "envfile_failed")
 (def reason-missing-out "missing_out")
@@ -72,6 +73,7 @@
    reason-missing-file-mappings
    reason-missing-render-target
    reason-no-files-to-render
+   reason-stdin-not-supported
    reason-envfile-failed
    reason-missing-out
    reason-missing-env-mappings

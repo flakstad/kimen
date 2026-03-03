@@ -295,3 +295,79 @@
     (is (nil? stderr))
     (is (str/includes? stdout "\"action\":\"plan\""))
     (is (str/includes? stdout "\"command\":[\"echo\",\"hello\"]"))))
+
+(deftest inline-mappings-work-without-map
+  (let [{:keys [exit-code stdout stderr]}
+        (run-cli ["plan"
+                  "--json"
+                  "--env" "API_KEY=const:shh"
+                  "--file" "conf/api.txt=const:file-val"
+                  "--envpath" "API_KEY_PATH=conf/api.txt"
+                  "--stdin" "const:stdin-val"
+                  "--"
+                  "echo"
+                  "ok"]
+                 {})]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (str/includes? stdout "\"action\":\"plan\""))
+    (is (str/includes? stdout "\"source\":\"const:shh\""))
+    (is (str/includes? stdout "\"path\":\"conf/api.txt\""))
+    (is (str/includes? stdout "\"stdin\":\"const:stdin-val\""))))
+
+(deftest run-render-envfile-accept-inline-mappings
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        out-dir (str (.getPath dir) "/render")
+        envfile-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["run" "--json" "--dry-run" "--env" "API_KEY=const:shh" "--" "echo" "ok"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"plan\"")))
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["render" "--file" "conf/api.txt=const:shh" "--dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"render\""))
+      (is (= "shh" (slurp (str out-dir "/conf/api.txt")))))
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["envfile" "--env" "API_KEY=const:shh" "--out" envfile-path "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"envfile\""))
+      (is (str/includes? (slurp envfile-path) "API_KEY=shh")))))
+
+(deftest stdin-mapping-is-rejected-for-render-and-envfile
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        map-path (str (.getPath dir) "/dev.kmap")
+        out-dir (str (.getPath dir) "/render")
+        out-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"]
+    (spit map-path "stdin const:hello\nfile conf/api.txt=const:shh\nenv API_KEY=const:shh\n")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--map" map-path "--dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"stdin_not_supported\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["envfile" "--map" map-path "--out" out-path "--files-dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-envfile-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"stdin_not_supported\"")))))
