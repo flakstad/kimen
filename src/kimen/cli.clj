@@ -43,7 +43,7 @@
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
-     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--json]"
+     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
      "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
@@ -129,6 +129,7 @@
   (loop [args args
          opts {:json? false
                :mode "all"
+               :strict? false
                :map-path nil
                :profile nil}]
     (if (empty? args)
@@ -155,6 +156,9 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :profile v))))
+
+          (= a "--strict")
+          (recur (rest args) (assoc opts :strict? true))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -793,6 +797,7 @@
               (map-lint/lint-source {:source source :mode mode}))
             (catch Exception e
               (map-lint/invalid-input-report mode (.getMessage e)))))
+        report (map-lint/apply-strict report (:strict? opts))
         payload (assoc report :action "map_lint")
         exit-code (:exit_code report)]
     (if (:json? opts)

@@ -49,6 +49,43 @@
       (is (str/includes? stdout "\"code\":\"invalid_input\""))
       (is (str/includes? stdout "\"ok\":false")))))
 
+(deftest map-lint-warnings-empty-map-and-strict-mode
+  (testing "warnings-only maps pass by default"
+    (let [map-src (str "env API_KEY=exec:echo \"token\"\n"
+                       "file conf/api.txt=const:token\n"
+                       "envpath API_KEY_PATH=conf/api.txt\n"
+                       "stdin exec:echo \"stdin-token\"\n")
+          {:keys [exit-code stdout]} (run-cli ["map" "lint" "--map" "warn.kmap" "--json"]
+                                             {"warn.kmap" map-src})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"ok\":true"))
+      (is (str/includes? stdout "\"warning_count\":"))
+      (is (str/includes? stdout "\"code\":\"exec_source_may_require_wrapper\""))))
+
+  (testing "strict mode turns warnings into failures"
+    (let [map-src "env API_KEY=exec:echo \"token\"\n"
+          {:keys [exit-code stdout]} (run-cli ["map" "lint" "--map" "warn.kmap" "--strict" "--json"]
+                                             {"warn.kmap" map-src})]
+      (is (= exit-code/code-map-lint-failed exit-code))
+      (is (str/includes? stdout "\"ok\":false"))))
+
+  (testing "empty map is an error"
+    (let [{:keys [exit-code stdout]} (run-cli ["map" "lint" "--map" "empty.kmap" "--json"]
+                                             {"empty.kmap" "# blank\n"})]
+      (is (= exit-code/code-map-lint-failed exit-code))
+      (is (str/includes? stdout "\"ok\":false"))
+      (is (str/includes? stdout "\"code\":\"empty_map\"")))))
+
+(deftest map-lint-distinguishes-conflicting-and-redundant-duplicates
+  (let [map-src (str "env API_KEY=first\n"
+                     "env API_KEY=first\n"
+                     "env API_KEY=second\n")
+        {:keys [exit-code stdout]} (run-cli ["map" "lint" "--map" "dup.kmap" "--json"]
+                                           {"dup.kmap" map-src})]
+    (is (= exit-code/code-map-lint-failed exit-code))
+    (is (str/includes? stdout "\"code\":\"duplicate_env_var\""))
+    (is (str/includes? stdout "\"code\":\"redundant_env_var\""))))
+
 (deftest plan-json-success-and-errors
   (testing "success"
     (let [map-src (str "env API_KEY=api_key\n"
