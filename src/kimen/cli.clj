@@ -44,10 +44,10 @@
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
      "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
-     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
-     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
 
 (defn- json-line
@@ -125,6 +125,7 @@
 
 (declare resolve-map-path!)
 (declare resolve-mappings!)
+(declare resolve-against-mappings!)
 
 (defn- parse-map-lint-opts
   [args]
@@ -176,6 +177,8 @@
                  :mode "run"
                  :map-path nil
                  :profile nil
+                 :against-map nil
+                 :against-profile nil
                  :env-mappings []
                  :file-mappings []
                  :envpath-mappings []
@@ -205,6 +208,18 @@
               (if err
                 [opts err]
                 (recur next-args (assoc opts :profile v))))
+
+            (or (= a "--against-map") (str/starts-with? a "--against-map="))
+            (let [[v next-args err] (parse-flag-value args "--against-map")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :against-map v))))
+
+            (or (= a "--against-profile") (str/starts-with? a "--against-profile="))
+            (let [[v next-args err] (parse-flag-value args "--against-profile")]
+              (if err
+                [opts err]
+                (recur next-args (assoc opts :against-profile v))))
 
             (or (= a "--env") (str/starts-with? a "--env="))
             (let [[v next-args err] (parse-flag-value args "--env")]
@@ -819,10 +834,14 @@
       :else
       (try
         (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-plan-failed)
+              {:keys [against-request against-env-paths against-label]} (resolve-against-mappings! ctx opts reasons/reason-plan-failed)
               payload (plan/plan-from-mappings {:request request
                                                 :env-paths env-paths
                                                 :mode (:mode opts)
-                                                :command (:command opts)})]
+                                                :command (:command opts)
+                                                :against-request against-request
+                                                :against-env-paths against-env-paths
+                                                :against-label against-label})]
           (if json?
             (success-json payload)
             (result {:exit-code 0
@@ -1361,6 +1380,36 @@
                :stdin (or flag-stdin map-stdin)}
      :env-paths (vec (concat (:env-paths from-map)
                              (:env-paths from-flags)))}))
+
+(defn- resolve-against-mappings!
+  [ctx opts default-reason]
+  (let [against-map (some-> (:against-map opts) str/trim not-empty)
+        against-profile (some-> (:against-profile opts) str/trim not-empty)]
+    (cond
+      (and (nil? against-map) (nil? against-profile))
+      {:against-request nil
+       :against-env-paths nil
+       :against-label nil}
+
+      (and against-map against-profile)
+      (throw (ex-info "use only one of --against-map or --against-profile"
+                      {:reason reasons/reason-conflicting-against-inputs}))
+
+      :else
+      (let [{:keys [request env-paths]}
+            (resolve-mappings! ctx {:map-path against-map
+                                    :profile against-profile
+                                    :env-mappings []
+                                    :file-mappings []
+                                    :envpath-mappings []
+                                    :stdin-spec nil}
+                               default-reason)
+            label (if against-profile
+                    (str "profile:" against-profile)
+                    against-map)]
+        {:against-request request
+         :against-env-paths env-paths
+         :against-label label}))))
 
 (defn- make-secret-lookup
   [vault-path passphrase]

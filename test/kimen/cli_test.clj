@@ -113,6 +113,45 @@
       (is (= exit-code/code-plan-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"envpath_requires_projected_files\"")))))
 
+(deftest plan-supports-against-diff-and-validates-against-inputs
+  (testing "diff payload with --against-map"
+    (let [current-src (str "env API_KEY=api_key\n"
+                           "file conf/api.txt=api_key\n"
+                           "envpath API_KEY_PATH=conf/api.txt\n"
+                           "stdin const:new\n")
+          against-src (str "env API_KEY=old_key\n"
+                           "env OLD=old\n"
+                           "file conf/old.txt=old_key\n"
+                           "stdin const:old\n")
+          {:keys [exit-code stdout stderr]}
+          (run-cli ["plan" "--map" "current.kmap" "--against-map" "base.kmap" "--json"]
+                   {"current.kmap" current-src
+                    "base.kmap" against-src})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"against\":\"base.kmap\""))
+      (is (str/includes? stdout "\"diff\":"))
+      (is (str/includes? stdout "\"env_changed\""))
+      (is (str/includes? stdout "\"files_added\""))
+      (is (str/includes? stdout "\"files_removed\""))
+      (is (str/includes? stdout "\"envpaths_added\""))
+      (is (str/includes? stdout "\"stdin_changed\":true"))))
+
+  (testing "conflicting against inputs are rejected"
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["plan" "--map" "current.kmap" "--against-map" "base.kmap" "--against-profile" "dev" "--json"]
+                   {"current.kmap" "env A=a\n"
+                    "base.kmap" "env B=b\n"})]
+      (is (= exit-code/code-plan-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_against_inputs\""))))
+
+  (testing "invalid against profile names are surfaced"
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["plan" "--map" "current.kmap" "--against-profile" "../bad" "--json"]
+                   {"current.kmap" "env A=a\n"})]
+      (is (= exit-code/code-plan-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_profile_name\"")))))
+
 (deftest unknown-command-exits-1
   (let [{:keys [exit-code stderr]} (run-cli ["nope"] {})]
     (is (= 1 exit-code))
