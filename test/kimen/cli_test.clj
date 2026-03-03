@@ -437,6 +437,17 @@
       (is (str/includes? stdout "\"action\":\"render\""))
       (is (= "shh" (slurp (str out-dir "/conf/api.txt")))))))
 
+(deftest project-command-help-and-unknown-subcommand
+  (let [{:keys [exit-code stdout stderr]} (run-cli ["project"] {})]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (str/includes? stdout "kimen project"))
+    (is (str/includes? stdout "project run")))
+
+  (let [{:keys [exit-code stderr]} (run-cli ["project" "nope"] {})]
+    (is (= 1 exit-code))
+    (is (str/includes? stderr "unknown project command"))))
+
 (deftest inline-mappings-work-without-map
   (let [{:keys [exit-code stdout stderr]}
         (run-cli ["plan"

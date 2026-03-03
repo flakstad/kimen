@@ -56,6 +56,17 @@
      "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
      ""]))
 
+(def project-usage
+  (str/join
+    "\n"
+    ["kimen project"
+     ""
+     "usage:"
+     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+     ""]))
+
 (defn- json-line
   [x]
   (str (json/write-str x) "\n"))
@@ -1879,6 +1890,30 @@
       (= "ci-sync-gate" (first args)) (handle-init-ci-sync-gate (rest args))
       :else (error-text 1 "unknown init command"))))
 
+(defn- handle-project
+  [ctx args]
+  (let [args (vec args)]
+    (cond
+      (empty? args)
+      (result {:exit-code 0
+               :stdout project-usage})
+
+      (some #{"help" "--help" "-h"} [(first args)])
+      (result {:exit-code 0
+               :stdout project-usage})
+
+      (= "run" (first args))
+      (handle-run ctx (rest args))
+
+      (= "render" (first args))
+      (handle-render ctx (rest args))
+
+      (= "plan" (first args))
+      (handle-plan ctx (rest args))
+
+      :else
+      (error-text 1 "unknown project command"))))
+
 (defn run
   [ctx argv]
   (let [raw-args (vec argv)
@@ -1927,14 +1962,8 @@
       (= "plan" (first args))
       (handle-plan ctx (rest args))
 
-      (and (= "project" (first args)) (= "run" (second args)))
-      (handle-run ctx (drop 2 args))
-
-      (and (= "project" (first args)) (= "render" (second args)))
-      (handle-render ctx (drop 2 args))
-
-      (and (= "project" (first args)) (= "plan" (second args)))
-      (handle-plan ctx (drop 2 args))
+      (= "project" (first args))
+      (handle-project ctx (rest args))
 
       :else
       (result {:exit-code 1
