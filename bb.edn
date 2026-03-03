@@ -5,9 +5,16 @@
        :override-builtin true
        :requires ([kimen.main :as main])
        :task (System/exit (int (main/main! *command-line-args*)))}
-  test {:doc "Run tests"
+ test {:doc "Run tests"
         :requires ([kimen.test-runner :as test-runner])
         :task (System/exit (int (test-runner/main!)))}
+  itest {:doc "Run CLI integration tests through bin/kimen"
+         :task (System/exit (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))}
+  test-all {:doc "Run unit and CLI integration tests"
+            :requires ([kimen.test-runner :as test-runner])
+            :task (let [unit-exit (int (test-runner/main!))
+                        itest-exit (int (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))]
+                    (System/exit (if (zero? unit-exit) itest-exit unit-exit)))}
   smoke {:doc "Smoke-check version --json"
          :requires ([kimen.main :as main])
          :task (System/exit (int (main/main! ["version" "--json"])))}}}

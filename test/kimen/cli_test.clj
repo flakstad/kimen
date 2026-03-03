@@ -4,7 +4,8 @@
     [clojure.test :refer [deftest is testing]]
     [kimen.cli :as cli]
     [kimen.commands.init :as init]
-    [kimen.exit-code :as exit-code]))
+    [kimen.exit-code :as exit-code]
+    [kimen.json :as json]))
 
 (defn- run-cli
   ([argv files]
@@ -285,6 +286,91 @@
                                               {:config-path cfg-path})]
       (is (= exit-code/code-wrong-passphrase exit-code))
       (is (str/includes? stderr "\"reason\":\"wrong_passphrase\"")))))
+
+(deftest bundle-cli-roundtrip-and-typed-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        id-path (str (.getPath dir) "/bundle.agekey")
+        bundle-path (str (.getPath dir) "/vault.age")
+        out-vault (str (.getPath dir) "/vault.out.db")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)
+          recipient (get payload "recipient")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "bundle_keygen" (get payload "action")))
+      (is (= id-path (get payload "identity_path")))
+      (is (string? recipient))
+      (is (str/starts-with? recipient "age1")))
+
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["bundle" "recipient" "--identity" id-path "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)
+          recipient (get payload "recipient")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "bundle_recipient" (get payload "action")))
+      (is (str/starts-with? recipient "age1"))
+
+      (let [{:keys [exit-code stderr]}
+            (run-cli ["bundle" "seal" "--vault" vault-path "--out" bundle-path "--recipient" "not-age" "--json"] {}
+                     {:config-path cfg-path})]
+        (is (= exit-code/code-bundle-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"invalid_recipient\"")))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["bundle" "seal" "--vault" vault-path "--out" bundle-path "--recipient" recipient "--json"] {}
+                     {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "bundle_seal" (get payload "action")))
+        (is (= bundle-path (get payload "out"))))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["bundle" "open" "--in" bundle-path "--out-vault" out-vault "--identity" id-path "--json"] {}
+                     {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "bundle_open" (get payload "action")))
+        (is (= out-vault (get payload "out_vault"))))
+
+      (is (java.util.Arrays/equals
+            (java.nio.file.Files/readAllBytes (.toPath (java.io.File. vault-path)))
+            (java.nio.file.Files/readAllBytes (.toPath (java.io.File. out-vault)))))
+
+      (let [{:keys [exit-code stderr]}
+            (run-cli ["bundle" "open" "--in" bundle-path "--out-vault" out-vault "--identity" id-path "--json"] {}
+                     {:config-path cfg-path})]
+        (is (= exit-code/code-bundle-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"output_vault_exists\""))))
+
+    (let [{:keys [exit-code stderr]} (run-cli ["bundle" "open" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-bundle-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_in\"")))
+
+    (let [{:keys [exit-code stderr]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-bundle-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"identity_exists\"")))))
+
+(deftest bundle-recipient-supports-identity-stdin
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        id-path (str (.getPath dir) "/bundle.agekey")]
+    (run-cli ["bundle" "keygen" "--out" id-path "--json"] {})
+    (let [identity-src (slurp id-path)
+          {:keys [exit-code stdout stderr]}
+          (run-cli ["bundle" "recipient" "--identity-stdin" "--json"]
+                   {}
+                   {:stdin (java.io.StringReader. identity-src)})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "bundle_recipient" (get payload "action")))
+      (is (str/starts-with? (get payload "recipient") "age1")))))
 
 (deftest run-render-envfile-happy-path
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

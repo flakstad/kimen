@@ -31,6 +31,17 @@
 
 (def reason-envfile-failed "envfile_failed")
 (def reason-missing-out "missing_out")
+(def reason-missing-in "missing_in")
+(def reason-missing-recipient "missing_recipient")
+(def reason-missing-identity-input "missing_identity_input")
+(def reason-input-missing "input_missing")
+(def reason-identity-exists "identity_exists")
+(def reason-output-vault-exists "output_vault_exists")
+(def reason-invalid-recipient "invalid_recipient")
+(def reason-missing-identity-file "missing_identity_file")
+(def reason-no-identity-found "no_identity_found")
+(def reason-multiple-identities-found "multiple_identities_found")
+(def reason-bundle-failed "bundle_failed")
 (def reason-missing-env-mappings "missing_env_mappings")
 (def reason-missing-files-dir-for-envpath "missing_files_dir_for_envpath")
 
@@ -84,6 +95,17 @@
    reason-stdin-not-supported
    reason-envfile-failed
    reason-missing-out
+   reason-missing-in
+   reason-missing-recipient
+   reason-missing-identity-input
+   reason-input-missing
+   reason-identity-exists
+   reason-output-vault-exists
+   reason-invalid-recipient
+   reason-missing-identity-file
+   reason-no-identity-found
+   reason-multiple-identities-found
+   reason-bundle-failed
    reason-missing-env-mappings
    reason-missing-files-dir-for-envpath
    reason-empty-passphrase-command

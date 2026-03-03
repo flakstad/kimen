@@ -1,6 +1,6 @@
 BINARY_NAME=kimen
 
-.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot clj-run clj-test bb-run bb-test
+.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot clj-run clj-test bb-run bb-test bb-itest bb-test-all
 
 # Go caches:
 # - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
@@ -95,3 +95,9 @@ bb-run:
 
 bb-test:
 	bb test
+
+bb-itest:
+	bb itest
+
+bb-test-all:
+	bb test-all

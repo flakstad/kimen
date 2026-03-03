@@ -2,6 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [kimen.bundle :as bundle]
     [kimen.commands.map-lint :as map-lint]
     [kimen.config :as config]
     [kimen.mapfile :as mapfile]
@@ -100,38 +101,53 @@
       (add-check state "bundle_spec" doctor-status-ok "no --bundle-in/--identity provided; skipping bundle checks")
 
       :else
-      (let [state
+      (let [[state bundle-ready?]
             (if (str/blank? bundle-in)
-              state
+              [state false]
               (let [f (io/file bundle-in)]
                 (cond
                   (not (.exists f))
-                  (add-check state "bundle_in" doctor-status-error (format "bundle file not found: %s" bundle-in))
+                  [(add-check state "bundle_in" doctor-status-error (format "bundle file not found: %s" bundle-in)) false]
 
                   (not (.isFile f))
-                  (add-check state "bundle_in" doctor-status-error (format "bundle path is not a regular file: %s" bundle-in))
+                  [(add-check state "bundle_in" doctor-status-error (format "bundle path is not a regular file: %s" bundle-in)) false]
 
                   :else
-                  (add-check state "bundle_in" doctor-status-ok bundle-in))))
-            state
+                  [(add-check state "bundle_in" doctor-status-ok bundle-in) true])))
+            [state identity-data identity-ready?]
             (if (str/blank? identity)
-              state
+              [state nil false]
               (let [f (io/file identity)]
                 (cond
                   (not (.exists f))
-                  (add-check state "bundle_identity" doctor-status-error (format "identity file not found: %s" identity))
+                  [(add-check state "bundle_identity" doctor-status-error (format "identity file not found: %s" identity)) nil false]
 
                   (not (.isFile f))
-                  (add-check state "bundle_identity" doctor-status-error (format "identity path is not a regular file: %s" identity))
+                  [(add-check state "bundle_identity" doctor-status-error (format "identity path is not a regular file: %s" identity)) nil false]
 
                   :else
-                  (let [content (slurp f)]
-                    (if (str/includes? content "AGE-SECRET-KEY-")
-                      (add-check state "bundle_identity" doctor-status-ok identity)
-                      (add-check state "bundle_identity" doctor-status-error (format "invalid age identity file: %s" identity)))))))]
-        (if (and (not (str/blank? bundle-in)) (str/blank? identity))
-          (add-check state "bundle_decrypt" doctor-status-warning "bundle file present but no identity provided; decryptability not verified")
-          state)))))
+                  (try
+                    (let [loaded-id (bundle/load-identity {:identity-file identity
+                                                           :from-stdin? false
+                                                           :stdin nil})]
+                      [(add-check state "bundle_identity" doctor-status-ok identity) loaded-id true])
+                    (catch Exception e
+                      [(add-check state "bundle_identity" doctor-status-error (.getMessage e)) nil false])))))
+            state
+            (cond
+              (and bundle-ready? identity-ready?)
+              (try
+                (bundle/validate-bundle-with-identity bundle-in identity-data)
+                (add-check state "bundle_decrypt" doctor-status-ok "bundle decrypt validated")
+                (catch Exception e
+                  (add-check state "bundle_decrypt" doctor-status-error (.getMessage e))))
+
+              (and bundle-ready? (str/blank? identity))
+              (add-check state "bundle_decrypt" doctor-status-warning "bundle file present but no identity provided; decryptability not verified")
+
+              :else
+              state)]
+        state))))
 
 (defn- maybe-url?
   [s]

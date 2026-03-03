@@ -4,7 +4,8 @@
 (set! *warn-on-reflection* true)
 
 (def test-namespaces
-  '[kimen.cli-test
+  '[kimen.bundle-test
+    kimen.cli-test
     kimen.json-test
     kimen.mapfile-test
     kimen.reason-codes-test])

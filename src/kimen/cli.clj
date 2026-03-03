@@ -2,6 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [kimen.bundle :as bundle]
     [kimen.commands.doctor :as doctor]
     [kimen.commands.init :as init]
     [kimen.commands.map-lint :as map-lint]
@@ -42,6 +43,10 @@
      "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
      "  kimen secret rm <name> [--vault <path>] [--json]"
      "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
+     "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
+     "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
+     "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
+     "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -684,6 +689,150 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :identity v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-bundle-keygen-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :overwrite? false
+               :print-recipient? false
+               :out-path nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--overwrite")
+          (recur (rest args) (assoc opts :overwrite? true))
+
+          (= a "--print-recipient")
+          (recur (rest args) (assoc opts :print-recipient? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-path v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-bundle-recipient-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :identity-file nil
+               :identity-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--identity-stdin")
+          (recur (rest args) (assoc opts :identity-stdin? true))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity-file v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-bundle-seal-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :vault-path nil
+               :out-path nil
+               :recipients []}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (or (= a "--vault") (str/starts-with? a "--vault="))
+          (let [[v next-args err] (parse-flag-value args "--vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :vault-path v))))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-path v))))
+
+          (or (= a "--recipient") (str/starts-with? a "--recipient="))
+          (let [[v next-args err] (parse-flag-value args "--recipient")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :recipients conj v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-bundle-open-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :overwrite? false
+               :in-path nil
+               :out-vault nil
+               :identity-file nil
+               :identity-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--overwrite")
+          (recur (rest args) (assoc opts :overwrite? true))
+
+          (= a "--identity-stdin")
+          (recur (rest args) (assoc opts :identity-stdin? true))
+
+          (or (= a "--in") (str/starts-with? a "--in="))
+          (let [[v next-args err] (parse-flag-value args "--in")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :in-path v))))
+
+          (or (= a "--out-vault") (str/starts-with? a "--out-vault="))
+          (let [[v next-args err] (parse-flag-value args "--out-vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-vault v))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity-file v))))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -1787,6 +1936,144 @@
         (catch Exception e
           (envfile-error-result json? e))))))
 
+(defn- bundle-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-bundle-failed)]
+    (if json?
+      (error-json exit-code/code-bundle-failed reason (.getMessage e))
+      (error-text exit-code/code-bundle-failed (.getMessage e)))))
+
+(defn- resolve-identity!
+  [ctx opts]
+  (bundle/load-identity {:identity-file (:identity-file opts)
+                         :from-stdin? (:identity-stdin? opts)
+                         :stdin (:stdin ctx)}))
+
+(defn- handle-bundle-keygen
+  [args]
+  (let [[opts parse-error] (parse-bundle-keygen-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (bundle-error-result json? (ex-info parse-error {:reason reasons/reason-bundle-failed}))
+
+      (str/blank? (:out-path opts))
+      (bundle-error-result json? (ex-info "--out is required" {:reason reasons/reason-missing-out}))
+
+      :else
+      (try
+        (let [{:keys [recipient]} (bundle/generate-identity-file (:out-path opts) (:overwrite? opts))]
+          (if json?
+            (success-json {:ok true
+                           :action "bundle_keygen"
+                           :exit_code 0
+                           :identity_path (:out-path opts)
+                           :recipient recipient})
+            (result {:exit-code 0
+                     :stdout (when (:print-recipient? opts)
+                               (str recipient "\n"))})))
+        (catch Exception e
+          (bundle-error-result json? e))))))
+
+(defn- handle-bundle-recipient
+  [ctx args]
+  (let [[opts parse-error] (parse-bundle-recipient-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (bundle-error-result json? (ex-info parse-error {:reason reasons/reason-bundle-failed}))
+
+      (and (str/blank? (:identity-file opts)) (not (:identity-stdin? opts)))
+      (bundle-error-result json? (ex-info "provide --identity or --identity-stdin"
+                                          {:reason reasons/reason-missing-identity-input}))
+
+      :else
+      (try
+        (let [id (resolve-identity! ctx opts)
+              recipient (bundle/recipient-for-identity id)]
+          (if json?
+            (success-json {:ok true
+                           :action "bundle_recipient"
+                           :exit_code 0
+                           :recipient recipient})
+            (result {:exit-code 0
+                     :stdout (str recipient "\n")})))
+        (catch Exception e
+          (bundle-error-result json? e))))))
+
+(defn- handle-bundle-seal
+  [ctx args]
+  (let [[opts parse-error] (parse-bundle-seal-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (bundle-error-result json? (ex-info parse-error {:reason reasons/reason-bundle-failed}))
+
+      (str/blank? (:out-path opts))
+      (bundle-error-result json? (ex-info "--out is required" {:reason reasons/reason-missing-out}))
+
+      (empty? (:recipients opts))
+      (bundle-error-result json? (ex-info "at least one --recipient is required"
+                                          {:reason reasons/reason-missing-recipient}))
+
+      :else
+      (try
+        (let [vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
+              _ (bundle/seal-vault-file vault-path (:out-path opts) (:recipients opts))]
+          (if json?
+            (success-json {:ok true
+                           :action "bundle_seal"
+                           :exit_code 0
+                           :vault vault-path
+                           :out (:out-path opts)
+                           :recipient_count (count (:recipients opts))})
+            (result {:exit-code 0
+                     :stdout (format "sealed %s -> %s\n" vault-path (:out-path opts))})))
+        (catch Exception e
+          (bundle-error-result json? e))))))
+
+(defn- handle-bundle-open
+  [ctx args]
+  (let [[opts parse-error] (parse-bundle-open-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (bundle-error-result json? (ex-info parse-error {:reason reasons/reason-bundle-failed}))
+
+      (str/blank? (:in-path opts))
+      (bundle-error-result json? (ex-info "--in is required" {:reason reasons/reason-missing-in}))
+
+      (and (str/blank? (:identity-file opts)) (not (:identity-stdin? opts)))
+      (bundle-error-result json? (ex-info "provide --identity or --identity-stdin"
+                                          {:reason reasons/reason-missing-identity-input}))
+
+      :else
+      (try
+        (let [out-vault (or (some-> (:out-vault opts) str/trim not-empty)
+                            (vault-path/default-vault-path))
+              id (resolve-identity! ctx opts)
+              _ (bundle/open-to-vault-file (:in-path opts) out-vault id (:overwrite? opts))]
+          (if json?
+            (success-json {:ok true
+                           :action "bundle_open"
+                           :exit_code 0
+                           :in (:in-path opts)
+                           :out_vault out-vault})
+            (result {:exit-code 0
+                     :stdout (format "opened %s -> %s\n" (:in-path opts) out-vault)})))
+        (catch Exception e
+          (bundle-error-result json? e))))))
+
+(defn- handle-bundle
+  [ctx args]
+  (let [args (vec args)]
+    (cond
+      (= "keygen" (first args)) (handle-bundle-keygen (rest args))
+      (= "recipient" (first args)) (handle-bundle-recipient ctx (rest args))
+      (= "seal" (first args)) (handle-bundle-seal ctx (rest args))
+      (= "open" (first args)) (handle-bundle-open ctx (rest args))
+      :else (error-text 1 "unknown bundle command"))))
+
 (defn- doctor-error-result
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-doctor-failed)]
@@ -1949,6 +2236,9 @@
 
       (= "envfile" (first args))
       (handle-envfile ctx (rest args))
+
+      (= "bundle" (first args))
+      (handle-bundle ctx (rest args))
 
       (= "doctor" (first args))
       (handle-doctor ctx (rest args))

@@ -1,0 +1,129 @@
+#!/usr/bin/env bb
+(ns scripts.cli-integration
+  (:require
+    [babashka.process :as p]
+    [clojure.java.io :as io]
+    [kimen.json :as json])
+  (:import
+    [java.nio.file Files]
+    [java.util Arrays]))
+
+(defn- fail!
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- ensure!
+  [pred message data]
+  (when-not pred
+    (fail! message data)))
+
+(defn- parse-json
+  [s]
+  (json/read-str s))
+
+(defn- run-kimen
+  [repo-root env-overrides argv & [stdin]]
+  (let [env (merge (into {} (System/getenv)) env-overrides)
+        opts (cond-> {:continue true
+                      :out :string
+                      :err :string
+                      :dir repo-root
+                      :env env}
+               (some? stdin) (assoc :in stdin))
+        res (apply p/sh opts "./bin/kimen" argv)]
+    (assoc res :argv (vec argv))))
+
+(defn- expect-success-json!
+  [res action]
+  (ensure! (zero? (:exit res)) "command failed" {:res res})
+  (let [payload (parse-json (:out res))]
+    (ensure! (= action (get payload "action")) "unexpected action" {:expected action :payload payload :res res})
+    (ensure! (= 0 (get payload "exit_code")) "expected exit_code=0 in payload" {:payload payload :res res})
+    payload))
+
+(defn- expect-error-json!
+  [res exit-code reason]
+  (ensure! (= exit-code (:exit res)) "unexpected command exit code" {:expected exit-code :res res})
+  (let [payload (parse-json (:err res))]
+    (ensure! (= false (get payload "ok")) "expected error payload" {:payload payload :res res})
+    (ensure! (= exit-code (get payload "exit_code")) "unexpected payload exit code" {:payload payload :res res})
+    (ensure! (= reason (get payload "reason")) "unexpected payload reason" {:expected reason :payload payload :res res})
+    payload))
+
+(defn main!
+  []
+  (let [repo-root (.getCanonicalPath (io/file "."))
+        kimen-bin (io/file repo-root "bin" "kimen")
+        _ (ensure! (.exists kimen-bin) "missing bin/kimen script" {:repo-root repo-root})
+        temp-dir (.toFile (Files/createTempDirectory "kimen-cli-integration" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath temp-dir) "/config.json")
+        vault-path (str (.getPath temp-dir) "/vault.db")
+        id-path (str (.getPath temp-dir) "/bundle.agekey")
+        bundle-path (str (.getPath temp-dir) "/vault.age")
+        opened-vault (str (.getPath temp-dir) "/opened.vault.db")
+        map-path (str (.getPath temp-dir) "/app.kmap")
+        render-dir (str (.getPath temp-dir) "/render")
+        envfile-path (str (.getPath temp-dir) "/app.env")
+        workflow-pr (str (.getPath temp-dir) "/kimen-pr-safety.yml")
+        workflow-deploy (str (.getPath temp-dir) "/kimen-deploy.yml")
+        workflow-sync (str (.getPath temp-dir) "/kimen-sync-gate.yml")
+        base-env {"KIMEN_CONFIG" cfg-path
+                  "KIMEN_VAULT" vault-path}
+        pass-cmd "printf integration-passphrase"
+        _ (spit map-path "env API_KEY=api_key\nfile conf/api.txt=api_key\nenvpath API_KEY_PATH=conf/api.txt\n")]
+    (expect-success-json! (run-kimen repo-root base-env ["version" "--json"]) "version")
+    (expect-success-json! (run-kimen repo-root base-env ["config" "path" "--json"]) "config_path")
+
+    (expect-success-json! (run-kimen repo-root base-env ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
+    (expect-success-json! (run-kimen repo-root base-env ["vault" "info" "--vault" vault-path "--json"]) "vault_info")
+    (expect-success-json! (run-kimen repo-root base-env ["vault" "path" "--json"]) "vault_path")
+
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "list" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "list")
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")
+
+    (expect-success-json! (run-kimen repo-root base-env ["map" "lint" "--map" map-path "--json"]) "map_lint")
+    (expect-success-json! (run-kimen repo-root base-env ["plan" "--map" map-path "--json" "--" "echo" "ok"]) "plan")
+    (expect-success-json! (run-kimen repo-root base-env ["run" "--map" map-path "--json" "--dry-run" "--" "echo" "ok"]) "plan")
+    (expect-success-json! (run-kimen repo-root base-env ["render" "--map" map-path "--dir" render-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "render")
+    (expect-success-json! (run-kimen repo-root base-env ["envfile" "--map" map-path "--out" envfile-path "--files-dir" render-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "envfile")
+    (expect-success-json! (run-kimen repo-root base-env ["project" "plan" "--map" map-path "--json" "--" "echo" "ok"]) "plan")
+    (expect-success-json! (run-kimen repo-root base-env ["project" "run" "--map" map-path "--json" "--dry-run" "--" "echo" "ok"]) "plan")
+    (expect-success-json! (run-kimen repo-root base-env ["project" "render" "--map" map-path "--dir" (str (.getPath temp-dir) "/project-render") "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "render")
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "mv" "api_key" "api_key2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "mv")
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "rm" "api_key2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "rm")
+
+    (let [keygen (expect-success-json! (run-kimen repo-root base-env ["bundle" "keygen" "--out" id-path "--json"]) "bundle_keygen")
+          recipient (get keygen "recipient")]
+      (ensure! (string? recipient) "missing bundle recipient" {:keygen keygen})
+      (expect-success-json! (run-kimen repo-root base-env ["bundle" "recipient" "--identity" id-path "--json"]) "bundle_recipient")
+      (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" vault-path "--out" bundle-path "--recipient" recipient "--json"]) "bundle_seal")
+      (expect-success-json! (run-kimen repo-root base-env ["bundle" "open" "--in" bundle-path "--out-vault" opened-vault "--identity" id-path "--json"]) "bundle_open")
+      (expect-error-json! (run-kimen repo-root base-env ["bundle" "open" "--json"]) 25 "missing_in"))
+
+    (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
+    (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")
+    (expect-success-json! (run-kimen repo-root base-env ["init" "ci-deploy" "--out" workflow-deploy "--json"]) "init_ci_deploy")
+    (expect-success-json! (run-kimen repo-root base-env ["init" "ci-sync-gate" "--out" workflow-sync "--json"]) "init_ci_sync_gate")
+
+    (ensure! (Arrays/equals
+               (Files/readAllBytes (.toPath (java.io.File. vault-path)))
+               (Files/readAllBytes (.toPath (java.io.File. opened-vault))))
+             "opened bundle vault differs from source vault"
+             {:vault vault-path :opened opened-vault})
+    (println "cli integration tests passed")
+    0))
+
+(defn -main
+  [& _]
+  (try
+    (System/exit (int (main!)))
+    (catch Exception e
+      (binding [*out* *err*]
+        (println "cli integration tests failed:" (.getMessage e))
+        (when-let [data (ex-data e)]
+          (println (pr-str data))))
+      (System/exit 1))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (-main))
