@@ -3,6 +3,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [kimen.cli :as cli]
+    [kimen.commands.init :as init]
     [kimen.exit-code :as exit-code]))
 
 (defn- run-cli
@@ -26,6 +27,10 @@
         (if (some? prev)
           (System/setProperty k prev)
           (System/clearProperty k))))))
+
+(defn- normalize-newlines
+  [s]
+  (str/replace (or s "") "\r\n" "\n"))
 
 (deftest version-json-shape
   (let [{:keys [exit-code stdout stderr]} (run-cli ["version" "--json"] {})]
@@ -590,3 +595,66 @@
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"action\":\"init_ci_sync_gate\""))
       (is (str/includes? (slurp out-path) "name: kimen-sync-gate")))))
+
+(deftest init-ci-deploy-json-writes-workflow
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        out-path (str (.getPath dir) "/.github/workflows/kimen-deploy.yml")
+        {:keys [exit-code stdout stderr]}
+        (run-cli ["init" "ci-deploy"
+                  "--out" out-path
+                  "--profile" "stage"
+                  "--deploy-command" "./scripts/release.sh --dry-run"
+                  "--json"]
+                 {})]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (str/includes? stdout "\"action\":\"init_ci_deploy\""))
+    (let [body (slurp out-path)]
+      (is (str/includes? body "name: kimen-deploy"))
+      (is (str/includes? body "default: \"stage\""))
+      (is (str/includes? body "default: \"./scripts/release.sh --dry-run\""))
+      (is (str/includes? body "./kimen project run --profile")))))
+
+(deftest doctor-bundle-identity-checks
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        bundle-path (str (.getPath dir) "/vault.age")
+        id-path (str (.getPath dir) "/ci.agekey")
+        pass-cmd "printf test-passphrase"]
+    (spit bundle-path "fake-bundle")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["doctor" "--bundle-in" bundle-path "--json"] {} {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"name\":\"bundle_decrypt\""))
+      (is (str/includes? stdout "\"status\":\"warning\"")))
+
+    (spit id-path "not-an-age-identity\n")
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["doctor" "--bundle-in" bundle-path "--identity" id-path "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-doctor-failed exit-code))
+      (is (str/includes? stdout "\"name\":\"bundle_identity\""))
+      (is (str/includes? stdout "\"status\":\"error\"")))))
+
+(deftest init-template-render-defaults-match-checked-in-workflows
+  (let [pr-workflow (slurp ".github/workflows/kimen-pr-safety-template.yml")
+        deploy-workflow (slurp ".github/workflows/kimen-deploy-template.yml")
+        sync-workflow (slurp ".github/workflows/kimen-sync-gate-template.yml")]
+    (is (= (normalize-newlines pr-workflow)
+           (normalize-newlines
+             (init/render-ci-pr-safety-workflow
+               (init/default-ci-pr-safety-options)
+               "kimen-pr-safety-template"))))
+    (is (= (normalize-newlines deploy-workflow)
+           (normalize-newlines
+             (init/render-ci-deploy-workflow
+               (init/default-ci-deploy-options)
+               "kimen-deploy-template"))))
+    (is (= (normalize-newlines sync-workflow)
+           (normalize-newlines
+             (init/render-ci-sync-gate-workflow
+               (init/default-ci-sync-gate-options)
+               "kimen-sync-gate-template"))))))
