@@ -315,6 +315,41 @@
         (is (str/includes? body "API_KEY=shh"))
         (is (str/includes? body (str "API_KEY_PATH=" out-dir "/conf/api.txt")))))))
 
+(deftest envfile-encodes-shell-unsafe-values
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        envfile-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["envfile" "--env" "MESSAGE=const:hello world" "--out" envfile-path "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"envfile\""))
+      (is (str/includes? (slurp envfile-path) "MESSAGE=\"hello world\"")))))
+
+(deftest envfile-rejects-newline-values
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        map-path (str (.getPath dir) "/newline.kmap")
+        envfile-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"]
+    (spit map-path "env MULTI=multiline\n")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "multiline" "--value" "line1\nline2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["envfile" "--map" map-path "--out" envfile-path "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-envfile-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"envfile_failed\""))
+      (is (str/includes? stderr "value contains newline")))))
+
 (deftest profile-inputs-work-and-errors-are-typed
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         home-dir (str (.getPath dir) "/home")

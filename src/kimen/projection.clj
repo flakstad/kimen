@@ -8,6 +8,7 @@
 (def exec-prefix "exec:")
 (def secret-prefix "secret:")
 (def const-prefix "const:")
+(def simple-env-value-re #"^[A-Za-z0-9_./:@+\-]*$")
 
 (defn- fail!
   [reason message]
@@ -142,9 +143,27 @@
   (io/make-parents path)
   (let [lines (->> env-map
                    (sort-by key)
-                   (map (fn [[k v]] (str k "=" v))))
+                   (map (fn [[k v]]
+                          (let [v (str v)]
+                            (when (str/includes? v "\u0000")
+                              (fail! reasons/reason-envfile-failed
+                                     (format "%s: value contains NUL" k)))
+                            (when (or (str/includes? v "\n") (str/includes? v "\r"))
+                              (fail! reasons/reason-envfile-failed
+                                     (format "%s: value contains newline" k)))
+                            (let [encoded (cond
+                                            (= "" v) "\"\""
+                                            (re-matches simple-env-value-re v) v
+                                            :else
+                                            (str "\""
+                                                 (-> v
+                                                     (str/replace "\\" "\\\\")
+                                                     (str/replace "\"" "\\\""))
+                                                 "\""))]
+                              (str k "=" encoded)))))
+                   vec)
         body (str (str/join "\n" lines) "\n")]
-    (spit path body)
+    (write-file-0600! path body)
     path))
 
 (defn delete-dir-recursive!
