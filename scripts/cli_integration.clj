@@ -46,6 +46,18 @@
                    argv)]
     (assoc res :argv (vec argv))))
 
+(defn- run-script
+  [repo-root env-overrides script-path argv]
+  (let [env (merge (into {} (System/getenv)) env-overrides)
+        res (apply p/sh {:continue true
+                         :out :string
+                         :err :string
+                         :dir repo-root
+                         :env env}
+                   script-path
+                   argv)]
+    (assoc res :argv (vec (into [script-path] argv)))))
+
 (def ^:private git-env-skip-vars
   #{"GIT_DIR"
     "GIT_WORK_TREE"
@@ -137,8 +149,12 @@
     (expect-success-json! (run-kimen repo-root base-env ["vault" "path" "--json"]) "vault_path")
 
     (let [legacy-shim (str (.getPath temp-dir) "/legacy-go-kimen.sh")
+          legacy-source-vault-path (str (.getPath temp-dir) "/legacy.vault.db")
           dry-run-target-vault-path (str (.getPath temp-dir) "/migrated.dry-run.vault.db")
           migrated-vault-path (str (.getPath temp-dir) "/migrated.vault.db")
+          migrated-script-vault-path (str (.getPath temp-dir) "/migrated.script.vault.db")
+          source-pass-file (str (.getPath temp-dir) "/legacy-source.pass")
+          target-pass-file (str (.getPath temp-dir) "/legacy-target.pass")
           _ (spit legacy-shim
                   (str "#!/usr/bin/env bash\n"
                        "set -euo pipefail\n"
@@ -157,13 +173,16 @@
                        "echo \"unsupported legacy shim command\" >&2\n"
                        "exit 1\n"))
           _ (.setExecutable (io/file legacy-shim) true)
+          _ (spit legacy-source-vault-path "legacy-vault-placeholder\n")
+          _ (spit source-pass-file "legacy-passphrase\n")
+          _ (spit target-pass-file "integration-passphrase\n")
           migrate-dry-run (expect-success-json!
                            (run-bb repo-root
                                    base-env
                                    ["migrate-go-vault"
                                     "--"
                                     "--source-bin" legacy-shim
-                                    "--source-vault" (str (.getPath temp-dir) "/legacy.vault.db")
+                                    "--source-vault" legacy-source-vault-path
                                     "--source-passphrase-cmd" "printf legacy-passphrase"
                                     "--target-vault" dry-run-target-vault-path
                                     "--target-passphrase-cmd" pass-cmd
@@ -177,26 +196,43 @@
                                   ["migrate-go-vault"
                                    "--"
                                    "--source-bin" legacy-shim
-                                   "--source-vault" (str (.getPath temp-dir) "/legacy.vault.db")
+                                   "--source-vault" legacy-source-vault-path
                                    "--source-passphrase-cmd" "printf legacy-passphrase"
                                    "--target-vault" migrated-vault-path
                                    "--target-passphrase-cmd" pass-cmd
                                    "--init-target"
-                                  "--json"])
+                                   "--json"])
                           "migrate_go_vault")
+          migrate-script-res (run-script repo-root
+                                         base-env
+                                         "./scripts/migrate_current_vault.sh"
+                                         ["--source-bin" legacy-shim
+                                          "--source-vault" legacy-source-vault-path
+                                          "--target-vault" migrated-script-vault-path
+                                          "--source-pass-file" source-pass-file
+                                          "--target-pass-file" target-pass-file
+                                          "--no-build-go"
+                                          "--skip-backup"
+                                          "--no-switch"
+                                          "--yes"])
           migrated-list (expect-success-json!
                          (run-kimen repo-root base-env ["secret" "list" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
                          "list")
           migrated-api (expect-success-json!
                         (run-kimen repo-root base-env ["secret" "get" "legacy_api" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
-                        "get")
+                          "get")
+          migrated-script-list (expect-success-json!
+                                (run-kimen repo-root base-env ["secret" "list" "--vault" migrated-script-vault-path "--passphrase-cmd" pass-cmd "--json"])
+                                "list")
           migrated-token (expect-success-json!
                           (run-kimen repo-root base-env ["secret" "get" "legacy_token" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
                           "get")]
       (ensure! (= true (get migrate-dry-run "dry_run")) "expected dry_run=true from migration dry-run payload" {:migrate-dry-run migrate-dry-run})
       (ensure! (false? (.exists (io/file dry-run-target-vault-path))) "migration dry-run should not create target vault" {:dry-run-target-vault-path dry-run-target-vault-path})
+      (ensure! (zero? (:exit migrate-script-res)) "migration shell script failed" {:migrate-script-res migrate-script-res})
       (ensure! (= 2 (get migrate-result "count")) "expected two migrated secrets" {:migrate-result migrate-result})
       (ensure! (= ["legacy_api" "legacy_token"] (get migrated-list "names")) "unexpected migrated secret names" {:migrated-list migrated-list})
+      (ensure! (= ["legacy_api" "legacy_token"] (get migrated-script-list "names")) "unexpected migrated script secret names" {:migrated-script-list migrated-script-list :res migrate-script-res})
       (ensure! (= "bGVnYWN5LWFwaQ==" (get migrated-api "value_b64")) "unexpected migrated legacy_api value" {:migrated-api migrated-api})
       (ensure! (= "bGVnYWN5LXRva2Vu" (get migrated-token "value_b64")) "unexpected migrated legacy_token value" {:migrated-token migrated-token}))
 

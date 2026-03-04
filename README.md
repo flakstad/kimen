@@ -142,6 +142,14 @@ bb migrate-go-vault -- \
 
 Dry-run mode is supported via `--dry-run` to validate source reads without writing target secrets.
 
+For an operator-friendly guided flow (backup + dry-run + migrate + verify), use:
+
+```bash
+scripts/migrate_current_vault.sh --yes
+```
+
+Run `scripts/migrate_current_vault.sh --help` for non-interactive/passphrase file options.
+
 ## Development
 
 ### Pre-commit hook (tests + build)
