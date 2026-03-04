@@ -96,6 +96,12 @@
 (def remote-name-re #"^[A-Za-z0-9_.-]+$")
 (def env-remote-name "KIMEN_REMOTE")
 
+(defn- getenv
+  [ctx k]
+  (if-let [lookup (:getenv ctx)]
+    (lookup k)
+    (System/getenv k)))
+
 (defn- json-line
   [x]
   (str (json/write-str x) "\n"))
@@ -3111,15 +3117,19 @@
   [ctx remote-opt]
   (let [remotes (config/config-remote-list (:config-path ctx))
         from-sync (infer-sync-remote-from-state (:config-path ctx) remotes)
-        requested (or (some-> remote-opt str/trim not-empty)
-                      (some-> (System/getenv env-remote-name) str/trim not-empty))]
+        requested-opt (some-> remote-opt str/trim not-empty)
+        requested-env (some-> (getenv ctx env-remote-name) str/trim not-empty)
+        requested (or requested-opt requested-env)]
     (when (empty? remotes)
       (throw (ex-info "no remotes configured" {:reason reasons/reason-no-remotes-configured})))
     (cond
       requested
       (or (some #(when (= requested (get % "name")) %) remotes)
           (throw (ex-info (format "remote %s not found" (pr-str requested))
-                          {:reason reasons/reason-remote-not-found})))
+                          {:reason (if (and (nil? requested-opt)
+                                            (some? requested-env))
+                                     reasons/reason-remote-not-found-from-env
+                                     reasons/reason-remote-not-found)})))
 
       (some? from-sync)
       from-sync

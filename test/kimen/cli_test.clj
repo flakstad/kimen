@@ -541,6 +541,28 @@
       (is (= "sync_status" (get payload "action")))
       (is (= "alpha" (get payload "remote"))))
 
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--json"] {}
+                   {:config-path cfg-path
+                    :getenv (fn [k]
+                              (when (= "KIMEN_REMOTE" k)
+                                "beta"))})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "beta" (get payload "remote"))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--remote" "alpha" "--json"] {}
+                   {:config-path cfg-path
+                    :getenv (fn [k]
+                              (when (= "KIMEN_REMOTE" k)
+                                "beta"))})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "alpha" (get payload "remote"))))
+
     (run-cli ["remote" "add" "origin" "--path" remote-origin "--json"] {} {:config-path cfg-path})
     (let [{:keys [exit-code stdout stderr]}
           (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})
@@ -548,6 +570,20 @@
       (is (= 0 exit-code))
       (is (nil? stderr))
       (is (= "origin" (get payload "remote"))))))
+
+(deftest sync-status-selection-invalid-env-remote-fails
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        remote-origin (str (.getPath dir) "/remote-origin")]
+    (run-cli ["remote" "add" "origin" "--path" remote-origin "--json"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "status" "--json"] {}
+                   {:config-path cfg-path
+                    :getenv (fn [k]
+                              (when (= "KIMEN_REMOTE" k)
+                                "missing"))})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"remote_not_found_from_env\"")))))
 
 (deftest sync-status-selection-prefers-unique-sync-state-remote
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

@@ -62,6 +62,7 @@
 (def reason-empty-remote-name "empty_remote_name")
 (def reason-invalid-remote-name "invalid_remote_name")
 (def reason-remote-not-found "remote_not_found")
+(def reason-remote-not-found-from-env "remote_not_found_from_env")
 (def reason-remote-exists "remote_exists")
 (def reason-unsupported-remote-type "unsupported_remote_type")
 (def reason-missing-remote-set-fields "missing_remote_set_fields")
@@ -167,6 +168,7 @@
    reason-empty-remote-name
    reason-invalid-remote-name
    reason-remote-not-found
+   reason-remote-not-found-from-env
    reason-remote-exists
    reason-unsupported-remote-type
    reason-missing-remote-set-fields
