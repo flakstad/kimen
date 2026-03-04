@@ -34,6 +34,18 @@
         res (apply p/sh opts "./bin/kimen" argv)]
     (assoc res :argv (vec argv))))
 
+(defn- run-bb
+  [repo-root env-overrides argv]
+  (let [env (merge (into {} (System/getenv)) env-overrides)
+        res (apply p/sh {:continue true
+                         :out :string
+                         :err :string
+                         :dir repo-root
+                         :env env}
+                   "bb"
+                   argv)]
+    (assoc res :argv (vec argv))))
+
 (def ^:private git-env-skip-vars
   #{"GIT_DIR"
     "GIT_WORK_TREE"
@@ -123,6 +135,53 @@
     (expect-success-json! (run-kimen repo-root base-env ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
     (expect-success-json! (run-kimen repo-root base-env ["vault" "info" "--vault" vault-path "--json"]) "vault_info")
     (expect-success-json! (run-kimen repo-root base-env ["vault" "path" "--json"]) "vault_path")
+
+    (let [legacy-shim (str (.getPath temp-dir) "/legacy-go-kimen.sh")
+          migrated-vault-path (str (.getPath temp-dir) "/migrated.vault.db")
+          _ (spit legacy-shim
+                  (str "#!/usr/bin/env bash\n"
+                       "set -euo pipefail\n"
+                       "if [[ \"$1\" == \"secret\" && \"$2\" == \"list\" ]]; then\n"
+                       "  echo '{\"ok\":true,\"action\":\"list\",\"exit_code\":0,\"names\":[\"legacy_api\",\"legacy_token\"]}'\n"
+                       "  exit 0\n"
+                       "fi\n"
+                       "if [[ \"$1\" == \"secret\" && \"$2\" == \"get\" && \"$3\" == \"legacy_api\" ]]; then\n"
+                       "  echo '{\"ok\":true,\"action\":\"get\",\"exit_code\":0,\"value_b64\":\"bGVnYWN5LWFwaQ==\"}'\n"
+                       "  exit 0\n"
+                       "fi\n"
+                       "if [[ \"$1\" == \"secret\" && \"$2\" == \"get\" && \"$3\" == \"legacy_token\" ]]; then\n"
+                       "  echo '{\"ok\":true,\"action\":\"get\",\"exit_code\":0,\"value_b64\":\"bGVnYWN5LXRva2Vu\"}'\n"
+                       "  exit 0\n"
+                       "fi\n"
+                       "echo \"unsupported legacy shim command\" >&2\n"
+                       "exit 1\n"))
+          _ (.setExecutable (io/file legacy-shim) true)
+          migrate-result (expect-success-json!
+                          (run-bb repo-root
+                                  base-env
+                                  ["migrate-go-vault"
+                                   "--"
+                                   "--source-bin" legacy-shim
+                                   "--source-vault" (str (.getPath temp-dir) "/legacy.vault.db")
+                                   "--source-passphrase-cmd" "printf legacy-passphrase"
+                                   "--target-vault" migrated-vault-path
+                                   "--target-passphrase-cmd" pass-cmd
+                                   "--init-target"
+                                   "--json"])
+                          "migrate_go_vault")
+          migrated-list (expect-success-json!
+                         (run-kimen repo-root base-env ["secret" "list" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
+                         "list")
+          migrated-api (expect-success-json!
+                        (run-kimen repo-root base-env ["secret" "get" "legacy_api" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
+                        "get")
+          migrated-token (expect-success-json!
+                          (run-kimen repo-root base-env ["secret" "get" "legacy_token" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
+                          "get")]
+      (ensure! (= 2 (get migrate-result "count")) "expected two migrated secrets" {:migrate-result migrate-result})
+      (ensure! (= ["legacy_api" "legacy_token"] (get migrated-list "names")) "unexpected migrated secret names" {:migrated-list migrated-list})
+      (ensure! (= "bGVnYWN5LWFwaQ==" (get migrated-api "value_b64")) "unexpected migrated legacy_api value" {:migrated-api migrated-api})
+      (ensure! (= "bGVnYWN5LXRva2Vu" (get migrated-token "value_b64")) "unexpected migrated legacy_token value" {:migrated-token migrated-token}))
 
     (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
     (expect-success-json! (run-kimen repo-root base-env ["secret" "list" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "list")

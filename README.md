@@ -125,6 +125,23 @@ make build
 
 Legacy Go build/test targets remain available as `go-*` targets during transition (for example `make go-test`).
 
+### One-Time Go Vault Migration
+
+Before removing the Go implementation from your workflow, migrate secrets from a Go-era vault into the Clojure vault:
+
+```bash
+bb migrate-go-vault -- \
+  --source-bin /path/to/go-era-kimen \
+  --source-vault /path/to/old-vault.db \
+  --source-passphrase-cmd "printf old-passphrase" \
+  --target-vault /path/to/new-vault.db \
+  --target-passphrase-cmd "printf new-passphrase" \
+  --init-target \
+  --json
+```
+
+Dry-run mode is supported via `--dry-run` to validate source reads without writing target secrets.
+
 ## Development
 
 ### Pre-commit hook (tests + build)

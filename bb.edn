@@ -10,6 +10,10 @@
         :task (System/exit (int (test-runner/main!)))}
   itest {:doc "Run CLI integration tests through bin/kimen"
          :task (System/exit (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))}
+  migrate-go-vault {:doc "Migrate secrets from a Go-era vault to the Clojure vault implementation"
+                    :override-builtin true
+                    :requires ([kimen.migration.go-vault :as migrate])
+                    :task (System/exit (int (migrate/main! *command-line-args*)))}
   test-all {:doc "Run unit and CLI integration tests"
             :requires ([kimen.test-runner :as test-runner])
             :task (let [unit-exit (int (test-runner/main!))

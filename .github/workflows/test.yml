@@ -27,6 +27,22 @@ jobs:
           bb: latest
       - run: bb itest
 
+  native-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          cli: latest
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          java-version: '21'
+          native-image-job-reports: 'true'
+      - run: native-image --version
+      - run: clojure -T:build native
+      - run: test -x target/kimen
+
   go-reference:
     runs-on: ubuntu-latest
     steps:
