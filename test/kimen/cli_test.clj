@@ -570,6 +570,66 @@
       (is (nil? stderr))
       (is (= "beta" (get payload "remote"))))))
 
+(deftest sync-status-human-default-and-terse-output
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["remote" "add" "origin" "--path" remote-dir "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "status"] {} {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "remote: origin"))
+      (is (str/includes? stdout "recommended-action:"))
+      (is (> (count (str/split-lines (str/trim stdout))) 1)))
+
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "status" "--terse"] {} {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "remote=origin"))
+      (is (str/includes? stdout "recommended_action="))
+      (is (= 1 (count (str/split-lines (str/trim stdout))))))))
+
+(deftest sync-conflicts-and-changes-terse-human-output
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["remote" "add" "origin" "--path" remote-dir "--recipient" recipient "--identity" id-path "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "v2-local" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+
+      (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "conflicts" "--terse"] {} {:config-path cfg-path})]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (str/includes? stdout "remote=origin"))
+        (is (str/includes? stdout "has_conflict=false"))
+        (is (str/includes? stdout "reason=none"))
+        (is (= 1 (count (str/split-lines (str/trim stdout))))))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "changes" "--terse" "--passphrase-cmd" pass-cmd] {}
+                     {:config-path cfg-path})]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (str/includes? stdout "remote=origin"))
+        (is (str/includes? stdout "recommended_action=sync_push"))
+        (is (= 1 (count (str/split-lines (str/trim stdout)))))))))
+
 (deftest sync-status-and-conflicts-strict-and-stale-threshold
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
