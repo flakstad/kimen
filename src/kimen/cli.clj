@@ -2702,71 +2702,90 @@
                       {:reason reasons/reason-unknown-preflight-check})))))
 
 (defn- sync-status-payload
-  [ctx remote]
-  (let [remote-name (get remote "name")
-        remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")
-        remote-path (some-> (get remote "path") str/trim)
-        bundle-path (when (= remote-type "fs") (fs-remote-bundle-path remote))
-        lock-path (when bundle-path (str bundle-path ".lock"))
-        has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
-        has-lock (boolean (and lock-path (.exists (io/file lock-path))))
-        vault-path (vault-path/resolve-vault-path ctx nil)
-        has-local (boolean (.exists (io/file vault-path)))
-        recipient (some-> (get remote "recipient") str/trim not-empty)
-        identity (some-> (get remote "identity") str/trim not-empty)
-        sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
-        remote-rev (when has-remote (file-sha256-hex bundle-path))
-        last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
-        local-hash (when has-local (file-sha256-hex vault-path))
-        last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
-        remote-changed (boolean (and has-remote last-seen remote-rev (not= last-seen remote-rev)))
-        local-changed (boolean (and has-local last-local-hash local-hash (not= last-local-hash local-hash)))
-        has-conflict (boolean (and remote-changed local-changed))
-        blockers (cond-> []
-                   (not has-local) (conj "local_vault_missing")
-                   (and has-local (nil? recipient)) (conj "remote_recipient_missing")
-                   (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
-                   has-lock (conj "remote_lock_present"))
-        can-push (boolean (and has-local (not has-lock) (some? recipient)))
-        needs-pull (boolean (and has-remote (not has-local)))
-        in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev) (not local-changed)))
-        recommended-action
-        (cond
-          has-conflict "sync_pull_reconcile"
-          has-lock "wait_or_sync_unlock"
-          remote-changed "sync_pull"
-          local-changed "sync_push"
-          (and has-local (nil? recipient)) "configure_remote_recipient"
-          (and has-remote (not has-local) (nil? identity)) "configure_remote_identity"
-          (and has-remote (not has-local)) "sync_pull"
-          has-local "sync_push"
-          :else "vault_init")]
-    {:ok true
-     :action "sync_status"
-     :exit_code 0
-     :remote remote-name
-     :remote_type remote-type
-     :remote_path remote-path
-     :bundle_path bundle-path
-     :vault_path vault-path
-     :remote_rev remote-rev
-     :last_seen_rev last-seen
-     :local_hash local-hash
-     :last_local_hash last-local-hash
-     :has_remote has-remote
-     :has_lock has-lock
-     :has_local has-local
-     :in_sync in-sync
-     :remote_changed remote-changed
-     :local_changed local-changed
-     :has_conflict has-conflict
-     :can_push can-push
-     :needs_pull needs-pull
-     :lock_blocks_push has-lock
-     :likely_stale false
-     :lock_age_seconds 0
-     :blockers blockers
-     :recommended_action recommended-action}))
+  ([ctx remote]
+   (sync-status-payload ctx remote {}))
+  ([ctx remote {:keys [stale-threshold-ms]}]
+   (let [remote-name (get remote "name")
+         remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")
+         remote-path (some-> (get remote "path") str/trim)
+         bundle-path (when (= remote-type "fs") (fs-remote-bundle-path remote))
+         lock-path (when bundle-path (str bundle-path ".lock"))
+         lock-file (when lock-path (io/file lock-path))
+         has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
+         has-lock (boolean (and lock-file (.exists lock-file)))
+         lock-age-ms (when has-lock
+                       (max 0 (- (System/currentTimeMillis) (.lastModified lock-file))))
+         lock-age-seconds (if lock-age-ms
+                            (quot lock-age-ms 1000)
+                            0)
+         stale-threshold-ms (long (or stale-threshold-ms 0))
+         likely-stale (boolean (and has-lock
+                                    (pos? stale-threshold-ms)
+                                    (>= lock-age-ms stale-threshold-ms)))
+         vault-path (vault-path/resolve-vault-path ctx nil)
+         has-local (boolean (.exists (io/file vault-path)))
+         recipient (some-> (get remote "recipient") str/trim not-empty)
+         identity (some-> (get remote "identity") str/trim not-empty)
+         sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
+         remote-rev (when has-remote (file-sha256-hex bundle-path))
+         last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
+         local-hash (when has-local (file-sha256-hex vault-path))
+         last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
+         remote-changed (boolean (and has-remote last-seen remote-rev (not= last-seen remote-rev)))
+         local-changed (boolean (and has-local last-local-hash local-hash (not= last-local-hash local-hash)))
+         has-conflict (boolean (and remote-changed local-changed))
+         blockers (cond-> []
+                    (not has-local) (conj "local_vault_missing")
+                    (and has-local (nil? recipient)) (conj "remote_recipient_missing")
+                    (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
+                    has-lock (conj "remote_lock_present"))
+         can-push (boolean (and has-local (not has-lock) (some? recipient)))
+         needs-pull (boolean (and has-remote (not has-local)))
+         in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev) (not local-changed)))
+         recommended-action
+         (cond
+           has-conflict "sync_pull_reconcile"
+           has-lock "wait_or_sync_unlock"
+           remote-changed "sync_pull"
+           local-changed "sync_push"
+           (and has-local (nil? recipient)) "configure_remote_recipient"
+           (and has-remote (not has-local) (nil? identity)) "configure_remote_identity"
+           (and has-remote (not has-local)) "sync_pull"
+           has-local "sync_push"
+           :else "vault_init")]
+     {:ok true
+      :action "sync_status"
+      :exit_code 0
+      :remote remote-name
+      :remote_type remote-type
+      :remote_path remote-path
+      :bundle_path bundle-path
+      :vault_path vault-path
+      :remote_rev remote-rev
+      :last_seen_rev last-seen
+      :local_hash local-hash
+      :last_local_hash last-local-hash
+      :has_remote has-remote
+      :has_lock has-lock
+      :has_local has-local
+      :in_sync in-sync
+      :remote_changed remote-changed
+      :local_changed local-changed
+      :has_conflict has-conflict
+      :can_push can-push
+      :needs_pull needs-pull
+      :lock_path lock-path
+      :lock_age (when has-lock (str lock-age-seconds "s"))
+      :lock_pid nil
+      :lock_host nil
+      :lock_user nil
+      :lock_created nil
+      :lock_error nil
+      :lock_blocks_push has-lock
+      :likely_stale likely-stale
+      :lock_age_seconds lock-age-seconds
+      :blockers blockers
+      :recommended_action recommended-action})))
 
 (defn- sync-status-strict-error
   [payload]
@@ -2811,7 +2830,7 @@
           (throw (ex-info "--stale-threshold must be >= 0"
                           {:reason reasons/reason-sync-failed})))
         (let [remote (select-sync-remote! ctx (:remote opts))
-              payload (sync-status-payload ctx remote)]
+              payload (sync-status-payload ctx remote opts)]
           (when-let [e (when (:strict? opts)
                          (sync-status-strict-error payload))]
             (throw e))
@@ -2856,7 +2875,7 @@
           (throw (ex-info "--stale-threshold must be >= 0"
                           {:reason reasons/reason-sync-failed})))
         (let [remote (select-sync-remote! ctx (:remote opts))
-              status (sync-status-payload ctx remote)
+              status (sync-status-payload ctx remote opts)
               payload {:ok true
                        :action "sync_conflicts"
                        :exit_code 0
@@ -2868,6 +2887,13 @@
                        :last_seen_rev (:last_seen_rev status)
                        :has_remote (:has_remote status)
                        :has_local (:has_local status)
+                       :lock_path (:lock_path status)
+                       :lock_age (:lock_age status)
+                       :lock_pid (:lock_pid status)
+                       :lock_host (:lock_host status)
+                       :lock_user (:lock_user status)
+                       :lock_created (:lock_created status)
+                       :lock_error (:lock_error status)
                        :local_hash (:local_hash status)
                        :last_local_hash (:last_local_hash status)
                        :has_lock (:has_lock status)
@@ -3288,9 +3314,9 @@
               reconcile-remote-snap (when reconcile-passphrase
                                       (load-remote-vault-snapshot remote reconcile-passphrase true))
               reconcile-analysis (when reconcile-passphrase
-                                 (analyze-sync-changes baseline-secret-hashes-in
-                                                       (:hashes reconcile-local-snap)
-                                                       (:hashes reconcile-remote-snap)))
+                                   (analyze-sync-changes baseline-secret-hashes-in
+                                                         (:hashes reconcile-local-snap)
+                                                         (:hashes reconcile-remote-snap)))
               _ (when (and reconcile-passphrase
                            (seq (:conflict-keys reconcile-analysis)))
                   (throw (ex-info "local and remote have overlapping key changes; manual reconciliation required"
