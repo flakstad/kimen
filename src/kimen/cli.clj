@@ -3098,7 +3098,7 @@
       (try
         (when (neg? (:stale-threshold-ms opts))
           (throw (ex-info "--stale-threshold must be >= 0"
-                          {:reason reasons/reason-sync-failed})))
+                          {:reason reasons/reason-invalid-stale-threshold})))
         (let [remote (select-sync-remote! ctx (:remote opts))
               payload (sync-status-payload ctx remote opts)]
           (when-let [e (when (:strict? opts)
@@ -3147,7 +3147,7 @@
       (try
         (when (neg? (:stale-threshold-ms opts))
           (throw (ex-info "--stale-threshold must be >= 0"
-                          {:reason reasons/reason-sync-failed})))
+                          {:reason reasons/reason-invalid-stale-threshold})))
         (let [remote (select-sync-remote! ctx (:remote opts))
               status (sync-status-payload ctx remote opts)
               conflict-reason (some-> (:reason status) str/trim not-empty)
@@ -3866,10 +3866,12 @@
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
 
       (neg? (:stale-threshold-ms opts))
-      (sync-error-result json? (ex-info "--stale-threshold must be >= 0" {:reason reasons/reason-sync-failed}))
+      (sync-error-result json? (ex-info "--stale-threshold must be >= 0"
+                                        {:reason reasons/reason-invalid-stale-threshold}))
 
       (and (:check? opts) (:dry-run? opts))
-      (sync-error-result json? (ex-info "--check and --dry-run cannot be used together" {:reason reasons/reason-sync-failed}))
+      (sync-error-result json? (ex-info "--check and --dry-run cannot be used together"
+                                        {:reason reasons/reason-conflicting-check-and-dry-run}))
 
       :else
       (try
@@ -4102,7 +4104,7 @@
       (try
         (when (neg? (:stale-threshold-ms opts))
           (throw (ex-info "--stale-threshold must be >= 0"
-                          {:reason reasons/reason-sync-failed})))
+                          {:reason reasons/reason-invalid-stale-threshold})))
         (let [selected-checks (resolve-sync-preflight-checks! (:only opts) (:skip opts))
               checks (mapv (fn [check-name]
                              (let [argv (build-sync-preflight-check-args check-name opts)]

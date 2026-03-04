@@ -432,7 +432,7 @@
               (run-cli ["sync" "status" "--remote" "origin" "--stale-threshold" "-1s" "--json"] {}
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"sync_failed\"")))))))
+          (is (str/includes? stderr "\"reason\":\"invalid_stale_threshold\"")))))))
 
 (deftest sync-push-pull-roundtrip
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -831,6 +831,19 @@
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))))))
+
+(deftest sync-auto-rejects-conflicting-check-and-dry-run
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "--check" "--dry-run" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_check_and_dry_run\"")))))
 
 (deftest sync-auto-noop-and-push-flow
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

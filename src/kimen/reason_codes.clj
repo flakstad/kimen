@@ -88,6 +88,8 @@
 (def reason-invalid-lock-wait "invalid_lock_wait")
 (def reason-invalid-break-stale-lock-after "invalid_break_stale_lock_after")
 (def reason-conflicting-dry-run-lock-flags "conflicting_dry_run_lock_flags")
+(def reason-invalid-stale-threshold "invalid_stale_threshold")
+(def reason-conflicting-check-and-dry-run "conflicting_check_and_dry_run")
 (def reason-overlapping-changes "overlapping_changes")
 (def reason-invalid-take "invalid_take")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
@@ -185,6 +187,8 @@
    reason-invalid-lock-wait
    reason-invalid-break-stale-lock-after
    reason-conflicting-dry-run-lock-flags
+   reason-invalid-stale-threshold
+   reason-conflicting-check-and-dry-run
    reason-overlapping-changes
    reason-invalid-take
    reason-no-overlapping-conflicts
