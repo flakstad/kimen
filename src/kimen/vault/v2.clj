@@ -9,7 +9,7 @@
    [java.nio.file.attribute PosixFilePermission]
    [java.security SecureRandom]
    [java.time Instant]
-   [java.util Base64]
+   [java.util Arrays Base64]
    [javax.crypto Cipher SecretKeyFactory]
    [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]))
 
@@ -99,6 +99,11 @@
     (System/arraycopy a 0 out 0 (alength a))
     (System/arraycopy b 0 out (alength a) (alength b))
     out))
+
+(defn- burn-bytes!
+  [^bytes b]
+  (when (some? b)
+    (Arrays/fill b (byte 0))))
 
 (defn- empty-vault-data
   []
@@ -213,23 +218,33 @@
               (< (alength salt) 8)
               (< (alength nonce) 8))
       (fail! reasons/reason-invalid-vault-file "invalid vault crypto metadata"))
-    (let [kek (derive-key passphrase salt iterations key-len)
-          data-key (if (some? wrapped-dek-b64)
-                     (do
-                       (when (str/blank? wrapped-dek-b64)
-                         (fail! reasons/reason-invalid-vault-file "invalid wrapped key metadata"))
-                       (unwrap-dek kek wrapped-dek-b64 kdf'))
-                     kek)
-          plaintext (decrypt-bytes data-key (b64-decode ciphertext-b64) nonce aad-vault true "invalid vault ciphertext")
-          decoded (json/read-str (String. plaintext "UTF-8"))
-          secrets (get decoded "secrets")]
-      (when-not (map? decoded)
-        (fail! reasons/reason-invalid-vault-file "invalid vault payload"))
-      {:meta {"kdf" (cond-> kdf'
-                       (some? wrapped-dek-b64) (assoc "wrapped_dek_b64" wrapped-dek-b64))
-              "enc" {"cipher" cipher-name}
-              "format_version" format-version}
-       :data {"secrets" (if (map? secrets) secrets {})}})))
+    (let [kek (derive-key passphrase salt iterations key-len)]
+      (try
+        (let [data-key (if (some? wrapped-dek-b64)
+                         (do
+                           (when (str/blank? wrapped-dek-b64)
+                             (fail! reasons/reason-invalid-vault-file "invalid wrapped key metadata"))
+                           (unwrap-dek kek wrapped-dek-b64 kdf'))
+                         kek)]
+          (try
+            (let [plaintext (decrypt-bytes data-key (b64-decode ciphertext-b64) nonce aad-vault true "invalid vault ciphertext")]
+              (try
+                (let [decoded (json/read-str (String. plaintext "UTF-8"))
+                      secrets (get decoded "secrets")]
+                  (when-not (map? decoded)
+                    (fail! reasons/reason-invalid-vault-file "invalid vault payload"))
+                  {:meta {"kdf" (cond-> kdf'
+                                  (some? wrapped-dek-b64) (assoc "wrapped_dek_b64" wrapped-dek-b64))
+                          "enc" {"cipher" cipher-name}
+                          "format_version" format-version}
+                   :data {"secrets" (if (map? secrets) secrets {})}})
+                (finally
+                  (burn-bytes! plaintext))))
+            (finally
+              (when (not (identical? data-key kek))
+                (burn-bytes! data-key)))))
+        (finally
+          (burn-bytes! kek))))))
 
 (defn- encode-vault
   [data passphrase kdf]
@@ -245,16 +260,21 @@
               "salt_b64" salt-b64}
         kek (derive-key passphrase salt iterations key-len)
         dek (random-bytes default-key-len-bytes)
-        wrapped-dek (wrap-dek kek dek kdf')
         nonce (random-bytes default-nonce-len)
-        plaintext (.getBytes (json/write-str {"secrets" (or (get data "secrets") {})}) "UTF-8")
-        ciphertext (encrypt-bytes dek plaintext nonce aad-vault)]
-    {"format_version" format-version
-     "kdf" (assoc kdf' "wrapped_dek_b64" (b64-encode wrapped-dek))
-     "enc" {"cipher" cipher-name
-             "nonce_b64" (b64-encode nonce)
-             "aad" aad-vault}
-     "ciphertext_b64" (b64-encode ciphertext)}))
+        plaintext (.getBytes (json/write-str {"secrets" (or (get data "secrets") {})}) "UTF-8")]
+    (try
+      (let [wrapped-dek (wrap-dek kek dek kdf')
+            ciphertext (encrypt-bytes dek plaintext nonce aad-vault)]
+        {"format_version" format-version
+         "kdf" (assoc kdf' "wrapped_dek_b64" (b64-encode wrapped-dek))
+         "enc" {"cipher" cipher-name
+                "nonce_b64" (b64-encode nonce)
+                "aad" aad-vault}
+         "ciphertext_b64" (b64-encode ciphertext)})
+      (finally
+        (burn-bytes! plaintext)
+        (burn-bytes! dek)
+        (burn-bytes! kek)))))
 
 (defn- load-vault-file
   [path]
