@@ -382,3 +382,21 @@
                  (nil? sync') (dissoc "sync"))]
       (save-config! config-path-override cfg')
       name)))
+
+(defn config-sync-entry
+  [config-path-override remote-name]
+  (let [[cfg _] (load-config config-path-override)
+        sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})]
+    (get sync-map remote-name)))
+
+(defn config-sync-mark-seen!
+  [config-path-override remote-name remote-rev]
+  (let [[cfg _] (load-config config-path-override)
+        sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
+        entry (if (map? (get sync-map remote-name)) (get sync-map remote-name) {})
+        entry' (assoc entry
+                      "last_seen_rev" remote-rev
+                      "updated_at" (str (java.time.Instant/now)))
+        cfg' (assoc cfg "sync" (assoc sync-map remote-name entry'))]
+    (save-config! config-path-override cfg')
+    entry'))

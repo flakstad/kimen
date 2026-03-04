@@ -112,6 +112,11 @@
     (expect-error-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--json"]) 32 "remote_exists")
     (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--update" "--path" (str (.getPath temp-dir) "/sync-remote-b") "--json"]) "sync_init")
     (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")
+    (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) "sync_push")
+    (.delete (io/file vault-path))
+    (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
+      (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
+    (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) "sync_pull")
 
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")

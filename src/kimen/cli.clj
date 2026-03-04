@@ -18,6 +18,8 @@
     [kimen.vault-path :as vault-path]
     [kimen.vault.v2 :as vault-v2])
   (:import
+    [java.security MessageDigest]
+    [java.nio.file Files StandardCopyOption]
     [java.util Base64]))
 
 (def usage
@@ -54,6 +56,8 @@
      "  kimen remote rm <name> [--json]"
      "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
      "  kimen sync status [--remote <name>] [--json]"
+     "  kimen sync push [--remote <name>] [--dry-run] [--json]"
+     "  kimen sync pull [--remote <name>] [--dry-run] [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -1063,6 +1067,34 @@
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
 
+(defn- parse-sync-transfer-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :dry-run? false
+               :remote nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--dry-run")
+          (recur (rest args) (assoc opts :dry-run? true))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
 (defn- parse-init-ci-pr-safety-opts
   [args]
   (loop [args args
@@ -1957,6 +1989,36 @@
         path
         (str path "/" bundle-path)))))
 
+(defn- hex-bytes
+  [^bytes b]
+  (apply str (map #(format "%02x" (bit-and % 0xff)) b)))
+
+(defn- file-sha256-hex
+  [path]
+  (let [bytes (Files/readAllBytes (.toPath (io/file path)))
+        digest (.digest (MessageDigest/getInstance "SHA-256") bytes)]
+    (hex-bytes digest)))
+
+(defn- ensure-fs-remote!
+  [remote]
+  (let [remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")]
+    (when-not (= remote-type "fs")
+      (throw (ex-info "only fs remotes are supported by this command for now"
+                      {:reason reasons/reason-unsupported-remote-type})))
+    remote))
+
+(defn- remote-lock-path
+  [remote]
+  (when-let [bundle-path (fs-remote-bundle-path remote)]
+    (str bundle-path ".lock")))
+
+(defn- copy-file!
+  [src dst]
+  (Files/copy (.toPath (io/file src))
+              (.toPath (io/file dst))
+              (into-array StandardCopyOption [StandardCopyOption/REPLACE_EXISTING]))
+  dst)
+
 (defn- select-sync-remote!
   [ctx remote-opt]
   (let [remotes (config/config-remote-list (:config-path ctx))
@@ -1991,13 +2053,18 @@
         has-local (boolean (.exists (io/file vault-path)))
         recipient (some-> (get remote "recipient") str/trim not-empty)
         identity (some-> (get remote "identity") str/trim not-empty)
+        remote-rev (when has-remote (file-sha256-hex bundle-path))
+        last-seen (some-> (config/config-sync-entry (:config-path ctx) remote-name)
+                          (get "last_seen_rev")
+                          str/trim
+                          not-empty)
         blockers (cond-> []
                    (and has-local (nil? recipient)) (conj "remote_recipient_missing")
                    (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
                    has-lock (conj "remote_lock_present"))
         can-push (boolean (and has-local (not has-lock) (some? recipient)))
         needs-pull (boolean (and has-remote (not has-local)))
-        in-sync false
+        in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev)))
         recommended-action
         (cond
           has-lock "wait_or_sync_unlock"
@@ -2014,6 +2081,8 @@
      :remote_path remote-path
      :bundle_path bundle-path
      :vault_path vault-path
+     :remote_rev remote-rev
+     :last_seen_rev last-seen
      :has_remote has-remote
      :has_lock has-lock
      :has_local has-local
@@ -2048,6 +2117,138 @@
                                        (str/join "," (:blockers payload))
                                        "-")
                                      (:recommended_action payload))})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
+(defn- handle-sync-push
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-transfer-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (-> (select-sync-remote! ctx (:remote opts))
+                         ensure-fs-remote!)
+              remote-name (get remote "name")
+              bundle-path (fs-remote-bundle-path remote)
+              lock-path (remote-lock-path remote)
+              recipient (some-> (get remote "recipient") str/trim not-empty)
+              vault-path (vault-path/resolve-vault-path ctx nil)
+              has-local (boolean (.exists (io/file vault-path)))
+              _ (when (str/blank? bundle-path)
+                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+              _ (when (.exists (io/file lock-path))
+                  (throw (ex-info "remote lock present" {:reason reasons/reason-remote-lock-present})))
+              _ (when-not has-local
+                  (throw (ex-info (format "local vault missing: %s" vault-path)
+                                  {:reason reasons/reason-local-vault-missing})))
+              _ (when (nil? recipient)
+                  (throw (ex-info "remote recipient is not configured (set --recipient on `remote add`)"
+                                  {:reason reasons/reason-remote-recipient-missing})))]
+          (if (:dry-run? opts)
+            (let [payload {:ok true
+                           :action "sync_push"
+                           :exit_code 0
+                           :remote remote-name
+                           :remote_type "fs"
+                           :remote_path (get remote "path")
+                           :bundle_path bundle-path
+                           :vault_path vault-path
+                           :dry_run true
+                           :has_local has-local
+                           :can_push true}]
+              (if json?
+                (success-json payload)
+                (result {:exit-code 0
+                         :stdout (format "dry-run: would push %s -> %s\n" vault-path bundle-path)})))
+            (do
+              (bundle/seal-vault-file vault-path bundle-path [recipient])
+              (let [remote-rev (file-sha256-hex bundle-path)
+                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev)
+                    payload {:ok true
+                             :action "sync_push"
+                             :exit_code 0
+                             :remote remote-name
+                             :remote_type "fs"
+                             :remote_path (get remote "path")
+                             :bundle_path bundle-path
+                             :vault_path vault-path
+                             :remote_rev remote-rev
+                             :last_seen_rev remote-rev
+                             :has_local true
+                             :can_push true}]
+                (if json?
+                  (success-json payload)
+                  (result {:exit-code 0
+                           :stdout (format "ok (pushed %s)\n" remote-name)}))))))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
+(defn- handle-sync-pull
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-transfer-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (-> (select-sync-remote! ctx (:remote opts))
+                         ensure-fs-remote!)
+              remote-name (get remote "name")
+              bundle-path (fs-remote-bundle-path remote)
+              identity-path (some-> (get remote "identity") str/trim not-empty)
+              vault-path (vault-path/resolve-vault-path ctx nil)
+              local-exists? (.exists (io/file vault-path))
+              _ (when (str/blank? bundle-path)
+                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+              _ (when-not (.exists (io/file bundle-path))
+                  (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                                  {:reason reasons/reason-remote-bundle-missing})))
+              _ (when (nil? identity-path)
+                  (throw (ex-info "remote identity is not configured (set --identity on `remote add`)"
+                                  {:reason reasons/reason-remote-identity-missing})))
+              identity (bundle/load-identity {:identity-file identity-path
+                                              :from-stdin? false
+                                              :stdin nil})]
+          (if (:dry-run? opts)
+            (let [payload {:ok true
+                           :action "sync_pull"
+                           :exit_code 0
+                           :remote remote-name
+                           :remote_type "fs"
+                           :remote_path (get remote "path")
+                           :bundle_path bundle-path
+                           :vault_path vault-path
+                           :dry_run true
+                           :has_remote true
+                           :has_local local-exists?}]
+              (if json?
+                (success-json payload)
+                (result {:exit-code 0
+                         :stdout (format "dry-run: would pull %s -> %s\n" bundle-path vault-path)})))
+            (let [backup-path (when local-exists?
+                                (let [p (str vault-path ".bak." (System/currentTimeMillis))]
+                                  (copy-file! vault-path p)
+                                  p))
+                  _ (bundle/open-to-vault-file bundle-path vault-path identity true)
+                  remote-rev (file-sha256-hex bundle-path)
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev)
+                  payload {:ok true
+                           :action "sync_pull"
+                           :exit_code 0
+                           :remote remote-name
+                           :remote_type "fs"
+                           :remote_path (get remote "path")
+                           :bundle_path bundle-path
+                           :vault_path vault-path
+                           :remote_rev remote-rev
+                           :last_seen_rev remote-rev
+                           :has_remote true
+                           :has_local true
+                           :backup_path backup-path}]
+              (if json?
+                (success-json payload)
+                (result {:exit-code 0
+                         :stdout (format "ok (pulled %s)\n" remote-name)})))))
         (catch Exception e
           (sync-error-result json? e))))))
 
@@ -2175,6 +2376,8 @@
     (cond
       (= "init" (first args)) (handle-sync-init ctx (rest args))
       (= "status" (first args)) (handle-sync-status ctx (rest args))
+      (= "push" (first args)) (handle-sync-push ctx (rest args))
+      (= "pull" (first args)) (handle-sync-pull ctx (rest args))
       :else (error-text 1 "unknown sync command"))))
 
 (defn- handle-vault-path

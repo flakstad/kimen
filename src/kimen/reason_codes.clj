@@ -75,6 +75,11 @@
 (def reason-remote-failed "remote_failed")
 (def reason-no-remotes-configured "no_remotes_configured")
 (def reason-multiple-remotes-configured "multiple_remotes_configured")
+(def reason-local-vault-missing "local_vault_missing")
+(def reason-remote-bundle-missing "remote_bundle_missing")
+(def reason-remote-recipient-missing "remote_recipient_missing")
+(def reason-remote-identity-missing "remote_identity_missing")
+(def reason-remote-lock-present "remote_lock_present")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -153,6 +158,11 @@
    reason-remote-failed
    reason-no-remotes-configured
    reason-multiple-remotes-configured
+   reason-local-vault-missing
+   reason-remote-bundle-missing
+   reason-remote-recipient-missing
+   reason-remote-identity-missing
+   reason-remote-lock-present
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type
