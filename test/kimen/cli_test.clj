@@ -2952,6 +2952,73 @@
         (is (str/includes? body "API_KEY=shh"))
         (is (str/includes? body (str "API_KEY_PATH=" out-dir "/conf/api.txt")))))))
 
+(deftest render-systemd-service-mode-and-target-validation
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        runtime-base (str (.getPath dir) "/run")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "systemd-secret" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["render"
+                    "--systemd-service" "linje-api"
+                    "--runtime-dir" runtime-base
+                    "--print-systemd-hints"
+                    "--file" "cfg.txt=api_key"
+                    "--vault" vault-path
+                    "--passphrase-cmd" pass-cmd
+                    "--json"]
+                   {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)
+          out-dir (str (io/file runtime-base "kimen" "linje-api"))
+          hints (get payload "hints")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "render" (get payload "action")))
+      (is (= out-dir (get payload "out_dir")))
+      (is (= 2 (count hints)))
+      (is (string? (first hints)))
+      (is (string? (second hints)))
+      (is (str/includes? (or (first hints) "") "KIMEN_FILES_DIR="))
+      (is (str/includes? (or (second hints) "") out-dir))
+      (is (= "systemd-secret" (slurp (str (io/file out-dir "cfg.txt"))))))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--file" "cfg.txt=api_key" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_render_target\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--dir" (str (.getPath dir) "/out")
+                    "--systemd-service" "linje-api"
+                    "--file" "cfg.txt=api_key"
+                    "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_render_target_inputs\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--dir" (str (.getPath dir) "/out-no-systemd")
+                    "--print-systemd-hints"
+                    "--file" "cfg.txt=api_key"
+                    "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"systemd_hints_requires_service\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--systemd-service" "bad/service" "--file" "cfg.txt=api_key" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-projection-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_systemd_service\"")))))
+
 (deftest envfile-encodes-shell-unsafe-values
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
@@ -3155,6 +3222,20 @@
                    {:config-path cfg-path})]
       (is (= exit-code/code-envfile-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"stdin_not_supported\"")))))
+
+(deftest conflicting-stdin-inputs-are-typed
+  (let [map-src "stdin const:from-map\n"
+        {:keys [exit-code stderr]} (run-cli ["run"
+                                             "--map" "dev.kmap"
+                                             "--stdin" "const:from-flag"
+                                             "--json"
+                                             "--dry-run"
+                                             "--"
+                                             "echo"
+                                             "ok"]
+                                            {"dev.kmap" map-src})]
+    (is (= exit-code/code-projection-failed exit-code))
+    (is (str/includes? stderr "\"reason\":\"conflicting_stdin_inputs\""))))
 
 (deftest doctor-json-ok-and-missing-vault
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

@@ -70,12 +70,12 @@
     "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json]"
     "  kimen sync restore --backup <path> [--no-backup] [--json]"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
     "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
     "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
@@ -90,11 +90,12 @@
     ""
     "usage:"
     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
     ""]))
 
 (def remote-name-re #"^[A-Za-z0-9_.-]+$")
+(def systemd-service-name-re #"^[A-Za-z0-9_.@-]+$")
 (def env-remote-name "KIMEN_REMOTE")
 
 (defn- getenv
@@ -644,6 +645,9 @@
                :profile nil
                :file-mappings []
                :out-dir nil
+               :systemd-service nil
+               :runtime-dir "/run"
+               :print-systemd-hints? false
                :vault-path nil
                :passphrase-cmd nil
                :passphrase-stdin? false}]
@@ -680,6 +684,21 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :out-dir v))))
+
+          (or (= a "--systemd-service") (str/starts-with? a "--systemd-service="))
+          (let [[v next-args err] (parse-flag-value args "--systemd-service")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :systemd-service v))))
+
+          (or (= a "--runtime-dir") (str/starts-with? a "--runtime-dir="))
+          (let [[v next-args err] (parse-flag-value args "--runtime-dir")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :runtime-dir v))))
+
+          (= a "--print-systemd-hints")
+          (recur (rest args) (assoc opts :print-systemd-hints? true))
 
           (or (= a "--vault") (str/starts-with? a "--vault="))
           (let [[v next-args err] (parse-flag-value args "--vault")]
@@ -5448,7 +5467,7 @@
         flag-stdin (some-> (get-in from-flags [:request :stdin]) str/trim not-empty)]
     (when (and map-stdin flag-stdin)
       (throw (ex-info "stdin projection specified multiple times (map/profile and flags)"
-                      {:reason reasons/reason-invalid-mapping})))
+                      {:reason reasons/reason-conflicting-stdin-inputs})))
     {:request {:envs (vec (concat (get-in from-map [:request :envs])
                                   (get-in from-flags [:request :envs])))
                :files (vec (concat (get-in from-map [:request :files])
@@ -5510,6 +5529,46 @@
   []
   (str (java.nio.file.Files/createTempDirectory "kimen-files-" (make-array java.nio.file.attribute.FileAttribute 0))))
 
+(defn- build-systemd-render-hints
+  [out-dir]
+  [(str "Environment=KIMEN_FILES_DIR=" out-dir)
+   (format "# files rendered under %s (dir 0700, files 0600)" out-dir)])
+
+(defn- resolve-render-target!
+  [opts]
+  (let [service (some-> (:systemd-service opts) str/trim not-empty)
+        out-dir (some-> (:out-dir opts) str/trim not-empty)
+        print-hints? (:print-systemd-hints? opts)]
+    (cond
+      (and service out-dir)
+      (throw (ex-info "use only one of --dir or --systemd-service"
+                      {:reason reasons/reason-conflicting-render-target-inputs}))
+
+      (and (nil? service) (nil? out-dir))
+      (throw (ex-info "--dir is required (or use --systemd-service)"
+                      {:reason reasons/reason-missing-render-target}))
+
+      (and (nil? service) print-hints?)
+      (throw (ex-info "--print-systemd-hints requires --systemd-service"
+                      {:reason reasons/reason-systemd-hints-requires-service}))
+
+      (and service (nil? (re-matches systemd-service-name-re service)))
+      (throw (ex-info (format "invalid --systemd-service %s" (pr-str service))
+                      {:reason reasons/reason-invalid-systemd-service}))
+
+      :else
+      (let [runtime-dir (or (some-> (:runtime-dir opts) str/trim not-empty) "/run")
+            effective-out-dir (if service
+                                (str (io/file runtime-dir "kimen" service))
+                                out-dir)
+            hints (when (and service print-hints?)
+                    (build-systemd-render-hints effective-out-dir))]
+        (assoc opts
+               :out-dir effective-out-dir
+               :systemd-service service
+               :runtime-dir runtime-dir
+               :hints hints)))))
+
 (defn- handle-run
   [ctx args]
   (let [[opts parse-error] (parse-run-opts args)
@@ -5568,30 +5627,33 @@
       parse-error
       (projection-error-result json? (ex-info parse-error {:reason reasons/reason-projection-failed}))
 
-      (str/blank? (:out-dir opts))
-      (projection-error-result json? (ex-info "missing render target" {:reason reasons/reason-missing-render-target}))
-
       :else
       (try
-        (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-projection-failed)
+        (let [opts (resolve-render-target! opts)
+              out-dir (:out-dir opts)
+              hints (:hints opts)
+              {:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-projection-failed)
               _ (when (some-> (:stdin request) str/trim not-empty)
                   (throw (ex-info "stdin projection is only supported for `kimen run`"
                                   {:reason reasons/reason-stdin-not-supported})))
-              _ (validate-envpaths! request env-paths (:out-dir opts) false)
+              _ (validate-envpaths! request env-paths out-dir false)
               _ (when (empty? (:files request))
                   (throw (ex-info "no files to render" {:reason reasons/reason-no-files-to-render})))
               vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
               pp (resolve-passphrase! ctx opts)
               lookup (make-secret-lookup vault-path pp)
-              n (projection/render-files! {:lookup-secret lookup} (:out-dir opts) (:files request))]
+              n (projection/render-files! {:lookup-secret lookup} out-dir (:files request))]
           (if json?
-            (success-json {:ok true
-                           :action "render"
-                           :exit_code 0
-                           :out_dir (:out-dir opts)
-                           :file_count n})
-            (result {:exit-code 0
-                     :stdout "ok\n"})))
+            (success-json (cond-> {:ok true
+                                   :action "render"
+                                   :exit_code 0
+                                   :out_dir out-dir
+                                   :file_count n}
+                            (seq hints) (assoc :hints hints)))
+            (if (seq hints)
+              (result {:exit-code 0
+                       :stdout (str (str/join "\n" hints) "\n")})
+              (result {:exit-code 0}))))
         (catch Exception e
           (projection-error-result json? e))))))
 

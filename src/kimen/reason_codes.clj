@@ -17,6 +17,10 @@
 (def reason-conflicting-map-profile-inputs "conflicting_map_profile_inputs")
 (def reason-conflicting-against-inputs "conflicting_against_inputs")
 (def reason-invalid-profile-name "invalid_profile_name")
+(def reason-conflicting-stdin-inputs "conflicting_stdin_inputs")
+(def reason-conflicting-render-target-inputs "conflicting_render_target_inputs")
+(def reason-systemd-hints-requires-service "systemd_hints_requires_service")
+(def reason-invalid-systemd-service "invalid_systemd_service")
 (def reason-envpath-requires-projected-files "envpath_requires_projected_files")
 (def reason-envpath-missing-projected-file "envpath_missing_projected_file")
 (def reason-invalid-relative-path "invalid_relative_path")
@@ -134,6 +138,10 @@
    reason-conflicting-map-profile-inputs
    reason-conflicting-against-inputs
    reason-invalid-profile-name
+   reason-conflicting-stdin-inputs
+   reason-conflicting-render-target-inputs
+   reason-systemd-hints-requires-service
+   reason-invalid-systemd-service
    reason-envpath-requires-projected-files
    reason-envpath-missing-projected-file
    reason-invalid-relative-path

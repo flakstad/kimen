@@ -105,6 +105,7 @@
         opened-vault (str (.getPath temp-dir) "/opened.vault.db")
         map-path (str (.getPath temp-dir) "/app.kmap")
         render-dir (str (.getPath temp-dir) "/render")
+        systemd-runtime-dir (str (.getPath temp-dir) "/run")
         envfile-path (str (.getPath temp-dir) "/app.env")
         workflow-pr (str (.getPath temp-dir) "/kimen-pr-safety.yml")
         workflow-deploy (str (.getPath temp-dir) "/kimen-deploy.yml")
@@ -131,6 +132,20 @@
     (expect-success-json! (run-kimen repo-root base-env ["plan" "--map" map-path "--json" "--" "echo" "ok"]) "plan")
     (expect-success-json! (run-kimen repo-root base-env ["run" "--map" map-path "--json" "--dry-run" "--" "echo" "ok"]) "plan")
     (expect-success-json! (run-kimen repo-root base-env ["render" "--map" map-path "--dir" render-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "render")
+    (let [systemd-render (expect-success-json! (run-kimen repo-root base-env ["render"
+                                                                               "--systemd-service" "integration-api"
+                                                                               "--runtime-dir" systemd-runtime-dir
+                                                                               "--print-systemd-hints"
+                                                                               "--file" "cfg.txt=api_key"
+                                                                               "--vault" vault-path
+                                                                               "--passphrase-cmd" pass-cmd
+                                                                               "--json"])
+                                               "render")
+          systemd-out (str (io/file systemd-runtime-dir "kimen" "integration-api"))
+          hints (get systemd-render "hints")]
+      (ensure! (= systemd-out (get systemd-render "out_dir")) "unexpected systemd render out_dir" {:payload systemd-render})
+      (ensure! (seq hints) "expected systemd hints in render payload" {:payload systemd-render})
+      (ensure! (= "shh" (slurp (str (io/file systemd-out "cfg.txt")))) "unexpected systemd rendered file value" {:out-dir systemd-out}))
     (expect-success-json! (run-kimen repo-root base-env ["envfile" "--map" map-path "--out" envfile-path "--files-dir" render-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "envfile")
     (expect-success-json! (run-kimen repo-root base-env ["project" "plan" "--map" map-path "--json" "--" "echo" "ok"]) "plan")
     (expect-success-json! (run-kimen repo-root base-env ["project" "run" "--map" map-path "--json" "--dry-run" "--" "echo" "ok"]) "plan")
