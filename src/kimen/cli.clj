@@ -3619,13 +3619,13 @@
                                              " (threshold=" (:stale-threshold-ms opts) "ms)"))
 
                                   (:has_lock payload)
-                                  (cond-> (conj (format "push-lock: present (%s)" (:lock_path payload)))
-                                    (:lock_age payload) (conj (str "push-lock-age: " (:lock_age payload)))
-                                    (:lock_pid payload) (conj (str "push-lock-pid: " (:lock_pid payload)))
-                                    (:lock_host payload) (conj (str "push-lock-host: " (:lock_host payload)))
-                                    (:lock_user payload) (conj (str "push-lock-user: " (:lock_user payload)))
-                                    (:lock_created payload) (conj (str "push-lock-created: " (:lock_created payload)))
-                                    (:lock_error payload) (conj (str "push-lock-error: " (:lock_error payload))))
+                                  (into (cond-> [(format "push-lock: present (%s)" (:lock_path payload))]
+                                          (:lock_age payload) (conj (str "push-lock-age: " (:lock_age payload)))
+                                          (:lock_pid payload) (conj (str "push-lock-pid: " (:lock_pid payload)))
+                                          (:lock_host payload) (conj (str "push-lock-host: " (:lock_host payload)))
+                                          (:lock_user payload) (conj (str "push-lock-user: " (:lock_user payload)))
+                                          (:lock_created payload) (conj (str "push-lock-created: " (:lock_created payload)))
+                                          (:lock_error payload) (conj (str "push-lock-error: " (:lock_error payload)))))
 
                                   (not (:has_lock payload))
                                   (conj "push-lock: (none)")
