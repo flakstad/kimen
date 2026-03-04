@@ -75,6 +75,13 @@
                        :res res})))
     res))
 
+(defn- find-check
+  [payload name]
+  (some (fn [check]
+          (when (= name (get check "name"))
+            check))
+        (get payload "checks")))
+
 (deftest version-json-shape
   (let [{:keys [exit-code stdout stderr]} (run-cli ["version" "--json"] {})]
     (is (= 0 exit-code))
@@ -3611,6 +3618,93 @@
       (is (= exit-code/code-doctor-failed exit-code))
       (is (str/includes? stdout "\"name\":\"remote_origin_git_remote\""))
       (is (str/includes? stdout "\"status\":\"error\"")))))
+
+(deftest doctor-remote-sync-state-warning-when-no-baseline
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        remote-bundle (str (io/file remote-dir "vault.age"))
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["bundle" "seal" "--vault" vault-path "--out" remote-bundle "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["remote" "add" "origin" "--type" "fs" "--path" remote-dir "--recipient" recipient "--identity" id-path "--json"] {}
+               {:config-path cfg-path}))
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)
+          check (find-check payload "remote_origin_sync_state")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "warning" (get check "status"))))))
+
+(deftest doctor-remote-sync-state-ok-when-baseline-matches
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["remote" "add" "origin" "--type" "fs" "--path" remote-dir "--recipient" recipient "--identity" id-path "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["sync" "push" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path}))
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)
+          check (find-check payload "remote_origin_sync_state")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "ok" (get check "status"))))))
+
+(deftest doctor-remote-stale-sync-state-warning
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (.mkdirs (io/file remote-dir))
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (spit cfg-path
+          (str (json/write-str {"vault" {"path" vault-path}
+                                "remotes" [{"name" "origin" "type" "fs" "path" remote-dir}]
+                                "sync" {"ghost" {"last_seen_rev" "abc123"}}})
+               "\n"))
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)
+          check (find-check payload "remote_sync_state_ghost")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "warning" (get check "status"))))))
+
+(deftest doctor-remote-git-branch-warning
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          cfg-path (str (.getPath dir) "/config.json")
+          vault-path (str (.getPath dir) "/vault.db")
+          repo-path (str (.getPath dir) "/team.git")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-git! nil "init" "--bare" repo-path)
+      (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+            recipient (get (json/read-str stdout) "recipient")]
+        (run-cli ["remote" "add" "origin" "--type" "git" "--path" repo-path "--branch" "main" "--recipient" recipient "--identity" id-path "--json"] {}
+                 {:config-path cfg-path}))
+      (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--json"] {} {:config-path cfg-path})
+            payload (json/read-str stdout)
+            check (find-check payload "remote_origin_git_branch")]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "warning" (get check "status")))))))
 
 (deftest init-template-render-defaults-match-checked-in-workflows
   (let [pr-workflow (slurp ".github/workflows/kimen-pr-safety-template.yml")

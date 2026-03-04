@@ -1,13 +1,17 @@
 (ns kimen.commands.doctor
   (:require
     [clojure.java.io :as io]
+    [clojure.java.shell :as sh]
     [clojure.string :as str]
     [kimen.bundle :as bundle]
     [kimen.commands.map-lint :as map-lint]
     [kimen.config :as config]
     [kimen.mapfile :as mapfile]
     [kimen.vault-path :as vault-path]
-    [kimen.vault.v2 :as vault-v2]))
+    [kimen.vault.v2 :as vault-v2])
+  (:import
+    [java.nio.file Files]
+    [java.security MessageDigest]))
 
 (def doctor-status-ok "ok")
 (def doctor-status-warning "warning")
@@ -149,11 +153,81 @@
               state)]
         state))))
 
-(defn- maybe-url?
+(defn- trim-not-blank
   [s]
-  (boolean (and (string? s)
-                (or (str/includes? s "://")
-                    (re-find #"^[^/]+@[^:]+:.+$" s)))))
+  (some-> s str str/trim not-empty))
+
+(defn- hex-bytes
+  [^bytes b]
+  (apply str (map #(format "%02x" (bit-and % 0xff)) b)))
+
+(defn- file-sha256-hex
+  [path]
+  (let [bytes (Files/readAllBytes (.toPath (io/file path)))
+        digest (.digest (MessageDigest/getInstance "SHA-256") bytes)]
+    (hex-bytes digest)))
+
+(defn- file-revision
+  [path]
+  (let [f (io/file path)]
+    (if (.exists f)
+      [(file-sha256-hex path) true]
+      [nil false])))
+
+(defn- fs-remote-bundle-path
+  [remote]
+  (let [path (trim-not-blank (get remote "path"))
+        bundle-path (or (trim-not-blank (get remote "bundle_path")) "vault.age")
+        path (some-> path (str/replace #"/+$" ""))]
+    (when-not (str/blank? path)
+      (if (str/ends-with? path ".age")
+        path
+        (str path "/" bundle-path)))))
+
+(defn- sync-conflict-message
+  [last-seen remote-rev has-remote]
+  (let [last-seen (trim-not-blank last-seen)
+        remote-rev (trim-not-blank remote-rev)]
+    (cond
+      (and (not has-remote) (nil? last-seen))
+      nil
+
+      (and (not has-remote) (some? last-seen))
+      (format "remote bundle disappeared since last sync (expected rev %s)" last-seen)
+
+      (and has-remote (nil? last-seen))
+      (format "remote has data (rev %s) but local baseline is empty; run `kimen sync pull`"
+              (or remote-rev "unknown"))
+
+      (and has-remote (not= last-seen remote-rev))
+      (format "remote changed (expected rev %s, found %s); run `kimen sync pull`, re-apply changes, then push"
+              last-seen
+              (or remote-rev "unknown"))
+
+      :else
+      nil)))
+
+(defn- remote-sync-state-check
+  [state cfg remote name transport-ok?]
+  (if-not transport-ok?
+    state
+    (let [type (or (trim-not-blank (get remote "type")) "fs")
+          sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
+          sync-entry (if (map? sync-map) (get sync-map name) nil)
+          last-seen (some-> sync-entry (get "last_seen_rev") trim-not-blank)]
+      (if-not (= "fs" type)
+        state
+        (let [bundle-path (fs-remote-bundle-path remote)
+              [remote-rev has-remote] (if (str/blank? bundle-path)
+                                        [nil false]
+                                        (file-revision bundle-path))
+              check-name (str "remote_" name "_sync_state")
+              conflict-msg (sync-conflict-message last-seen remote-rev has-remote)]
+          (if (some? conflict-msg)
+            (add-check state check-name doctor-status-warning conflict-msg)
+            (if has-remote
+              (add-check state check-name doctor-status-ok "baseline matches remote revision")
+              (add-check state check-name doctor-status-ok "no baseline and remote has no bundle yet"))))))))
 
 (defn- remote-checks
   [state cfg cfg-valid?]
@@ -164,63 +238,85 @@
                     [])]
       (if (empty? remotes)
         (add-check state "remote_config" doctor-status-ok "no remotes configured; skipping remote checks")
-        (reduce
-          (fn [state remote]
-            (let [name (or (some-> (get remote "name") str/trim not-empty) "unnamed")
-                  type (some-> (get remote "type") str/lower-case str/trim)
-                  path (some-> (get remote "path") str/trim)
-                  branch (some-> (get remote "branch") str/trim)
-                  recipient (some-> (get remote "recipient") str/trim)
-                  identity (some-> (get remote "identity") str/trim)
-                  state
-                  (case type
-                    "fs"
-                    (cond
-                      (str/blank? path)
-                      (add-check state (str "remote_" name "_fs_dir") doctor-status-error "fs remote path is empty")
-
-                      (.exists (io/file path))
-                      (add-check state (str "remote_" name "_fs_dir") doctor-status-ok path)
-
-                      :else
-                      (add-check state (str "remote_" name "_fs_dir") doctor-status-warning (format "fs remote path does not exist yet: %s" path)))
-
-                    "git"
-                    (let [state
+        (let [{:keys [state remote-names]}
+              (reduce
+                (fn [{:keys [state remote-names]} remote]
+                  (let [name (or (trim-not-blank (get remote "name")) "unnamed")
+                        type (some-> (or (get remote "type") "fs") str/lower-case str/trim)
+                        path (trim-not-blank (get remote "path"))
+                        branch (trim-not-blank (get remote "branch"))
+                        recipient (trim-not-blank (get remote "recipient"))
+                        identity (trim-not-blank (get remote "identity"))
+                        [state transport-ok?]
+                        (case type
+                          "fs"
                           (cond
                             (str/blank? path)
-                            (add-check state (str "remote_" name "_git_remote") doctor-status-error "git remote path is empty")
-
-                            (maybe-url? path)
-                            (add-check state (str "remote_" name "_git_remote") doctor-status-ok path)
+                            [(add-check state (str "remote_" name "_fs_dir") doctor-status-error "fs remote path is empty")
+                             false]
 
                             (.exists (io/file path))
-                            (add-check state (str "remote_" name "_git_remote") doctor-status-ok path)
+                            [(add-check state (str "remote_" name "_fs_dir") doctor-status-ok path)
+                             true]
 
                             :else
-                            (add-check state (str "remote_" name "_git_remote") doctor-status-error (format "git remote not found: %s" path)))]
-                      (if (str/blank? branch)
-                        (add-check state (str "remote_" name "_git_branch") doctor-status-warning "git remote branch not set (defaulting to main)")
-                        (add-check state (str "remote_" name "_git_branch") doctor-status-ok branch)))
+                            [(add-check state (str "remote_" name "_fs_dir") doctor-status-warning (format "fs remote path does not exist yet: %s" path))
+                             true])
 
-                    (add-check state (str "remote_" name "_type") doctor-status-error (format "unknown remote type %s" (pr-str (or type "")))))
+                          "git"
+                          (if (str/blank? path)
+                            [(add-check state (str "remote_" name "_git_remote") doctor-status-error "git remote path is empty")
+                             false]
+                            (let [branch (or branch "main")
+                                  res (sh/sh "git" "ls-remote" "--heads" path branch :out :string :err :string)
+                                  msg (or (not-empty (str/trim (str (:err res))))
+                                          (not-empty (str/trim (str (:out res))))
+                                          "git ls-remote failed")]
+                              (if (zero? (:exit res))
+                                (let [state (add-check state (str "remote_" name "_git_remote") doctor-status-ok path)
+                                      state (if (str/blank? (str/trim (str (:out res))))
+                                              (add-check state (str "remote_" name "_git_branch") doctor-status-warning
+                                                         (format "branch %s not found on remote (may be created on first push)"
+                                                                 (pr-str branch)))
+                                              (add-check state (str "remote_" name "_git_branch") doctor-status-ok
+                                                         (format "branch %s found on remote" (pr-str branch))))]
+                                  [state true])
+                                [(add-check state (str "remote_" name "_git_remote") doctor-status-error msg)
+                                 false])))
+
+                          [(add-check state (str "remote_" name "_type") doctor-status-error (format "unknown remote type %s" (pr-str (or type ""))))
+                           false])
+                        state (if (str/blank? recipient)
+                                (add-check state (str "remote_" name "_recipient") doctor-status-warning "remote recipient is not configured")
+                                (add-check state (str "remote_" name "_recipient") doctor-status-ok recipient))
+                        state (cond
+                                (str/blank? identity)
+                                (add-check state (str "remote_" name "_identity") doctor-status-warning "remote identity is not configured")
+
+                                (.exists (io/file identity))
+                                (add-check state (str "remote_" name "_identity") doctor-status-ok identity)
+
+                                :else
+                                (add-check state (str "remote_" name "_identity") doctor-status-warning (format "remote identity file not found: %s" identity)))
+                        state (remote-sync-state-check state cfg remote name transport-ok?)]
+                    {:state state
+                     :remote-names (conj remote-names name)}))
+                {:state state
+                 :remote-names #{}}
+                remotes)
+              sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
+              stale-sync-names (->> (keys sync-map)
+                                    (map trim-not-blank)
+                                    (remove nil?)
+                                    (remove remote-names)
+                                    sort)]
+          (reduce (fn [state stale-name]
+                    (add-check state
+                               (str "remote_sync_state_" stale-name)
+                               doctor-status-warning
+                               "sync baseline exists for unknown remote; remove stale state with `kimen remote rm` or edit config"))
                   state
-                  (if (str/blank? recipient)
-                    (add-check state (str "remote_" name "_recipient") doctor-status-warning "remote recipient is not configured")
-                    (add-check state (str "remote_" name "_recipient") doctor-status-ok recipient))
-                  state
-                  (cond
-                    (str/blank? identity)
-                    (add-check state (str "remote_" name "_identity") doctor-status-warning "remote identity is not configured")
-
-                    (.exists (io/file identity))
-                    (add-check state (str "remote_" name "_identity") doctor-status-ok identity)
-
-                    :else
-                    (add-check state (str "remote_" name "_identity") doctor-status-warning (format "remote identity file not found: %s" identity)))]
-              state))
-          state
-          remotes)))))
+                  stale-sync-names))))))
 
 (defn run-doctor-checks
   [{:keys [ctx map-path profile bundle-in identity allow-missing-vault?]}]
