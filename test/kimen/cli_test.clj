@@ -527,6 +527,42 @@
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"value_b64\":\"c2ho\"")))))
 
+(deftest sync-pull-dry-run-and-reconcile-actions
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--json"] {}
+             {:config-path cfg-path})
+    (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (.delete (io/file vault-path))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "pull" "--remote" "origin" "--dry-run" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_pull_dry_run" (get payload "action")))
+      (is (= true (get payload "dry_run"))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "pull" "--remote" "origin" "--reconcile" "--passphrase-cmd" pass-cmd "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_pull_reconcile" (get payload "action")))
+      (is (= true (get payload "reconcile")))
+      (is (= 0 (get payload "merged_key_count"))))))
+
 (deftest sync-push-pull-typed-errors
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")

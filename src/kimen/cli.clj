@@ -3661,7 +3661,7 @@
                                    :recommended_action "manual_reconcile"})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
-                           :action "sync_pull"
+                           :action "sync_pull_dry_run"
                            :exit_code 0
                            :remote remote-name
                            :remote_type "fs"
@@ -3687,6 +3687,10 @@
                   _ (if reconcile-passphrase
                       (apply-sync-reconcile-merge! vault-path reconcile-passphrase reconcile-local-snap reconcile-remote-snap reconcile-analysis)
                       (bundle/open-to-vault-file bundle-path vault-path identity true))
+                  merged-key-count (if reconcile-passphrase
+                                     (+ (count (:local-only-changed-keys reconcile-analysis))
+                                        (count (:remote-only-changed-keys reconcile-analysis)))
+                                     0)
                   local-hash (file-sha256-hex vault-path)
                   sync-passphrase (or reconcile-passphrase
                                       (maybe-sync-passphrase ctx opts))
@@ -3696,7 +3700,7 @@
                                              (:hashes (load-vault-snapshot vault-path sync-passphrase false))))
                   _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
                   payload {:ok true
-                           :action "sync_pull"
+                           :action (if reconcile? "sync_pull_reconcile" "sync_pull")
                            :exit_code 0
                            :remote remote-name
                            :remote_type "fs"
@@ -3707,6 +3711,8 @@
                            :last_seen_rev remote-rev
                            :local_hash local-hash
                            :has_baseline_hashes (boolean baseline-secret-hashes)
+                           :reconcile reconcile?
+                           :merged_key_count merged-key-count
                            :reconciled (boolean reconcile-passphrase)
                            :remote_changed remote-changed
                            :local_changed local-changed

@@ -174,7 +174,7 @@
           (ensure! (= "manual_reconcile" (get sync-auto-blocked "recommended_action")) "expected manual_reconcile recommendation for blocked sync auto" {:sync-auto-blocked sync-auto-blocked}))
         (let [changes (expect-success-json! (run-kimen repo-root base-env ["sync" "changes" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_changes")
               resolve (expect-success-json! (run-kimen repo-root base-env ["sync" "resolve" "--remote" "team" "--take" "remote" "--key" "api_key" "--passphrase-cmd" pass-cmd "--json"]) "sync_resolve")
-              pull (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--reconcile" "--passphrase-cmd" pass-cmd "--json"]) "sync_pull")
+              pull (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--reconcile" "--passphrase-cmd" pass-cmd "--json"]) "sync_pull_reconcile")
               api-key (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")
               sync-auto-noop (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--json"]) "sync")]
           (ensure! (= true (get changes "has_baseline")) "expected has_baseline=true for sync changes" {:changes changes})
