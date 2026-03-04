@@ -2583,83 +2583,11 @@
           (= "delete" (first args))) (handle-remote-rm ctx (rest args))
       :else (error-text 1 "unknown remote command"))))
 
-(def sync-conflict-reasons
-  #{reasons/reason-remote-disappeared
-    reasons/reason-no-local-baseline
-    reasons/reason-remote-changed
-    reasons/reason-overlapping-changes})
-
-(defn- sync-conflict-reason?
-  [reason]
-  (contains? sync-conflict-reasons reason))
-
 (defn- sync-exit-code-for-reason
   [reason]
-  (if (sync-conflict-reason? reason)
+  (if (sync-state/conflict-reason? reason)
     exit-code/code-sync-conflict
     exit-code/code-sync-failed))
-
-(defn- recommended-action-for-conflict-reason
-  [reason]
-  (let [reason (some-> reason str/trim)]
-    (cond
-      (= reason reasons/reason-remote-changed) "sync_pull"
-      (= reason reasons/reason-no-local-baseline) "sync_pull"
-      (= reason reasons/reason-remote-disappeared) "sync_reset_baseline_or_remote_recreate"
-      (= reason reasons/reason-remote-lock-present) "wait_or_sync_unlock"
-      (= reason reasons/reason-overlapping-changes) "manual_reconcile"
-      :else nil)))
-
-(defn- infer-sync-error-reason-from-message
-  [message]
-  (let [msg (some-> message str/lower-case str/trim)]
-    (cond
-      (str/blank? msg) nil
-      (str/includes? msg "--stale-threshold must be >= 0") reasons/reason-invalid-stale-threshold
-      (str/includes? msg "--check and --dry-run cannot be used together") reasons/reason-conflicting-check-and-dry-run
-      (str/includes? msg "empty remote name") reasons/reason-empty-remote-name
-      (str/includes? msg "remote name mismatch between arg and --remote") reasons/reason-remote-name-mismatch
-      (str/includes? msg "invalid remote name") reasons/reason-invalid-remote-name
-      (and (str/includes? msg "remote ") (str/includes? msg "already exists")) reasons/reason-remote-exists
-      (and (str/includes? msg "remote ") (str/includes? msg "not found (from kimen_remote)")) reasons/reason-remote-not-found-from-env
-      (and (str/includes? msg "remote ") (str/includes? msg "not found")) reasons/reason-remote-not-found
-      (str/includes? msg "no remotes configured") reasons/reason-no-remotes-configured
-      (str/includes? msg "multiple remotes configured") reasons/reason-multiple-remotes-configured
-      (str/includes? msg "--path is required") reasons/reason-missing-path
-      (str/includes? msg "--branch/--bundle-path are only valid for --type git") reasons/reason-git-fields-require-git-type
-      (str/includes? msg "derive recipient from identity") reasons/reason-recipient-derivation-failed
-      (str/includes? msg "--take must be one of") reasons/reason-invalid-take
-      (str/includes? msg "choose exactly one mode: --to-remote, --clear, or --rev") reasons/reason-invalid-reset-baseline-mode
-      (or (str/includes? msg "refusing to reset baseline without --yes")
-          (str/includes? msg "sync reset-baseline requires --yes")) reasons/reason-reset-baseline-confirmation-required
-      (str/includes? msg "remote bundle is missing; cannot set baseline to remote") reasons/reason-remote-bundle-missing-for-baseline
-      (str/includes? msg "cannot resolve conflicts without baseline key hashes") reasons/reason-reconcile-baseline-missing
-      (str/includes? msg "cannot reconcile without baseline key hashes") reasons/reason-reconcile-baseline-missing
-      (str/includes? msg "--if-older-than must be >= 0") reasons/reason-invalid-if-older-than
-      (str/includes? msg "sync unlock is only supported for fs remotes") reasons/reason-unlock-requires-fs-remote
-      (and (str/includes? msg "refusing to unlock") (str/includes? msg "lock is only")) reasons/reason-lock-too-new
-      (str/includes? msg "refusing to remove lock without --yes") reasons/reason-unlock-confirmation-required
-      (str/includes? msg "--backup is required") reasons/reason-missing-backup
-      (str/includes? msg "--lock-wait must be >= 0") reasons/reason-invalid-lock-wait
-      (str/includes? msg "--break-stale-lock-after must be >= 0") reasons/reason-invalid-break-stale-lock-after
-      (str/includes? msg "--dry-run cannot be combined with --lock-wait/--break-stale-lock-after") reasons/reason-conflicting-dry-run-lock-flags
-      (str/includes? msg "remote recipient is not configured") reasons/reason-remote-recipient-missing
-      (str/includes? msg "--lock-wait/--break-stale-lock-after are only supported for fs remotes") reasons/reason-lock-flags-require-fs-remote
-      (str/includes? msg "local vault file not found") reasons/reason-local-vault-missing
-      (str/includes? msg "local vault missing after sync resolve") reasons/reason-local-vault-missing-after-resolve
-      (str/includes? msg "local vault missing after pull") reasons/reason-local-vault-missing-after-pull
-      (str/includes? msg "local vault disappeared before baseline update") reasons/reason-local-vault-disappeared-before-baseline-update
-      (str/includes? msg "remote identity is not configured") reasons/reason-remote-identity-missing
-      (str/includes? msg "remote bundle is missing") reasons/reason-remote-bundle-missing
-      (str/includes? msg "unsupported remote type") reasons/reason-unsupported-remote-type
-      (str/includes? msg "unknown preflight check") reasons/reason-unknown-preflight-check
-      (str/includes? msg "unsupported preflight check") reasons/reason-unsupported-preflight-check
-      (str/includes? msg "no preflight checks selected") reasons/reason-no-preflight-checks-selected
-      (str/includes? msg "keys are not current conflict keys") reasons/reason-resolve-keys-not-conflicts
-      (str/includes? msg "sync status returned empty payload") reasons/reason-sync-status-empty-payload
-      (str/includes? msg "decode sync status payload") reasons/reason-sync-status-decode-failed
-      (str/includes? msg "sync status payload missing action") reasons/reason-sync-status-missing-action
-      :else nil)))
 
 (defn- sync-error-reason
   [e]
@@ -2670,7 +2598,7 @@
       explicit
 
       :else
-      (or (infer-sync-error-reason-from-message (.getMessage e))
+      (or (sync-state/infer-error-reason-from-message (.getMessage e))
           explicit
           reasons/reason-sync-failed))))
 
@@ -2684,7 +2612,7 @@
         reason (sync-error-reason e)
         code (sync-exit-code-for-reason reason)
         recommended-action (or (:recommended_action data)
-                               (recommended-action-for-conflict-reason reason))
+                               (sync-state/recommended-action-for-reason reason))
         payload (cond-> {:ok false
                          :error (.getMessage e)
                          :exit_code code
@@ -4096,8 +4024,8 @@
                                               (cond-> {:reason reason}
                                                 (some? (:expected-rev conflict)) (assoc :expected_rev (:expected-rev conflict))
                                                 (some? (:actual-rev conflict)) (assoc :actual_rev (:actual-rev conflict))
-                                                (some? (recommended-action-for-conflict-reason reason))
-                                                (assoc :recommended_action (recommended-action-for-conflict-reason reason)))
+                                                (some? (sync-state/recommended-action-for-reason reason))
+                                                (assoc :recommended_action (sync-state/recommended-action-for-reason reason)))
                                               e))
                               (throw e)))
                           (throw e))))
@@ -4377,7 +4305,7 @@
           (if (:has-conflict conflict)
             ["blocked" {:reason conflict-reason
                         :message (or conflict-message "sync is blocked by remote conflict")
-                        :recommended_action (or (recommended-action-for-conflict-reason conflict-reason)
+                        :recommended_action (or (sync-state/recommended-action-for-reason conflict-reason)
                                                 recommended
                                                 "manual_review")
                         :expected_rev (:expected-rev conflict)
@@ -4390,7 +4318,7 @@
                (not= conflict-reason reasons/reason-remote-changed))
           ["blocked" {:reason conflict-reason
                       :message (or conflict-message "sync is blocked by remote conflict")
-                      :recommended_action (or (recommended-action-for-conflict-reason conflict-reason)
+                      :recommended_action (or (sync-state/recommended-action-for-reason conflict-reason)
                                               recommended
                                               "manual_review")
                       :expected_rev (:expected-rev conflict)
