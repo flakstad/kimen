@@ -2477,12 +2477,14 @@
 
 (defn- recommended-action-for-conflict-reason
   [reason]
-  (case (some-> reason str/trim)
-    reasons/reason-remote-changed "sync_pull"
-    reasons/reason-no-local-baseline "sync_pull"
-    reasons/reason-remote-disappeared "sync_reset_baseline_or_remote_recreate"
-    reasons/reason-overlapping-changes "manual_reconcile"
-    nil))
+  (let [reason (some-> reason str/trim)]
+    (cond
+      (= reason reasons/reason-remote-changed) "sync_pull"
+      (= reason reasons/reason-no-local-baseline) "sync_pull"
+      (= reason reasons/reason-remote-disappeared) "sync_reset_baseline_or_remote_recreate"
+      (= reason reasons/reason-remote-lock-present) "wait_or_sync_unlock"
+      (= reason reasons/reason-overlapping-changes) "manual_reconcile"
+      :else nil)))
 
 (defn- detect-sync-conflict
   [last-seen remote-rev has-remote]
