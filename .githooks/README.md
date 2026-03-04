@@ -16,3 +16,6 @@ git commit --no-verify
 ```
 
 Or set `KIMEN_SKIP_PRECOMMIT=1` for your shell session.
+
+The pre-commit hook runs tests by default.
+To opt into a full build during pre-commit, set `KIMEN_PRECOMMIT_BUILD=1`.

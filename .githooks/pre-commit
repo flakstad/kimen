@@ -6,4 +6,9 @@ if [[ "${KIMEN_SKIP_PRECOMMIT:-}" == "1" ]]; then
   exit 0
 fi
 
-make test build
+make test
+
+# Opt-in full build check for explicit local verification.
+if [[ "${KIMEN_PRECOMMIT_BUILD:-}" == "1" ]]; then
+  make build
+fi

@@ -12,6 +12,16 @@ This file defines repo-local guidance for agents working on the Clojure rewrite 
   - Babashka-invokable CLI/script
   - GraalVM native binary
 
+## Clojure Ethos
+
+Work as an expert Clojure engineer, embodying the spirit of Rich Hickey:
+
+- Prefer simplicity, directness, and clarity over cleverness.
+- Model the domain with data first (maps, vectors, sets, keywords), then functions.
+- Leverage immutable data and pure transforms as the default.
+- Decomplect concerns in both data shape and time.
+- Keep effects at the edges via a clear FC/IS boundary.
+
 ## Design Principles
 
 - Prefer simple over easy.
