@@ -514,7 +514,13 @@
           (run-cli ["sync" "init" "--remote" "bad/name" "--path" remote-a "--json"] {}
                    {:config-path cfg-path})]
       (is (= exit-code/code-sync-failed exit-code))
-      (is (str/includes? stderr "\"reason\":\"invalid_remote_name\"")))))
+      (is (str/includes? stderr "\"reason\":\"invalid_remote_name\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "init" "origin" "--remote" "other" "--path" remote-a "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"remote_name_mismatch\"")))))
 
 (deftest sync-status-selection-and-errors
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -1950,7 +1956,7 @@
               (run-cli ["sync" "reset-baseline" "--remote" "origin" "--clear" "--json"] {}
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
+          (is (str/includes? stderr "\"reason\":\"reset_baseline_confirmation_required\"")))
 
         (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "reset-baseline" "--remote" "origin" "--clear" "--yes" "--json"] {}
@@ -1966,6 +1972,41 @@
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))))))
+
+(deftest sync-reset-baseline-typed-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path}))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "reset-baseline" "--remote" "origin" "--clear" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"reset_baseline_confirmation_required\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "reset-baseline" "--remote" "origin" "--yes" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_reset_baseline_mode\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "reset-baseline" "--remote" "origin" "--to-remote" "--yes" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"remote_bundle_missing_for_baseline\"")))))
 
 (deftest sync-restore-restores-vault-from-backup
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -2014,7 +2055,13 @@
           (run-cli ["sync" "restore" "--backup" (str (.getPath dir) "/missing.backup") "--json"] {}
                    {:config-path cfg-path})]
       (is (= exit-code/code-sync-failed exit-code))
-      (is (str/includes? stderr "\"reason\":\"input_missing\"")))))
+      (is (str/includes? stderr "\"reason\":\"input_missing\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "restore" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_backup\"")))))
 
 (deftest sync-unlock-removes-lock-with-guards
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -2337,7 +2384,7 @@
               (run-cli ["sync" "resolve" "--remote" "origin" "--take" "remote" "--key" "does_not_exist" "--passphrase-cmd" pass-cmd "--json"] {}
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"resolve_key_not_conflict\"")))))))
+          (is (str/includes? stderr "\"reason\":\"resolve_keys_not_conflicts\"")))))))
 
 (deftest sync-git-remote-push-pull-roundtrip
   (if-not (git-available?)

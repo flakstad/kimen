@@ -16,6 +16,7 @@
 (def reason-invalid-mode "invalid_mode")
 (def reason-conflicting-map-profile-inputs "conflicting_map_profile_inputs")
 (def reason-conflicting-against-inputs "conflicting_against_inputs")
+(def reason-invalid-against-spec "invalid_against_spec")
 (def reason-invalid-profile-name "invalid_profile_name")
 (def reason-conflicting-stdin-inputs "conflicting_stdin_inputs")
 (def reason-conflicting-render-target-inputs "conflicting_render_target_inputs")
@@ -93,7 +94,9 @@
 (def reason-remote-lock-present "remote_lock_present")
 (def reason-remote-disappeared "remote_disappeared")
 (def reason-remote-changed "remote_changed")
+(def reason-remote-missing "remote_missing")
 (def reason-no-local-baseline "no_local_baseline")
+(def reason-reconcile-baseline-missing "reconcile_baseline_missing")
 (def reason-manual-pull-required "manual_pull_required")
 (def reason-push-blocked "push_blocked")
 (def reason-invalid-lock-wait "invalid_lock_wait")
@@ -102,17 +105,30 @@
 (def reason-lock-flags-require-fs-remote "lock_flags_require_fs_remote")
 (def reason-invalid-stale-threshold "invalid_stale_threshold")
 (def reason-conflicting-check-and-dry-run "conflicting_check_and_dry_run")
+(def reason-remote-name-mismatch "remote_name_mismatch")
 (def reason-invalid-if-older-than "invalid_if_older_than")
 (def reason-unlock-requires-fs-remote "unlock_requires_fs_remote")
 (def reason-lock-too-new "lock_too_new")
 (def reason-unlock-confirmation-required "unlock_confirmation_required")
+(def reason-missing-backup "missing_backup")
 (def reason-lock-missing "lock_missing")
 (def reason-overlapping-changes "overlapping_changes")
 (def reason-invalid-take "invalid_take")
+(def reason-invalid-reset-baseline-mode "invalid_reset_baseline_mode")
+(def reason-reset-baseline-confirmation-required "reset_baseline_confirmation_required")
+(def reason-remote-bundle-missing-for-baseline "remote_bundle_missing_for_baseline")
+(def reason-local-vault-missing-after-resolve "local_vault_missing_after_resolve")
+(def reason-local-vault-missing-after-pull "local_vault_missing_after_pull")
+(def reason-local-vault-disappeared-before-baseline-update "local_vault_disappeared_before_baseline_update")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
 (def reason-resolve-key-not-conflict "resolve_key_not_conflict")
+(def reason-resolve-keys-not-conflicts "resolve_keys_not_conflicts")
 (def reason-unknown-preflight-check "unknown_preflight_check")
+(def reason-unsupported-preflight-check "unsupported_preflight_check")
 (def reason-no-preflight-checks-selected "no_preflight_checks_selected")
+(def reason-sync-status-empty-payload "sync_status_empty_payload")
+(def reason-sync-status-decode-failed "sync_status_decode_failed")
+(def reason-sync-status-missing-action "sync_status_missing_action")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -137,6 +153,7 @@
    reason-invalid-mode
    reason-conflicting-map-profile-inputs
    reason-conflicting-against-inputs
+   reason-invalid-against-spec
    reason-invalid-profile-name
    reason-conflicting-stdin-inputs
    reason-conflicting-render-target-inputs
@@ -209,7 +226,9 @@
    reason-remote-lock-present
    reason-remote-disappeared
    reason-remote-changed
+   reason-remote-missing
    reason-no-local-baseline
+   reason-reconcile-baseline-missing
    reason-manual-pull-required
    reason-push-blocked
    reason-invalid-lock-wait
@@ -218,17 +237,30 @@
    reason-lock-flags-require-fs-remote
    reason-invalid-stale-threshold
    reason-conflicting-check-and-dry-run
+   reason-remote-name-mismatch
    reason-invalid-if-older-than
    reason-unlock-requires-fs-remote
    reason-lock-too-new
    reason-unlock-confirmation-required
+   reason-missing-backup
    reason-lock-missing
    reason-overlapping-changes
    reason-invalid-take
+   reason-invalid-reset-baseline-mode
+   reason-reset-baseline-confirmation-required
+   reason-remote-bundle-missing-for-baseline
+   reason-local-vault-missing-after-resolve
+   reason-local-vault-missing-after-pull
+   reason-local-vault-disappeared-before-baseline-update
    reason-no-overlapping-conflicts
    reason-resolve-key-not-conflict
+   reason-resolve-keys-not-conflicts
    reason-unknown-preflight-check
+   reason-unsupported-preflight-check
    reason-no-preflight-checks-selected
+   reason-sync-status-empty-payload
+   reason-sync-status-decode-failed
+   reason-sync-status-missing-action
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type

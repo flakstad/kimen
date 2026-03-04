@@ -210,7 +210,7 @@
         (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "remote_changed")
         (let [force-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--force" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")]
           (ensure! (= true (get force-push "forced")) "expected forced=true for sync push --force" {:force-push force-push}))
-        (expect-error-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--clear" "--json"]) 32 "sync_failed")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--clear" "--json"]) 32 "reset_baseline_confirmation_required")
         (let [clear (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--clear" "--yes" "--json"]) "sync_reset_baseline")]
           (ensure! (= "clear" (get clear "mode")) "expected clear mode for reset-baseline --clear" {:clear clear}))
         (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "no_local_baseline")
