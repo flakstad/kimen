@@ -86,6 +86,8 @@
 (def reason-invalid-take "invalid_take")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
 (def reason-resolve-key-not-conflict "resolve_key_not_conflict")
+(def reason-unknown-preflight-check "unknown_preflight_check")
+(def reason-no-preflight-checks-selected "no_preflight_checks_selected")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -175,6 +177,8 @@
    reason-invalid-take
    reason-no-overlapping-conflicts
    reason-resolve-key-not-conflict
+   reason-unknown-preflight-check
+   reason-no-preflight-checks-selected
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type

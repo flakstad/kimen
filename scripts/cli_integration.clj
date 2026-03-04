@@ -1,12 +1,12 @@
 #!/usr/bin/env bb
 (ns scripts.cli-integration
   (:require
-    [babashka.process :as p]
-    [clojure.java.io :as io]
-    [kimen.json :as json])
+   [babashka.process :as p]
+   [clojure.java.io :as io]
+   [kimen.json :as json])
   (:import
-    [java.nio.file Files]
-    [java.util Arrays]))
+   [java.nio.file Files]
+   [java.util Arrays]))
 
 (defn- fail!
   [message data]
@@ -100,8 +100,8 @@
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" vault-path "--out" bundle-path "--recipient" recipient "--json"]) "bundle_seal")
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "open" "--in" bundle-path "--out-vault" opened-vault "--identity" id-path "--json"]) "bundle_open")
       (ensure! (Arrays/equals
-                 (Files/readAllBytes (.toPath (java.io.File. vault-path)))
-                 (Files/readAllBytes (.toPath (java.io.File. opened-vault))))
+                (Files/readAllBytes (.toPath (java.io.File. vault-path)))
+                (Files/readAllBytes (.toPath (java.io.File. opened-vault))))
                "opened bundle vault differs from source vault"
                {:vault vault-path :opened opened-vault})
       (expect-error-json! (run-kimen repo-root base-env ["bundle" "open" "--json"]) 25 "missing_in")
@@ -121,6 +121,14 @@
             sync-bundle-path (get sync-push "bundle_path")
             remote-vault (str (.getPath temp-dir) "/remote-writer.vault.db")]
         (ensure! (string? sync-bundle-path) "missing sync bundle path" {:sync-push sync-push})
+        (let [preflight (expect-success-json! (run-kimen repo-root base-env ["sync" "preflight" "--remote" "team" "--json"]) "sync_preflight")
+              lock-path (str sync-bundle-path ".lock")]
+          (ensure! (= true (get preflight "ok")) "expected sync preflight success after initial push" {:preflight preflight})
+          (spit lock-path "held\n")
+          (let [unlock (expect-success-json! (run-kimen repo-root base-env ["sync" "unlock" "--remote" "team" "--yes" "--json"]) "sync_unlock")
+                unlock-missing (expect-success-json! (run-kimen repo-root base-env ["sync" "unlock" "--remote" "team" "--yes" "--json"]) "sync_unlock")]
+            (ensure! (= true (get unlock "removed")) "expected sync unlock to remove lock file" {:unlock unlock})
+            (ensure! (= false (get unlock-missing "removed")) "expected sync unlock missing lock response" {:unlock-missing unlock-missing})))
         (spit sync-bundle-path "tampered-remote\n")
         (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "remote_changed")
         (let [to-remote (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--to-remote" "--yes" "--json"]) "sync_reset_baseline")
