@@ -89,6 +89,31 @@
     (is (str/includes? stdout "\"action\":\"version\""))
     (is (str/includes? stdout "\"exit_code\":0"))))
 
+(deftest json-success-envelopes-include-exit-code
+  (let [cfg-path (.getPath (java.io.File/createTempFile "kimen-config" ".json"))
+        map-src "env API_KEY=api_key\n"
+        cases [{:name "version"
+                :argv ["version" "--json"]
+                :files {}}
+               {:name "config_path"
+                :argv ["config" "path" "--json"]
+                :files {}}
+               {:name "vault_path"
+                :argv ["vault" "path" "--json"]
+                :files {}}
+               {:name "map_lint"
+                :argv ["map" "lint" "--map" "base.kmap" "--json"]
+                :files {"base.kmap" map-src}}]]
+    (.delete (java.io.File. cfg-path))
+    (doseq [{:keys [name argv files]} cases]
+      (let [{:keys [exit-code stdout stderr]} (run-cli argv files {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code) name)
+        (is (nil? stderr) name)
+        (is (= true (get payload "ok")) name)
+        (is (= 0 (get payload "exit_code")) name)
+        (is (string? (get payload "action")) name)))))
+
 (deftest map-lint-json-ok-and-fail
   (testing "ok"
     (let [map-src "env API_KEY=api_key\nfile conf/api.txt=api_key\n"
