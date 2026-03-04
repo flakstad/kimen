@@ -109,9 +109,12 @@
         workflow-pr (str (.getPath temp-dir) "/kimen-pr-safety.yml")
         workflow-deploy (str (.getPath temp-dir) "/kimen-deploy.yml")
         workflow-sync (str (.getPath temp-dir) "/kimen-sync-gate.yml")
+        old-pass-file (str (.getPath temp-dir) "/old.pass")
+        new-pass-file (str (.getPath temp-dir) "/new.pass")
         base-env {"KIMEN_CONFIG" cfg-path
                   "KIMEN_VAULT" vault-path}
         pass-cmd "printf integration-passphrase"
+        new-pass-cmd "printf integration-passphrase-2"
         _ (spit map-path "env API_KEY=api_key\nfile conf/api.txt=api_key\nenvpath API_KEY_PATH=conf/api.txt\n")]
     (expect-success-json! (run-kimen repo-root base-env ["version" "--json"]) "version")
     (expect-success-json! (run-kimen repo-root base-env ["config" "path" "--json"]) "config_path")
@@ -280,6 +283,18 @@
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-deploy" "--out" workflow-deploy "--json"]) "init_ci_deploy")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-sync-gate" "--out" workflow-sync "--json"]) "init_ci_sync_gate")
+    (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "rekey_probe" "--value" "probe" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+    (spit old-pass-file "integration-passphrase\n")
+    (spit new-pass-file "integration-passphrase-2\n")
+    (let [rekey-dry-run (expect-success-json! (run-kimen repo-root base-env ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--dry-run" "--json"]) "vault_rekey")
+          rekey (expect-success-json! (run-kimen repo-root base-env ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--json"]) "vault_rekey")
+          old-pass-failure (expect-error-json! (run-kimen repo-root base-env ["secret" "get" "rekey_probe" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) 15 "wrong_passphrase")
+          new-pass-read (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "rekey_probe" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" new-pass-cmd "--json"]) "get")]
+      (ensure! (= true (get rekey-dry-run "dry_run")) "expected dry_run=true in vault rekey dry-run payload" {:rekey-dry-run rekey-dry-run})
+      (ensure! (= true (get rekey-dry-run "would_backup")) "expected would_backup=true in vault rekey dry-run payload" {:rekey-dry-run rekey-dry-run})
+      (ensure! (string? (get rekey "backup_path")) "expected backup_path in vault rekey payload" {:rekey rekey})
+      (ensure! (= 15 (get old-pass-failure "exit_code")) "expected wrong_passphrase code for old pass after rekey" {:old-pass-failure old-pass-failure})
+      (ensure! (= "cHJvYmU=" (get new-pass-read "value_b64")) "expected rekey_probe value with new passphrase" {:new-pass-read new-pass-read}))
 
     (println "cli integration tests passed")
     0))
