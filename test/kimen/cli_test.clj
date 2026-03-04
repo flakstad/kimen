@@ -1,6 +1,7 @@
 (ns kimen.cli-test
   (:require
    [clojure.java.io :as io]
+   [clojure.java.shell :as sh]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [kimen.cli :as cli]
@@ -33,6 +34,45 @@
 (defn- normalize-newlines
   [s]
   (str/replace (or s "") "\r\n" "\n"))
+
+(def ^:private git-env-skip-vars
+  #{"GIT_DIR"
+    "GIT_WORK_TREE"
+    "GIT_INDEX_FILE"
+    "GIT_PREFIX"
+    "GIT_OBJECT_DIRECTORY"
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES"
+    "GIT_COMMON_DIR"})
+
+(defn- sanitized-git-env
+  []
+  (into {}
+        (remove (fn [[k _]] (contains? git-env-skip-vars k)))
+        (System/getenv)))
+
+(defn- git-available?
+  []
+  (zero? (:exit (sh/sh "git" "--version" :out :string :err :string))))
+
+(defn- run-git!
+  [dir & args]
+  (let [dir (some-> dir str/trim not-empty)
+        res (apply sh/sh
+                   (concat ["git"]
+                           args
+                           (cond-> [:env (sanitized-git-env)
+                                    :out :string
+                                    :err :string]
+                             (some? dir) (into [:dir dir]))))]
+    (when-not (zero? (:exit res))
+      (throw (ex-info (format "git %s failed: %s"
+                              (str/join " " args)
+                              (or (not-empty (str/trim (str (:err res))))
+                                  (not-empty (str/trim (str (:out res))))
+                                  "unknown error"))
+                      {:args args
+                       :res res})))
+    res))
 
 (deftest version-json-shape
   (let [{:keys [exit-code stdout stderr]} (run-cli ["version" "--json"] {})]
@@ -623,7 +663,7 @@
           (run-cli ["sync" "pull" "--remote" "origin" "--json"] {}
                    {:config-path cfg-path})]
       (is (= exit-code/code-sync-failed exit-code))
-      (is (str/includes? stderr "\"reason\":\"remote_bundle_missing\"")))))
+      (is (str/includes? stderr "\"reason\":\"remote_identity_missing\"")))))
 
 (deftest sync-push-detects-remote-drift
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -1617,6 +1657,248 @@
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-failed exit-code))
           (is (str/includes? stderr "\"reason\":\"resolve_key_not_conflict\"")))))))
+
+(deftest sync-git-remote-push-pull-roundtrip
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-a (str (.getPath dir) "/config-a.json")
+          vault-a (str (.getPath dir) "/vault-a.db")
+          cfg-b (str (.getPath dir) "/config-b.json")
+          vault-b (str (.getPath dir) "/vault-b.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+      (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+      (run-cli ["secret" "set" "api_key" "--value" "team-v1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-a})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-a})
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "push" "--json"] {} {:config-path cfg-a})
+              payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "sync_push" (get payload "action")))
+          (is (= "git" (get payload "remote_type"))))
+
+        (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-b})
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "pull" "--json"] {} {:config-path cfg-b})
+              payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "sync_pull" (get payload "action")))
+          (is (= "git" (get payload "remote_type"))))
+        (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {}
+                                                  {:config-path cfg-b})]
+          (is (= 0 exit-code))
+          (is (str/includes? stdout "\"value_b64\":\"dGVhbS12MQ==\"")))))))
+
+(deftest sync-git-remote-pull-dry-run-no-mutation
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-a (str (.getPath dir) "/config-a.json")
+          vault-a (str (.getPath dir) "/vault-a.db")
+          cfg-b (str (.getPath dir) "/config-b.json")
+          vault-b (str (.getPath dir) "/vault-b.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+      (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+      (run-cli ["secret" "set" "api_key" "--value" "team-v1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-a})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-a})
+        (run-cli ["sync" "push" "--json"] {} {:config-path cfg-a})
+
+        (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-b})
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "pull" "--dry-run" "--json"] {} {:config-path cfg-b})
+              payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "sync_pull_dry_run" (get payload "action")))
+          (is (= "git" (get payload "remote_type")))
+          (is (= true (get payload "dry_run")))
+          (is (= false (get payload "has_local")))
+          (is (= false (get payload "would_backup"))))
+        (is (= false (.exists (io/file vault-b))))
+        (let [cfg (json/read-str (slurp cfg-b))]
+          (is (nil? (get-in cfg ["sync" "origin"]))))))))
+
+(deftest sync-git-remote-push-dry-run-no-mutation
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-path (str (.getPath dir) "/config.json")
+          vault-path (str (.getPath dir) "/vault.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-path})
+        (run-cli ["sync" "push" "--json"] {} {:config-path cfg-path})
+        (let [cfg-before (json/read-str (slurp cfg-path))
+              baseline-before (get-in cfg-before ["sync" "origin" "last_seen_rev"])
+              {:keys [stdout]} (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})
+              status-before (json/read-str stdout)
+              remote-rev-before (get status-before "remote_rev")]
+          (run-cli ["secret" "set" "api_key" "--value" "v2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                   {:config-path cfg-path})
+          (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "push" "--dry-run" "--json"] {} {:config-path cfg-path})
+                payload (json/read-str stdout)]
+            (is (= 0 exit-code))
+            (is (nil? stderr))
+            (is (= "sync_push_dry_run" (get payload "action")))
+            (is (= "git" (get payload "remote_type")))
+            (is (= true (get payload "dry_run")))
+            (is (= true (get payload "can_push")))
+            (is (= true (get payload "has_local"))))
+          (let [cfg-after (json/read-str (slurp cfg-path))
+                baseline-after (get-in cfg-after ["sync" "origin" "last_seen_rev"])
+                {:keys [stdout]} (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})
+                status-after (json/read-str stdout)]
+            (is (= baseline-before baseline-after))
+            (is (= remote-rev-before (get status-after "remote_rev")))))))))
+
+(deftest sync-git-remote-push-conflict-when-remote-changed
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-a (str (.getPath dir) "/config-a.json")
+          vault-a (str (.getPath dir) "/vault-a.db")
+          cfg-b (str (.getPath dir) "/config-b.json")
+          vault-b (str (.getPath dir) "/vault-b.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+      (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+      (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-a})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-a})
+        (run-cli ["sync" "push" "--json"] {} {:config-path cfg-a})
+        (run-cli ["secret" "set" "api_key" "--value" "a2" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+                 {:config-path cfg-a})
+
+        (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-b})
+        (run-cli ["sync" "pull" "--json"] {} {:config-path cfg-b})
+        (run-cli ["secret" "set" "api_key" "--value" "b2" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {}
+                 {:config-path cfg-b})
+        (run-cli ["sync" "push" "--json"] {} {:config-path cfg-b})
+
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--json"] {} {:config-path cfg-a})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (= "remote_changed" (get err "reason")))
+          (is (= "sync_pull" (get err "recommended_action"))))))))
+
+(deftest sync-git-remote-rejects-lock-flags
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-path (str (.getPath dir) "/config.json")
+          vault-path (str (.getPath dir) "/vault.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-path})
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--lock-wait" "1s" "--json"] {}
+                                                  {:config-path cfg-path})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-failed (get err "exit_code"))))))))
 
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

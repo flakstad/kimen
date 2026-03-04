@@ -34,6 +34,36 @@
         res (apply p/sh opts "./bin/kimen" argv)]
     (assoc res :argv (vec argv))))
 
+(def ^:private git-env-skip-vars
+  #{"GIT_DIR"
+    "GIT_WORK_TREE"
+    "GIT_INDEX_FILE"
+    "GIT_PREFIX"
+    "GIT_OBJECT_DIRECTORY"
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES"
+    "GIT_COMMON_DIR"})
+
+(defn- sanitized-git-env
+  []
+  (into {}
+        (remove (fn [[k _]] (contains? git-env-skip-vars k)))
+        (System/getenv)))
+
+(defn- git-available?
+  []
+  (zero? (:exit (p/sh {:continue true :out :string :err :string} "git" "--version"))))
+
+(defn- run-git!
+  [argv]
+  (let [res (apply p/sh {:continue true
+                         :out :string
+                         :err :string
+                         :env (sanitized-git-env)}
+                   "git"
+                   argv)]
+    (ensure! (zero? (:exit res)) "git command failed" {:argv argv :res res})
+    res))
+
 (defn- expect-success-json!
   [res action]
   (ensure! (zero? (:exit res)) "command failed" {:res res})
@@ -204,7 +234,41 @@
         (expect-success-json! (run-kimen repo-root base-env ["sync" "restore" "--backup" restore-backup "--json"]) "sync_restore")
         (expect-success-json! (run-kimen repo-root base-env ["sync" "restore" "--backup" restore-backup "--no-backup" "--json"]) "sync_restore")
         (let [restored (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")]
-          (ensure! (= "cmVzdG9yZS1zb3VyY2U=" (get restored "value_b64")) "expected source value after sync restore" {:restored restored}))))
+          (ensure! (= "cmVzdG9yZS1zb3VyY2U=" (get restored "value_b64")) "expected source value after sync restore" {:restored restored})))
+
+      (if (git-available?)
+        (let [git-repo (str (.getPath temp-dir) "/team.git")
+              git-cfg-a (str (.getPath temp-dir) "/git-config-a.json")
+              git-vault-a (str (.getPath temp-dir) "/git-vault-a.db")
+              git-cfg-b (str (.getPath temp-dir) "/git-config-b.json")
+              git-vault-b (str (.getPath temp-dir) "/git-vault-b.db")
+              env-a {"KIMEN_CONFIG" git-cfg-a
+                     "KIMEN_VAULT" git-vault-a}
+              env-b {"KIMEN_CONFIG" git-cfg-b
+                     "KIMEN_VAULT" git-vault-b}]
+          (run-git! ["init" "--bare" git-repo])
+          (expect-success-json! (run-kimen repo-root env-a ["vault" "init" "--vault" git-vault-a "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
+          (expect-success-json! (run-kimen repo-root env-a ["secret" "set" "api_key" "--value" "team-v1" "--vault" git-vault-a "--passphrase-cmd" pass-cmd "--json"]) "set")
+          (expect-success-json! (run-kimen repo-root env-a ["remote" "add" "origin" "--type" "git" "--path" git-repo "--branch" "main" "--bundle-path" "vault.age" "--recipient" recipient "--identity" id-path "--json"]) "remote_add")
+          (let [push-a (expect-success-json! (run-kimen repo-root env-a ["sync" "push" "--json"]) "sync_push")]
+            (ensure! (= "git" (get push-a "remote_type")) "expected git remote type for sync push" {:push-a push-a}))
+
+          (expect-success-json! (run-kimen repo-root env-b ["remote" "add" "origin" "--type" "git" "--path" git-repo "--branch" "main" "--bundle-path" "vault.age" "--recipient" recipient "--identity" id-path "--json"]) "remote_add")
+          (let [pull-b (expect-success-json! (run-kimen repo-root env-b ["sync" "pull" "--json"]) "sync_pull")
+                value-b (expect-success-json! (run-kimen repo-root env-b ["secret" "get" "api_key" "--unsafe-stdout" "--vault" git-vault-b "--passphrase-cmd" pass-cmd "--json"]) "get")]
+            (ensure! (= "git" (get pull-b "remote_type")) "expected git remote type for sync pull" {:pull-b pull-b})
+            (ensure! (= "dGVhbS12MQ==" (get value-b "value_b64")) "expected team-v1 after git sync pull" {:value-b value-b}))
+
+          (let [status-before (expect-success-json! (run-kimen repo-root env-a ["sync" "status" "--json"]) "sync_status")
+                remote-rev-before (get status-before "remote_rev")]
+            (expect-success-json! (run-kimen repo-root env-a ["secret" "set" "api_key" "--value" "team-v2" "--vault" git-vault-a "--passphrase-cmd" pass-cmd "--json"]) "set")
+            (let [push-dry-run (expect-success-json! (run-kimen repo-root env-a ["sync" "push" "--dry-run" "--json"]) "sync_push_dry_run")
+                  status-after (expect-success-json! (run-kimen repo-root env-a ["sync" "status" "--json"]) "sync_status")
+                  lock-flag-error (expect-error-json! (run-kimen repo-root env-a ["sync" "push" "--lock-wait" "1s" "--json"]) 32 "sync_failed")]
+              (ensure! (= "git" (get push-dry-run "remote_type")) "expected git remote type on sync push dry-run" {:push-dry-run push-dry-run})
+              (ensure! (= remote-rev-before (get status-after "remote_rev")) "expected remote rev unchanged after git push dry-run" {:status-before status-before :status-after status-after})
+              (ensure! (= 32 (get lock-flag-error "exit_code")) "expected sync_failed payload for git lock-flag rejection" {:lock-flag-error lock-flag-error}))))
+        (println "skipping git integration checks: git unavailable")))
 
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")

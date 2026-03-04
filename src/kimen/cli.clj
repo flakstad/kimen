@@ -1,6 +1,7 @@
 (ns kimen.cli
   (:require
    [clojure.java.io :as io]
+   [clojure.java.shell :as sh]
    [clojure.string :as str]
    [kimen.bundle :as bundle]
    [kimen.commands.doctor :as doctor]
@@ -20,6 +21,7 @@
   (:import
    [java.security MessageDigest]
    [java.nio.file Files StandardCopyOption]
+   [java.nio.file Paths]
    [java.util Base64]))
 
 (def usage
@@ -2557,6 +2559,15 @@
         path
         (str path "/" bundle-path)))))
 
+(defn- remote-type
+  [remote]
+  (let [t (some-> (get remote "type") str/trim str/lower-case)]
+    (if (str/blank? t) "fs" t)))
+
+(defn- remote-supports-push-lock?
+  [remote]
+  (= "fs" (remote-type remote)))
+
 (defn- hex-bytes
   [^bytes b]
   (apply str (map #(format "%02x" (bit-and % 0xff)) b)))
@@ -2567,11 +2578,18 @@
         digest (.digest (MessageDigest/getInstance "SHA-256") bytes)]
     (hex-bytes digest)))
 
+(defn- file-revision
+  [path]
+  (let [f (io/file path)]
+    (if (.exists f)
+      [(file-sha256-hex path) true]
+      [nil false])))
+
 (defn- ensure-fs-remote!
   [remote]
-  (let [remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")]
-    (when-not (= remote-type "fs")
-      (throw (ex-info "only fs remotes are supported by this command for now"
+  (let [t (remote-type remote)]
+    (when-not (= t "fs")
+      (throw (ex-info "sync unlock is only supported for fs remotes"
                       {:reason reasons/reason-unsupported-remote-type})))
     remote))
 
@@ -2618,6 +2636,247 @@
               (into-array StandardCopyOption [StandardCopyOption/REPLACE_EXISTING]))
   dst)
 
+(def ^:private git-env-skip-vars
+  #{"GIT_DIR"
+    "GIT_WORK_TREE"
+    "GIT_INDEX_FILE"
+    "GIT_PREFIX"
+    "GIT_OBJECT_DIRECTORY"
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES"
+    "GIT_COMMON_DIR"})
+
+(defn- sanitized-git-env
+  []
+  (into {}
+        (remove (fn [[k _]] (contains? git-env-skip-vars k)))
+        (System/getenv)))
+
+(defn- git-run-raw
+  [dir args]
+  (let [dir (some-> dir str/trim not-empty)]
+    (apply sh/sh
+           (concat ["git"]
+                   args
+                   (cond-> [:env (sanitized-git-env)
+                            :out :string
+                            :err :string]
+                     (some? dir) (into [:dir dir]))))))
+
+(defn- git-run!
+  [dir args]
+  (let [res (git-run-raw dir args)]
+    (if (zero? (:exit res))
+      res
+      (let [msg (or (not-empty (str/trim (str (:err res))))
+                    (not-empty (str/trim (str (:out res))))
+                    "git command failed")]
+        (throw (ex-info (format "git %s: %s" (str/join " " args) msg)
+                        {:reason reasons/reason-sync-failed
+                         :git_args (vec args)
+                         :git_exit (:exit res)
+                         :git_output (str (:out res) (:err res))
+                         :git_stdout (:out res)
+                         :git_stderr (:err res)}))))))
+
+(defn- delete-recursively!
+  [path]
+  (let [f (some-> path io/file)]
+    (when (and (some? f) (.exists f))
+      (doseq [child (reverse (file-seq f))]
+        (try
+          (Files/deleteIfExists (.toPath child))
+          (catch Exception _ nil))))))
+
+(defn- git-remote-ref
+  [remote]
+  (let [repo-path (some-> (get remote "path") str/trim not-empty)
+        branch (or (some-> (get remote "branch") str/trim not-empty) "main")
+        rel-path-raw (or (some-> (get remote "bundle_path") str/trim not-empty) "vault.age")
+        rel-path (try
+                   (-> (Paths/get rel-path-raw (make-array String 0))
+                       .normalize
+                       .toString)
+                   (catch Exception _
+                     (throw (ex-info "remote bundle_path is invalid"
+                                     {:reason reasons/reason-sync-failed}))))]
+    (when (nil? repo-path)
+      (throw (ex-info "remote path is empty" {:reason reasons/reason-missing-path})))
+    (when (or (str/blank? rel-path)
+              (= rel-path ".")
+              (= rel-path ".."))
+      (throw (ex-info "remote bundle_path is invalid"
+                      {:reason reasons/reason-sync-failed})))
+    (when (or (.isAbsolute (Paths/get rel-path (make-array String 0)))
+              (str/starts-with? rel-path (str ".." java.io.File/separator))
+              (str/starts-with? rel-path "../")
+              (str/starts-with? rel-path "..\\"))
+      (throw (ex-info "remote bundle_path must be relative"
+                      {:reason reasons/reason-sync-failed})))
+    {:repo-path repo-path
+     :branch branch
+     :rel-path rel-path
+     :bundle-ref (format "%s@%s:%s" repo-path branch rel-path)}))
+
+(defn- git-clone-no-checkout
+  [repo-path]
+  (let [repo-dir (.toString (Files/createTempDirectory "kimen-sync-git-" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cleanup (fn [] (delete-recursively! repo-dir))]
+    (try
+      (git-run! nil ["clone" "--quiet" "--no-checkout" repo-path repo-dir])
+      {:repo-dir repo-dir
+       :cleanup cleanup}
+      (catch Exception e
+        (cleanup)
+        (throw e)))))
+
+(defn- git-ref-exists?
+  [repo-dir ref]
+  (let [res (git-run-raw repo-dir ["rev-parse" "--verify" "--quiet" ref])]
+    (cond
+      (zero? (:exit res)) true
+      (= 1 (:exit res)) false
+      :else
+      (let [msg (or (not-empty (str/trim (str (:err res))))
+                    (not-empty (str/trim (str (:out res))))
+                    "git ref check failed")]
+        (throw (ex-info (format "git rev-parse --verify --quiet %s: %s" ref msg)
+                        {:reason reasons/reason-sync-failed}))))))
+
+(defn- git-checkout-remote-branch!
+  [repo-dir branch]
+  (let [ref (str "refs/remotes/origin/" branch)]
+    (if-not (git-ref-exists? repo-dir ref)
+      false
+      (do
+        (git-run! repo-dir ["checkout" "--quiet" "-B" branch ref])
+        true))))
+
+(defn- git-has-staged-changes?
+  [repo-dir]
+  (let [res (git-run-raw repo-dir ["diff" "--cached" "--quiet" "--exit-code"])]
+    (cond
+      (zero? (:exit res)) false
+      (= 1 (:exit res)) true
+      :else
+      (let [msg (or (not-empty (str/trim (str (:err res))))
+                    (not-empty (str/trim (str (:out res))))
+                    "git diff --cached failed")]
+        (throw (ex-info (format "git diff --cached --quiet --exit-code: %s" msg)
+                        {:reason reasons/reason-sync-failed}))))))
+
+(defn- git-push-rejected?
+  [e]
+  (let [out (some-> (ex-data e) (get :git_output) str str/lower-case)]
+    (boolean (and (not (str/blank? out))
+                  (or (str/includes? out "non-fast-forward")
+                      (str/includes? out "[rejected]")
+                      (str/includes? out "fetch first"))))))
+
+(defn- git-push-bundle-file!
+  [repo-path branch rel-path source-bundle-path]
+  (let [{:keys [repo-dir cleanup]} (git-clone-no-checkout repo-path)]
+    (try
+      (when-not (git-checkout-remote-branch! repo-dir branch)
+        (git-run! repo-dir ["checkout" "--quiet" "--orphan" branch]))
+      (let [target-path (str (.getPath (io/file repo-dir rel-path)))]
+        (.mkdirs (.getParentFile (io/file target-path)))
+        (copy-file! source-bundle-path target-path)
+        (git-run! repo-dir ["add" "--" rel-path])
+        (if-not (git-has-staged-changes? repo-dir)
+          (file-sha256-hex target-path)
+          (do
+            (git-run! repo-dir ["config" "user.name" "kimen"])
+            (git-run! repo-dir ["config" "user.email" "kimen@localhost"])
+            (git-run! repo-dir ["commit" "--quiet" "-m" (str "kimen sync push " (.toString (java.time.Instant/now)))])
+            (try
+              (git-run! repo-dir ["push" "--quiet" "origin" (format "HEAD:refs/heads/%s" branch)])
+              (catch clojure.lang.ExceptionInfo e
+                (if (git-push-rejected? e)
+                  (throw (ex-info (.getMessage e) (assoc (ex-data e) :git_push_rejected true) e))
+                  (throw e))))
+            (file-sha256-hex target-path))))
+      (finally
+        (cleanup)))))
+
+(defn- git-remote-revision
+  [remote]
+  (let [{:keys [repo-path branch rel-path bundle-ref]} (git-remote-ref remote)
+        {:keys [repo-dir cleanup]} (git-clone-no-checkout repo-path)]
+    (try
+      (if-not (git-checkout-remote-branch! repo-dir branch)
+        {:remote_rev nil
+         :has_remote false
+         :bundle_ref bundle-ref}
+        (let [bundle-path (str (.getPath (io/file repo-dir rel-path)))
+              [rev ok?] (file-revision bundle-path)]
+          {:remote_rev rev
+           :has_remote ok?
+           :bundle_ref bundle-ref}))
+      (finally
+        (cleanup)))))
+
+(defn- remote-revision
+  [remote]
+  (case (remote-type remote)
+    "fs"
+    (let [bundle-path (fs-remote-bundle-path remote)
+          _ (when (str/blank? bundle-path)
+              (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+          [rev ok?] (file-revision bundle-path)]
+      {:remote_rev rev
+       :has_remote ok?
+       :bundle_ref bundle-path})
+
+    "git"
+    (git-remote-revision remote)
+
+    (throw (ex-info (format "unsupported remote type %s" (pr-str (remote-type remote)))
+                    {:reason reasons/reason-unsupported-remote-type}))))
+
+(defn- materialize-remote-bundle-for-read
+  [remote]
+  (case (remote-type remote)
+    "fs"
+    (let [bundle-path (fs-remote-bundle-path remote)
+          _ (when (str/blank? bundle-path)
+              (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))]
+      {:bundle-path bundle-path
+       :bundle-ref bundle-path
+       :cleanup (fn [] nil)})
+
+    "git"
+    (let [{:keys [repo-path branch rel-path bundle-ref]} (git-remote-ref remote)
+          {:keys [repo-dir cleanup]} (git-clone-no-checkout repo-path)]
+      (if-not (git-checkout-remote-branch! repo-dir branch)
+        (do
+          (cleanup)
+          (throw (ex-info "remote bundle is missing"
+                          {:reason reasons/reason-remote-bundle-missing})))
+        (let [bundle-path (str (.getPath (io/file repo-dir rel-path)))]
+          (if-not (.exists (io/file bundle-path))
+            (do
+              (cleanup)
+              (throw (ex-info "remote bundle is missing"
+                              {:reason reasons/reason-remote-bundle-missing})))
+            {:bundle-path bundle-path
+             :bundle-ref bundle-ref
+             :cleanup cleanup}))))
+
+    (throw (ex-info (format "unsupported remote type %s" (pr-str (remote-type remote)))
+                    {:reason reasons/reason-unsupported-remote-type}))))
+
+(defn- seal-vault-to-git-remote!
+  [vault-path recipient remote]
+  (let [{:keys [repo-path branch rel-path bundle-ref]} (git-remote-ref remote)
+        tmp-dir (.toString (Files/createTempDirectory "kimen-sync-git-seal-" (make-array java.nio.file.attribute.FileAttribute 0)))
+        tmp-bundle (str (.getPath (io/file tmp-dir "vault.age")))]
+    (try
+      (bundle/seal-vault-file vault-path tmp-bundle [recipient])
+      {:remote_rev (git-push-bundle-file! repo-path branch rel-path tmp-bundle)
+       :bundle_ref bundle-ref}
+      (finally
+        (delete-recursively! tmp-dir)))))
+
 (defn- sync-secret-hash
   [type value]
   (let [digest (MessageDigest/getInstance "SHA-256")
@@ -2656,13 +2915,8 @@
 
 (defn- load-remote-vault-snapshot
   [remote passphrase include-secrets?]
-  (let [bundle-path (fs-remote-bundle-path remote)
+  (let [{:keys [bundle-path cleanup]} (materialize-remote-bundle-for-read remote)
         identity-path (some-> (get remote "identity") str/trim not-empty)
-        _ (when (str/blank? bundle-path)
-            (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-        _ (when-not (.exists (io/file bundle-path))
-            (throw (ex-info (format "remote bundle missing: %s" bundle-path)
-                            {:reason reasons/reason-remote-bundle-missing})))
         _ (when (nil? identity-path)
             (throw (ex-info "remote identity is not configured (set --identity on `remote add`)"
                             {:reason reasons/reason-remote-identity-missing})))
@@ -2675,6 +2929,7 @@
       (bundle/open-to-vault-file bundle-path tmp-path identity true)
       (load-vault-snapshot tmp-path passphrase include-secrets?)
       (finally
+        (cleanup)
         (try
           (Files/deleteIfExists tmp-path-obj)
           (catch Exception _ nil))))))
@@ -2952,12 +3207,12 @@
    (sync-status-payload ctx remote {}))
   ([ctx remote {:keys [stale-threshold-ms]}]
    (let [remote-name (get remote "name")
-         remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")
+         remote-type (remote-type remote)
          remote-path (some-> (get remote "path") str/trim)
-         bundle-path (when (= remote-type "fs") (fs-remote-bundle-path remote))
-         lock-path (when bundle-path (str bundle-path ".lock"))
+         {:keys [remote_rev has_remote bundle_ref]} (remote-revision remote)
+         lock-path (when (remote-supports-push-lock? remote)
+                     (some-> bundle_ref (str ".lock")))
          lock-file (when lock-path (io/file lock-path))
-         has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
          has-lock (boolean (and lock-file (.exists lock-file)))
          lock-age-ms (when has-lock
                        (max 0 (- (System/currentTimeMillis) (.lastModified lock-file))))
@@ -2973,24 +3228,23 @@
          recipient (some-> (get remote "recipient") str/trim not-empty)
          identity (some-> (get remote "identity") str/trim not-empty)
          sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
-         remote-rev (when has-remote (file-sha256-hex bundle-path))
          last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
          local-hash (when has-local (file-sha256-hex vault-path))
          last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
          local-changed (boolean (and has-local last-local-hash local-hash (not= last-local-hash local-hash)))
          missing-recipient? (nil? recipient)
          missing-identity? (nil? identity)
-         conflict (detect-sync-conflict last-seen remote-rev has-remote)
+         conflict (detect-sync-conflict last-seen remote_rev has_remote)
          has-conflict (boolean (:has-conflict conflict))
          conflict-reason (some-> (:reason conflict) str/trim not-empty)
          remote-changed (= conflict-reason reasons/reason-remote-changed)
-         needs-pull (boolean (and has-remote
+         needs-pull (boolean (and has_remote
                                   (or (nil? last-seen)
-                                      (not= last-seen remote-rev))))
+                                      (not= last-seen remote_rev))))
          can-push-base (cond
-                         (and (not has-remote) (some? last-seen)) false
-                         (and has-remote (nil? last-seen)) false
-                         (and has-remote (not= last-seen remote-rev)) false
+                         (and (not has_remote) (some? last-seen)) false
+                         (and has_remote (nil? last-seen)) false
+                         (and has_remote (not= last-seen remote_rev)) false
                          :else true)
          can-push (boolean (and can-push-base
                                 (not has-lock)
@@ -3002,12 +3256,12 @@
                     missing-recipient? (conj reasons/reason-remote-recipient-missing)
                     (and needs-pull missing-identity?) (conj reasons/reason-remote-identity-missing)
                     has-conflict (conj conflict-reason))
-         in-sync (boolean (and has-remote has-local (not needs-pull) (not local-changed)))
+         in-sync (boolean (and has_remote has-local (not needs-pull) (not local-changed)))
          recommended-action
          (cond
            (and needs-pull missing-identity?) "configure_remote_identity"
-           (and (not has-local) (not has-remote)) "vault_init"
-           (and (not has-local) has-remote) "sync_pull"
+           (and (not has-local) (not has_remote)) "vault_init"
+           (and (not has-local) has_remote) "sync_pull"
            (and missing-recipient? (not needs-pull)) "configure_remote_recipient"
            (and has-conflict (= conflict-reason reasons/reason-remote-disappeared)) "sync_reset_baseline_or_remote_recreate"
            (or needs-pull
@@ -3021,13 +3275,13 @@
       :remote remote-name
       :remote_type remote-type
       :remote_path remote-path
-      :bundle_path bundle-path
+      :bundle_path bundle_ref
       :vault_path vault-path
-      :remote_rev remote-rev
+      :remote_rev remote_rev
       :last_seen_rev last-seen
       :local_hash local-hash
       :last_local_hash last-local-hash
-      :has_remote has-remote
+      :has_remote has_remote
       :has_lock has-lock
       :has_local has-local
       :in_sync in-sync
@@ -3233,19 +3487,17 @@
 (defn- sync-changes-payload
   [ctx remote opts]
   (let [remote-name (get remote "name")
-        bundle-path (fs-remote-bundle-path remote)
-        has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
+        {:keys [remote_rev has_remote]} (remote-revision remote)
         vault-path (vault-path/resolve-vault-path ctx nil)
         has-local (boolean (.exists (io/file vault-path)))
-        remote-rev (when has-remote (file-sha256-hex bundle-path))
         sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
         baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
-        passphrase (when (or has-local has-remote)
+        passphrase (when (or has-local has_remote)
                      (resolve-passphrase! ctx opts))
         local-snap (if has-local
                      (load-vault-snapshot vault-path passphrase false)
                      {:hashes {}})
-        remote-snap (if has-remote
+        remote-snap (if has_remote
                       (load-remote-vault-snapshot remote passphrase false)
                       {:hashes {}})
         analysis (analyze-sync-changes baseline (:hashes local-snap) (:hashes remote-snap))
@@ -3259,8 +3511,8 @@
      :remote remote-name
      :has_baseline (:has-baseline analysis)
      :baseline_rev (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
-     :remote_rev remote-rev
-     :has_remote has-remote
+     :remote_rev remote_rev
+     :has_remote has_remote
      :has_local has-local
      :local_changed_keys (:local-changed-keys analysis)
      :remote_changed_keys (:remote-changed-keys analysis)
@@ -3281,8 +3533,7 @@
     (if parse-error
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
       (try
-        (let [remote (-> (select-sync-remote! ctx (:remote opts))
-                         ensure-fs-remote!)
+        (let [remote (select-sync-remote! ctx (:remote opts))
               payload (sync-changes-payload ctx remote opts)]
           (cond
             json?
@@ -3391,16 +3642,12 @@
 
       :else
       (try
-        (let [remote (-> (select-sync-remote! ctx (:remote opts))
-                         ensure-fs-remote!)
+        (let [remote (select-sync-remote! ctx (:remote opts))
               remote-name (get remote "name")
-              bundle-path (fs-remote-bundle-path remote)
-              _ (when (str/blank? bundle-path)
-                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-              _ (when-not (.exists (io/file bundle-path))
-                  (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+              {:keys [remote_rev has_remote]} (remote-revision remote)
+              _ (when-not has_remote
+                  (throw (ex-info "remote bundle is missing"
                                   {:reason reasons/reason-remote-bundle-missing})))
-              remote-rev (file-sha256-hex bundle-path)
               vault-path (vault-path/resolve-vault-path ctx nil)
               _ (when-not (.exists (io/file vault-path))
                   (throw (ex-info (format "local vault missing: %s" vault-path)
@@ -3437,14 +3684,14 @@
                                         {"local_hash" local-hash
                                          "baseline_secret_hashes" baseline-resolved})
                            (empty? baseline-resolved) (dissoc "baseline_secret_hashes")
-                           (empty? (:remote-changed-keys remaining)) (assoc "last_seen_rev" remote-rev))
+                           (empty? (:remote-changed-keys remaining)) (assoc "last_seen_rev" remote_rev))
               saved-entry (config/config-sync-replace! (:config-path ctx) remote-name next-entry)
               last-seen (some-> saved-entry (get "last_seen_rev") str/trim not-empty)
               payload {:ok true
                        :action "sync_resolve"
                        :exit_code 0
                        :remote remote-name
-                       :remote_rev remote-rev
+                       :remote_rev remote_rev
                        :last_seen_rev last-seen
                        :take take
                        :keys selected-keys
@@ -3503,25 +3750,33 @@
 
       :else
       (try
-        (let [remote (-> (select-sync-remote! ctx (:remote opts))
-                         ensure-fs-remote!)
+        (let [remote (select-sync-remote! ctx (:remote opts))
               remote-name (get remote "name")
-              bundle-path (fs-remote-bundle-path remote)
-              lock-path (remote-lock-path remote)
+              remote-type (remote-type remote)
               recipient (some-> (get remote "recipient") str/trim not-empty)
               vault-path (vault-path/resolve-vault-path ctx nil)
               has-local (boolean (.exists (io/file vault-path)))
               sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
               last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
-              remote-exists? (boolean (and (not (str/blank? bundle-path))
-                                           (.exists (io/file bundle-path))))
-              remote-rev-before (when remote-exists? (file-sha256-hex bundle-path))
+              {:keys [remote_rev has_remote bundle_ref]} (remote-revision remote)
+              remote-exists? has_remote
+              remote-rev-before remote_rev
               force? (boolean (:force? opts))
-              _ (when (str/blank? bundle-path)
-                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-              lock-state (await-push-lock-clear! lock-path
-                                                 (:lock-wait-ms opts)
-                                                 (:break-stale-lock-after-ms opts))
+              lock-supported? (remote-supports-push-lock? remote)
+              _ (when (and (not lock-supported?)
+                           (or (pos? (:lock-wait-ms opts))
+                               (pos? (:break-stale-lock-after-ms opts))))
+                  (throw (ex-info "--lock-wait/--break-stale-lock-after are only supported for fs remotes"
+                                  {:reason reasons/reason-sync-failed})))
+              lock-path (when lock-supported? (remote-lock-path remote))
+              _ (when (and lock-supported? (str/blank? lock-path))
+                  (throw (ex-info "remote lock path is empty" {:reason reasons/reason-missing-path})))
+              lock-state (if lock-supported?
+                           (await-push-lock-clear! lock-path
+                                                   (:lock-wait-ms opts)
+                                                   (:break-stale-lock-after-ms opts))
+                           {:locked? false
+                            :stale_lock_broken false})
               stale-lock-broken? (boolean (:stale_lock_broken lock-state))
               _ (when (:locked? lock-state)
                   (throw (ex-info "remote lock present" {:reason reasons/reason-remote-lock-present})))
@@ -3552,47 +3807,79 @@
                            :action "sync_push_dry_run"
                            :exit_code 0
                            :remote remote-name
-                           :remote_type "fs"
+                           :remote_type remote-type
                            :remote_path (get remote "path")
-                           :bundle_path bundle-path
+                           :bundle_path bundle_ref
                            :vault_path vault-path
+                           :remote_rev remote-rev-before
+                           :last_seen_rev last-seen
                            :dry_run true
                            :forced force?
                            :stale_lock_broken stale-lock-broken?
+                           :has_remote remote-exists?
                            :has_local has-local
                            :can_push true}]
               (if json?
                 (success-json payload)
                 (result {:exit-code 0
-                         :stdout (format "dry-run: would push %s -> %s\n" vault-path bundle-path)})))
-            (do
-              (bundle/seal-vault-file vault-path bundle-path [recipient])
-              (let [remote-rev (file-sha256-hex bundle-path)
-                    local-hash (file-sha256-hex vault-path)
-                    sync-passphrase (maybe-sync-passphrase ctx opts)
-                    baseline-secret-hashes (when sync-passphrase
-                                             (:hashes (load-vault-snapshot vault-path sync-passphrase false)))
-                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
-                    payload {:ok true
-                             :action "sync_push"
-                             :exit_code 0
-                             :remote remote-name
-                             :remote_type "fs"
-                             :remote_path (get remote "path")
-                             :bundle_path bundle-path
-                             :vault_path vault-path
-                             :remote_rev remote-rev
-                             :last_seen_rev remote-rev
-                             :local_hash local-hash
-                             :has_baseline_hashes (boolean baseline-secret-hashes)
-                             :forced force?
-                             :stale_lock_broken stale-lock-broken?
-                             :has_local true
-                             :can_push true}]
-                (if json?
-                  (success-json payload)
-                  (result {:exit-code 0
-                           :stdout (format "ok (pushed %s)\n" remote-name)}))))))
+                         :stdout (format "dry-run: would push %s -> %s\n" vault-path bundle_ref)})))
+            (let [{remote-rev :remote_rev
+                   bundle-ref :bundle_ref}
+                  (case remote-type
+                    "fs"
+                    (do
+                      (bundle/seal-vault-file vault-path bundle_ref [recipient])
+                      {:remote_rev (file-sha256-hex bundle_ref)
+                       :bundle_ref bundle_ref})
+
+                    "git"
+                    (try
+                      (seal-vault-to-git-remote! vault-path recipient remote)
+                      (catch clojure.lang.ExceptionInfo e
+                        (if (true? (get (ex-data e) :git_push_rejected))
+                          (let [{current-rev :remote_rev
+                                 current-has-remote :has_remote}
+                                (remote-revision remote)
+                                conflict (detect-sync-conflict remote-rev-before current-rev current-has-remote)
+                                reason (:reason conflict)]
+                            (if (:has-conflict conflict)
+                              (throw (ex-info (or (:message conflict) (.getMessage e))
+                                              (cond-> {:reason reason}
+                                                (some? (:expected-rev conflict)) (assoc :expected_rev (:expected-rev conflict))
+                                                (some? (:actual-rev conflict)) (assoc :actual_rev (:actual-rev conflict))
+                                                (some? (recommended-action-for-conflict-reason reason))
+                                                (assoc :recommended_action (recommended-action-for-conflict-reason reason)))
+                                              e))
+                              (throw e)))
+                          (throw e))))
+
+                    (throw (ex-info (format "unsupported remote type %s" (pr-str remote-type))
+                                    {:reason reasons/reason-unsupported-remote-type})))
+                  local-hash (file-sha256-hex vault-path)
+                  sync-passphrase (maybe-sync-passphrase ctx opts)
+                  baseline-secret-hashes (when sync-passphrase
+                                           (:hashes (load-vault-snapshot vault-path sync-passphrase false)))
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
+                  payload {:ok true
+                           :action "sync_push"
+                           :exit_code 0
+                           :remote remote-name
+                           :remote_type remote-type
+                           :remote_path (get remote "path")
+                           :bundle_path bundle-ref
+                           :vault_path vault-path
+                           :remote_rev remote-rev
+                           :last_seen_rev remote-rev
+                           :local_hash local-hash
+                           :has_baseline_hashes (boolean baseline-secret-hashes)
+                           :forced force?
+                           :stale_lock_broken stale-lock-broken?
+                           :has_local true
+                           :can_push true}]
+              (if json?
+                (success-json payload)
+                (result {:exit-code 0
+                         :stdout (format "ok (pushed %s)\n" remote-name)})))))
         (catch Exception e
           (sync-error-result json? e))))))
 
@@ -3617,31 +3904,28 @@
 
       :else
       (try
-        (let [remote (-> (select-sync-remote! ctx (:remote opts))
-                         ensure-fs-remote!)
+        (let [remote (select-sync-remote! ctx (:remote opts))
               remote-name (get remote "name")
-              bundle-path (fs-remote-bundle-path remote)
+              remote-type (remote-type remote)
               identity-path (some-> (get remote "identity") str/trim not-empty)
               vault-path (vault-path/resolve-vault-path ctx nil)
               local-exists? (.exists (io/file vault-path))
-              _ (when (str/blank? bundle-path)
-                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-              _ (when-not (.exists (io/file bundle-path))
-                  (throw (ex-info (format "remote bundle missing: %s" bundle-path)
-                                  {:reason reasons/reason-remote-bundle-missing})))
               _ (when (nil? identity-path)
                   (throw (ex-info "remote identity is not configured (set --identity on `remote add`)"
                                   {:reason reasons/reason-remote-identity-missing})))
               identity (bundle/load-identity {:identity-file identity-path
                                               :from-stdin? false
                                               :stdin nil})
-              remote-rev (file-sha256-hex bundle-path)
+              {:keys [remote_rev has_remote bundle_ref]} (remote-revision remote)
+              _ (when-not has_remote
+                  (throw (ex-info "remote bundle is missing"
+                                  {:reason reasons/reason-remote-bundle-missing})))
               sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
               baseline-secret-hashes-in (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
               last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
               local-hash-before (when local-exists? (file-sha256-hex vault-path))
               last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
-              remote-changed (boolean (and last-seen remote-rev (not= last-seen remote-rev)))
+              remote-changed (boolean (and last-seen remote_rev (not= last-seen remote_rev)))
               local-changed (boolean (and local-exists? last-local-hash local-hash-before (not= last-local-hash local-hash-before)))
               has-conflict (boolean (and remote-changed local-changed))
               reconcile? (boolean (:reconcile? opts))
@@ -3674,30 +3958,34 @@
                            :action "sync_pull_dry_run"
                            :exit_code 0
                            :remote remote-name
-                           :remote_type "fs"
+                           :remote_type remote-type
                            :remote_path (get remote "path")
-                           :bundle_path bundle-path
+                           :bundle_path bundle_ref
                            :vault_path vault-path
-                           :remote_rev remote-rev
+                           :remote_rev remote_rev
                            :dry_run true
                            :would_backup would-backup
                            :reconcile reconcile?
                            :remote_changed remote-changed
                            :local_changed local-changed
                            :has_conflict has-conflict
-                           :has_remote true
+                           :has_remote has_remote
                            :has_local local-exists?}]
               (if json?
                 (success-json payload)
                 (result {:exit-code 0
-                         :stdout (format "dry-run: would pull %s -> %s\n" bundle-path vault-path)})))
+                         :stdout (format "dry-run: would pull %s -> %s\n" bundle_ref vault-path)})))
             (let [backup-path (when (and local-exists? (not (:no-backup? opts)))
                                 (let [p (str vault-path ".bak." (System/currentTimeMillis))]
                                   (copy-file! vault-path p)
                                   p))
                   _ (if reconcile-passphrase
                       (apply-sync-reconcile-merge! vault-path reconcile-passphrase reconcile-local-snap reconcile-remote-snap reconcile-analysis)
-                      (bundle/open-to-vault-file bundle-path vault-path identity true))
+                      (let [{:keys [bundle-path cleanup]} (materialize-remote-bundle-for-read remote)]
+                        (try
+                          (bundle/open-to-vault-file bundle-path vault-path identity true)
+                          (finally
+                            (cleanup)))))
                   merged-key-count (if reconcile-passphrase
                                      (+ (count (:local-only-changed-keys reconcile-analysis))
                                         (count (:remote-only-changed-keys reconcile-analysis)))
@@ -3709,17 +3997,17 @@
                                            (:hashes reconcile-remote-snap)
                                            (when sync-passphrase
                                              (:hashes (load-vault-snapshot vault-path sync-passphrase false))))
-                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote_rev local-hash baseline-secret-hashes)
                   payload {:ok true
                            :action (if reconcile? "sync_pull_reconcile" "sync_pull")
                            :exit_code 0
                            :remote remote-name
-                           :remote_type "fs"
+                           :remote_type remote-type
                            :remote_path (get remote "path")
-                           :bundle_path bundle-path
+                           :bundle_path bundle_ref
                            :vault_path vault-path
-                           :remote_rev remote-rev
-                           :last_seen_rev remote-rev
+                           :remote_rev remote_rev
+                           :last_seen_rev remote_rev
                            :local_hash local-hash
                            :has_baseline_hashes (boolean baseline-secret-hashes)
                            :reconcile reconcile?
@@ -3728,7 +4016,7 @@
                            :remote_changed remote-changed
                            :local_changed local-changed
                            :has_conflict has-conflict
-                           :has_remote true
+                           :has_remote has_remote
                            :has_local true
                            :backup_path backup-path}]
               (if json?
@@ -4213,8 +4501,7 @@
     (if parse-error
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
       (try
-        (let [remote (-> (select-sync-remote! ctx (:remote opts))
-                         ensure-fs-remote!)
+        (let [remote (select-sync-remote! ctx (:remote opts))
               remote-name (get remote "name")
               clear? (:clear? opts)
               to-remote? (:to-remote? opts)
@@ -4243,13 +4530,11 @@
                          :stdout (format "ok (sync baseline cleared for %s)\n" remote-name)})))
             (let [new-rev (if (some? rev)
                             rev
-                            (let [bundle-path (fs-remote-bundle-path remote)
-                                  _ (when (str/blank? bundle-path)
-                                      (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-                                  _ (when-not (.exists (io/file bundle-path))
-                                      (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                            (let [{:keys [remote_rev has_remote]} (remote-revision remote)
+                                  _ (when-not has_remote
+                                      (throw (ex-info "remote bundle is missing"
                                                       {:reason reasons/reason-remote-bundle-missing})))]
-                              (file-sha256-hex bundle-path)))
+                              remote_rev))
                   vault-path (vault-path/resolve-vault-path ctx nil)
                   local-hash (when (.exists (io/file vault-path))
                                (file-sha256-hex vault-path))
