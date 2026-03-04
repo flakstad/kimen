@@ -57,10 +57,12 @@
     "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
     "  kimen sync status [--remote <name>] [--json]"
     "  kimen sync conflicts [--remote <name>] [--json]"
-    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--json]"
-    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--json]"
-    "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--json]"
-    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote) --yes [--json]"
+    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync restore --backup <path> [--json]"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
@@ -1078,6 +1080,8 @@
                :dry-run? false
                :force? false
                :reconcile? false
+               :passphrase-cmd nil
+               :passphrase-stdin? false
                :remote nil}]
     (if (empty? args)
       [opts nil]
@@ -1094,6 +1098,15 @@
 
           (= a "--reconcile")
           (recur (rest args) (assoc opts :reconcile? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
 
           (or (= a "--remote") (str/starts-with? a "--remote="))
           (let [[v next-args err] (parse-flag-value args "--remote")]
@@ -1114,6 +1127,8 @@
                :remote nil
                :clear? false
                :to-remote? false
+               :passphrase-cmd nil
+               :passphrase-stdin? false
                :yes? false}]
     (if (empty? args)
       [opts nil]
@@ -1130,6 +1145,15 @@
 
           (= a "--yes")
           (recur (rest args) (assoc opts :yes? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
 
           (or (= a "--remote") (str/starts-with? a "--remote="))
           (let [[v next-args err] (parse-flag-value args "--remote")]
@@ -1160,6 +1184,94 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :backup v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-sync-changes-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :terse? false
+               :passphrase-cmd nil
+               :passphrase-stdin? false
+               :remote nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--terse")
+          (recur (rest args) (assoc opts :terse? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-sync-resolve-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :take nil
+               :keys []
+               :passphrase-cmd nil
+               :passphrase-stdin? false
+               :remote nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (or (= a "--take") (str/starts-with? a "--take="))
+          (let [[v next-args err] (parse-flag-value args "--take")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :take v))))
+
+          (or (= a "--key") (str/starts-with? a "--key="))
+          (let [[v next-args err] (parse-flag-value args "--key")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :keys conj v))))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -2091,6 +2203,221 @@
               (into-array StandardCopyOption [StandardCopyOption/REPLACE_EXISTING]))
   dst)
 
+(defn- sync-secret-hash
+  [type value]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        type-bytes (.getBytes (str (or type "")) "UTF-8")
+        value-bytes (.getBytes (str (or value "")) "UTF-8")]
+    (.update digest type-bytes)
+    (.update digest (byte-array [(byte 0)]))
+    (.update digest value-bytes)
+    (hex-bytes (.digest digest))))
+
+(defn- normalize-hash-map
+  [m]
+  (when (map? m)
+    (into {}
+          (for [[k v] m
+                :let [k (some-> k str str/trim)
+                      v (some-> v str str/trim)]
+                :when (and (not (str/blank? k))
+                           (not (str/blank? v)))]
+            [k v]))))
+
+(defn- load-vault-snapshot
+  [vault-path passphrase include-secrets?]
+  (let [names (vault-v2/list-secret-names vault-path passphrase)]
+    (reduce (fn [acc name]
+              (let [sec (vault-v2/get-secret vault-path passphrase name)
+                    h (sync-secret-hash (:type sec) (:value sec))
+                    acc (assoc-in acc [:hashes name] h)]
+                (if include-secrets?
+                  (assoc-in acc [:secrets name] {:type (:type sec)
+                                                 :value (:value sec)})
+                  acc)))
+            {:hashes {}
+             :secrets (when include-secrets? {})}
+            names)))
+
+(defn- load-remote-vault-snapshot
+  [remote passphrase include-secrets?]
+  (let [bundle-path (fs-remote-bundle-path remote)
+        identity-path (some-> (get remote "identity") str/trim not-empty)
+        _ (when (str/blank? bundle-path)
+            (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+        _ (when-not (.exists (io/file bundle-path))
+            (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                            {:reason reasons/reason-remote-bundle-missing})))
+        _ (when (nil? identity-path)
+            (throw (ex-info "remote identity is not configured (set --identity on `remote add`)"
+                            {:reason reasons/reason-remote-identity-missing})))
+        identity (bundle/load-identity {:identity-file identity-path
+                                        :from-stdin? false
+                                        :stdin nil})
+        tmp-path-obj (Files/createTempFile "kimen-sync-remote-" ".vault" (make-array java.nio.file.attribute.FileAttribute 0))
+        tmp-path (.toString tmp-path-obj)]
+    (try
+      (bundle/open-to-vault-file bundle-path tmp-path identity true)
+      (load-vault-snapshot tmp-path passphrase include-secrets?)
+      (finally
+        (try
+          (Files/deleteIfExists tmp-path-obj)
+          (catch Exception _ nil))))))
+
+(def sync-change-unchanged :unchanged)
+(def sync-change-added :added)
+(def sync-change-removed :removed)
+(def sync-change-modified :modified)
+
+(defn- compute-sync-change-ops
+  [baseline current]
+  (let [keys* (->> (concat (keys baseline) (keys current))
+                   set
+                   sort)]
+    (reduce (fn [acc k]
+              (let [in-base (contains? baseline k)
+                    in-cur (contains? current k)
+                    base-hash (get baseline k)
+                    cur-hash (get current k)
+                    op (cond
+                         (and (not in-base) in-cur) sync-change-added
+                         (and in-base (not in-cur)) sync-change-removed
+                         (and in-base in-cur (not= (str/trim (str base-hash))
+                                                   (str/trim (str cur-hash))))
+                         sync-change-modified
+                         :else sync-change-unchanged)]
+                (-> acc
+                    (assoc-in [:ops k] op)
+                    (cond-> (not= op sync-change-unchanged)
+                      (update :changed conj k)))))
+            {:ops {}
+             :changed []}
+            keys*)))
+
+(defn- sync-conflict-change?
+  [local-op remote-op local-hash remote-hash]
+  (cond
+    (and (= local-op sync-change-removed) (= remote-op sync-change-removed))
+    false
+
+    (and (or (= local-op sync-change-added) (= local-op sync-change-modified))
+         (or (= remote-op sync-change-added) (= remote-op sync-change-modified)))
+    (not= (str/trim (str (or local-hash "")))
+          (str/trim (str (or remote-hash ""))))
+
+    :else
+    true))
+
+(defn- analyze-sync-changes
+  [baseline local remote]
+  (if (nil? baseline)
+    {:has-baseline false
+     :local-ops {}
+     :remote-ops {}
+     :local-changed-keys []
+     :remote-changed-keys []
+     :overlapping-keys []
+     :conflict-keys []
+     :local-only-changed-keys []
+     :remote-only-changed-keys []}
+    (let [{local-ops :ops local-changed :changed} (compute-sync-change-ops baseline local)
+          {remote-ops :ops remote-changed :changed} (compute-sync-change-ops baseline remote)
+          keys* (->> (concat (keys local-ops) (keys remote-ops))
+                     set
+                     sort)
+          merged (reduce (fn [acc k]
+                           (let [lo (get local-ops k sync-change-unchanged)
+                                 ro (get remote-ops k sync-change-unchanged)
+                                 local? (not= lo sync-change-unchanged)
+                                 remote? (not= ro sync-change-unchanged)]
+                             (cond
+                               (and local? remote?)
+                               (-> acc
+                                   (update :overlapping-keys conj k)
+                                   (cond-> (sync-conflict-change? lo ro (get local k) (get remote k))
+                                     (update :conflict-keys conj k)))
+
+                               local?
+                               (update acc :local-only-changed-keys conj k)
+
+                               remote?
+                               (update acc :remote-only-changed-keys conj k)
+
+                               :else
+                               acc)))
+                         {:overlapping-keys []
+                          :conflict-keys []
+                          :local-only-changed-keys []
+                          :remote-only-changed-keys []}
+                         keys*)]
+      {:has-baseline true
+       :local-ops local-ops
+       :remote-ops remote-ops
+       :local-changed-keys local-changed
+       :remote-changed-keys remote-changed
+       :overlapping-keys (:overlapping-keys merged)
+       :conflict-keys (:conflict-keys merged)
+       :local-only-changed-keys (:local-only-changed-keys merged)
+       :remote-only-changed-keys (:remote-only-changed-keys merged)})))
+
+(defn- diff-current-snapshots
+  [local remote]
+  (let [only-local (->> (keys local)
+                        (filter #(not (contains? remote %)))
+                        sort
+                        vec)
+        only-remote (->> (keys remote)
+                         (filter #(not (contains? local %)))
+                         sort
+                         vec)
+        different (->> (keys local)
+                       (filter #(and (contains? remote %)
+                                     (not= (str/trim (str (get local %)))
+                                           (str/trim (str (get remote %))))))
+                       sort
+                       vec)]
+    {:only-local only-local
+     :only-remote only-remote
+     :different different}))
+
+(defn- recommended-action-for-sync-analysis
+  [analysis]
+  (cond
+    (not (:has-baseline analysis)) "sync_pull_or_sync_reset_baseline"
+    (seq (:conflict-keys analysis)) "manual_reconcile"
+    (and (seq (:remote-changed-keys analysis)) (empty? (:local-changed-keys analysis))) "sync_pull"
+    (and (seq (:local-changed-keys analysis)) (empty? (:remote-changed-keys analysis))) "sync_push"
+    (or (seq (:local-changed-keys analysis))
+        (seq (:remote-changed-keys analysis))) "sync_pull_reconcile"
+    :else "none"))
+
+(defn- maybe-sync-passphrase
+  [ctx opts]
+  (let [env-pp (some-> (System/getenv passphrase/env-passphrase) str/trim not-empty)
+        cmd-pp (some-> (:passphrase-cmd opts) str/trim not-empty)]
+    (when (or env-pp cmd-pp (:passphrase-stdin? opts))
+      (resolve-passphrase! ctx opts))))
+
+(defn- resolve-sync-selected-keys!
+  [raw-keys conflict-keys]
+  (let [conflict-set (set conflict-keys)
+        selected (->> raw-keys
+                      (mapcat #(str/split (str (or % "")) #","))
+                      (map str/trim)
+                      (remove str/blank?)
+                      distinct
+                      sort
+                      vec)]
+    (if (empty? selected)
+      (vec (sort conflict-keys))
+      (let [invalid (->> selected
+                         (remove conflict-set)
+                         vec)]
+        (when (seq invalid)
+          (throw (ex-info (format "keys are not current conflict keys: %s" (str/join "," invalid))
+                          {:reason reasons/reason-resolve-key-not-conflict})))
+        selected))))
+
 (defn- select-sync-remote!
   [ctx remote-opt]
   (let [remotes (config/config-remote-list (:config-path ctx))
@@ -2241,6 +2568,195 @@
         (catch Exception e
           (sync-error-result json? e))))))
 
+(defn- sync-changes-payload
+  [ctx remote opts]
+  (let [remote-name (get remote "name")
+        bundle-path (fs-remote-bundle-path remote)
+        has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
+        vault-path (vault-path/resolve-vault-path ctx nil)
+        has-local (boolean (.exists (io/file vault-path)))
+        remote-rev (when has-remote (file-sha256-hex bundle-path))
+        sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
+        baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
+        passphrase (when (or has-local has-remote)
+                     (resolve-passphrase! ctx opts))
+        local-snap (if has-local
+                     (load-vault-snapshot vault-path passphrase false)
+                     {:hashes {}})
+        remote-snap (if has-remote
+                      (load-remote-vault-snapshot remote passphrase false)
+                      {:hashes {}})
+        analysis (analyze-sync-changes baseline (:hashes local-snap) (:hashes remote-snap))
+        current-diff (diff-current-snapshots (:hashes local-snap) (:hashes remote-snap))
+        can-reconcile (boolean (and (:has-baseline analysis)
+                                    (empty? (:conflict-keys analysis))))
+        recommended-action (recommended-action-for-sync-analysis analysis)]
+    {:ok true
+     :action "sync_changes"
+     :exit_code 0
+     :remote remote-name
+     :has_baseline (:has-baseline analysis)
+     :baseline_rev (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
+     :remote_rev remote-rev
+     :has_remote has-remote
+     :has_local has-local
+     :local_changed_keys (:local-changed-keys analysis)
+     :remote_changed_keys (:remote-changed-keys analysis)
+     :overlapping_keys (:overlapping-keys analysis)
+     :conflict_keys (:conflict-keys analysis)
+     :local_only_changed_keys (:local-only-changed-keys analysis)
+     :remote_only_changed_keys (:remote-only-changed-keys analysis)
+     :current_only_local_keys (:only-local current-diff)
+     :current_only_remote_keys (:only-remote current-diff)
+     :current_different_keys (:different current-diff)
+     :can_reconcile can-reconcile
+     :recommended_action recommended-action}))
+
+(defn- handle-sync-changes
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-changes-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (-> (select-sync-remote! ctx (:remote opts))
+                         ensure-fs-remote!)
+              payload (sync-changes-payload ctx remote opts)]
+          (cond
+            json?
+            (success-json payload)
+
+            (:terse? opts)
+            (result {:exit-code 0
+                     :stdout (format "remote=%s has_baseline=%s can_reconcile=%s local_changed=%d remote_changed=%d overlapping=%d conflicts=%d recommended_action=%s\n"
+                                     (:remote payload)
+                                     (:has_baseline payload)
+                                     (:can_reconcile payload)
+                                     (count (:local_changed_keys payload))
+                                     (count (:remote_changed_keys payload))
+                                     (count (:overlapping_keys payload))
+                                     (count (:conflict_keys payload))
+                                     (:recommended_action payload))})
+
+            :else
+            (result {:exit-code 0
+                     :stdout (str/join
+                              "\n"
+                              [(str "remote: " (:remote payload))
+                               (str "has-baseline: " (:has_baseline payload))
+                               (str "can-reconcile: " (:can_reconcile payload))
+                               (str "local-changed-keys: " (count (:local_changed_keys payload)))
+                               (str "remote-changed-keys: " (count (:remote_changed_keys payload)))
+                               (str "overlapping-keys: " (count (:overlapping_keys payload)))
+                               (str "conflict-keys: " (count (:conflict_keys payload)))
+                               (when (seq (:conflict_keys payload))
+                                 (str "conflict-list: " (str/join "," (:conflict_keys payload))))
+                               (str "recommended-action: " (:recommended_action payload))
+                               ""])})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
+(defn- apply-sync-resolve-remote!
+  [vault-path passphrase selected-keys remote-secrets]
+  (doseq [k selected-keys]
+    (if-let [sec (get remote-secrets k)]
+      (vault-v2/set-secret! vault-path passphrase k (:value sec))
+      (try
+        (vault-v2/delete-secret! vault-path passphrase k)
+        (catch clojure.lang.ExceptionInfo e
+          (when-not (= reasons/reason-secret-not-found (:reason (ex-data e)))
+            (throw e)))))))
+
+(defn- handle-sync-resolve
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-resolve-opts args)
+        json? (:json? opts)
+        take (some-> (:take opts) str/lower-case str/trim)]
+    (cond
+      parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+
+      (not (#{"local" "remote"} take))
+      (sync-error-result json? (ex-info "--take must be one of: local, remote"
+                                        {:reason reasons/reason-invalid-take}))
+
+      :else
+      (try
+        (let [remote (-> (select-sync-remote! ctx (:remote opts))
+                         ensure-fs-remote!)
+              remote-name (get remote "name")
+              bundle-path (fs-remote-bundle-path remote)
+              _ (when (str/blank? bundle-path)
+                  (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+              _ (when-not (.exists (io/file bundle-path))
+                  (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                                  {:reason reasons/reason-remote-bundle-missing})))
+              remote-rev (file-sha256-hex bundle-path)
+              vault-path (vault-path/resolve-vault-path ctx nil)
+              _ (when-not (.exists (io/file vault-path))
+                  (throw (ex-info (format "local vault missing: %s" vault-path)
+                                  {:reason reasons/reason-local-vault-missing})))
+              passphrase (resolve-passphrase! ctx opts)
+              local-snap (load-vault-snapshot vault-path passphrase false)
+              remote-snap (load-remote-vault-snapshot remote passphrase (= take "remote"))
+              sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
+              baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
+              _ (when (nil? baseline)
+                  (throw (ex-info "cannot resolve conflicts without baseline key hashes; run `kimen sync changes` after a clean sync first"
+                                  {:reason reasons/reason-no-local-baseline})))
+              analysis (analyze-sync-changes baseline (:hashes local-snap) (:hashes remote-snap))
+              _ (when (empty? (:conflict-keys analysis))
+                  (throw (ex-info "no overlapping key conflicts to resolve"
+                                  {:reason reasons/reason-no-overlapping-conflicts})))
+              selected-keys (resolve-sync-selected-keys! (:keys opts) (:conflict-keys analysis))
+              _ (when (= take "remote")
+                  (apply-sync-resolve-remote! vault-path passphrase selected-keys (:secrets remote-snap)))
+              local-resolved (if (= take "remote")
+                               (load-vault-snapshot vault-path passphrase false)
+                               local-snap)
+              baseline-resolved (reduce (fn [acc k]
+                                          (if-let [remote-hash (get-in remote-snap [:hashes k])]
+                                            (assoc acc k remote-hash)
+                                            (dissoc acc k)))
+                                        baseline
+                                        selected-keys)
+              remaining (analyze-sync-changes baseline-resolved
+                                              (:hashes local-resolved)
+                                              (:hashes remote-snap))
+              local-hash (file-sha256-hex vault-path)
+              next-entry (cond-> (merge (or sync-entry {})
+                                        {"local_hash" local-hash
+                                         "baseline_secret_hashes" baseline-resolved})
+                           (empty? baseline-resolved) (dissoc "baseline_secret_hashes")
+                           (empty? (:remote-changed-keys remaining)) (assoc "last_seen_rev" remote-rev))
+              saved-entry (config/config-sync-replace! (:config-path ctx) remote-name next-entry)
+              last-seen (some-> saved-entry (get "last_seen_rev") str/trim not-empty)
+              payload {:ok true
+                       :action "sync_resolve"
+                       :exit_code 0
+                       :remote remote-name
+                       :remote_rev remote-rev
+                       :last_seen_rev last-seen
+                       :take take
+                       :keys selected-keys
+                       :resolved_count (count selected-keys)
+                       :remaining_conflict_keys (:conflict-keys remaining)
+                       :remaining_conflict_count (count (:conflict-keys remaining))
+                       :recommended_action (recommended-action-for-sync-analysis remaining)}]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (str/join
+                              "\n"
+                              [(str "remote: " (:remote payload))
+                               (str "take: " (:take payload))
+                               (str "resolved-keys: " (:resolved_count payload))
+                               (str "remaining-conflicts: " (:remaining_conflict_count payload))
+                               (str "recommended-action: " (:recommended_action payload))
+                               ""])})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
 (defn- handle-sync-push
   [ctx args]
   (let [[opts parse-error] (parse-sync-transfer-opts args)
@@ -2307,7 +2823,10 @@
               (bundle/seal-vault-file vault-path bundle-path [recipient])
               (let [remote-rev (file-sha256-hex bundle-path)
                     local-hash (file-sha256-hex vault-path)
-                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)
+                    sync-passphrase (maybe-sync-passphrase ctx opts)
+                    baseline-secret-hashes (when sync-passphrase
+                                             (:hashes (load-vault-snapshot vault-path sync-passphrase false)))
+                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
                     payload {:ok true
                              :action "sync_push"
                              :exit_code 0
@@ -2319,6 +2838,7 @@
                              :remote_rev remote-rev
                              :last_seen_rev remote-rev
                              :local_hash local-hash
+                             :has_baseline_hashes (boolean baseline-secret-hashes)
                              :forced force?
                              :has_local true
                              :can_push true}]
@@ -2401,7 +2921,10 @@
                                   p))
                   _ (bundle/open-to-vault-file bundle-path vault-path identity true)
                   local-hash (file-sha256-hex vault-path)
-                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)
+                  sync-passphrase (maybe-sync-passphrase ctx opts)
+                  baseline-secret-hashes (when sync-passphrase
+                                           (:hashes (load-vault-snapshot vault-path sync-passphrase false)))
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)
                   payload {:ok true
                            :action "sync_pull"
                            :exit_code 0
@@ -2413,6 +2936,7 @@
                            :remote_rev remote-rev
                            :last_seen_rev remote-rev
                            :local_hash local-hash
+                           :has_baseline_hashes (boolean baseline-secret-hashes)
                            :reconciled (boolean (and reconcile? has-conflict))
                            :remote_changed remote-changed
                            :local_changed local-changed
@@ -2428,12 +2952,14 @@
           (sync-error-result json? e))))))
 
 (defn- sync-transfer-args
-  [{:keys [remote json? dry-run? force? reconcile?]}]
+  [{:keys [remote json? dry-run? force? reconcile? passphrase-cmd passphrase-stdin?]}]
   (cond-> []
     (some? remote) (conj "--remote" remote)
     dry-run? (conj "--dry-run")
     force? (conj "--force")
     reconcile? (conj "--reconcile")
+    passphrase-stdin? (conj "--passphrase-stdin")
+    (some? passphrase-cmd) (conj "--passphrase-cmd" passphrase-cmd)
     json? (conj "--json")))
 
 (defn- handle-sync-auto
@@ -2449,11 +2975,15 @@
               push-args (sync-transfer-args {:remote remote-name
                                              :json? json?
                                              :dry-run? (:dry-run? opts)
-                                             :force? (:force? opts)})
+                                             :force? (:force? opts)
+                                             :passphrase-cmd (:passphrase-cmd opts)
+                                             :passphrase-stdin? (:passphrase-stdin? opts)})
               pull-args (sync-transfer-args {:remote remote-name
                                              :json? json?
                                              :dry-run? (:dry-run? opts)
-                                             :reconcile? (:reconcile? opts)})
+                                             :reconcile? (:reconcile? opts)
+                                             :passphrase-cmd (:passphrase-cmd opts)
+                                             :passphrase-stdin? (:passphrase-stdin? opts)})
               decision (cond
                          (:has_lock status) :blocked-lock
                          (:has_conflict status) (if (:reconcile? opts) :pull :blocked-overlap)
@@ -2521,7 +3051,10 @@
                   vault-path (vault-path/resolve-vault-path ctx nil)
                   local-hash (when (.exists (io/file vault-path))
                                (file-sha256-hex vault-path))
-                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)]
+                  sync-passphrase (maybe-sync-passphrase ctx opts)
+                  baseline-secret-hashes (when sync-passphrase
+                                           (:hashes (load-remote-vault-snapshot remote sync-passphrase false)))
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)]
               (if json?
                 (success-json {:ok true
                                :action "sync_reset_baseline"
@@ -2529,7 +3062,8 @@
                                :remote remote-name
                                :mode "to_remote"
                                :remote_rev remote-rev
-                               :local_hash local-hash})
+                               :local_hash local-hash
+                               :has_baseline_hashes (boolean baseline-secret-hashes)})
                 (result {:exit-code 0
                          :stdout (format "ok (sync baseline set to remote for %s)\n" remote-name)})))))
         (catch Exception e
@@ -2691,6 +3225,8 @@
       (= "init" (first args)) (handle-sync-init ctx (rest args))
       (= "status" (first args)) (handle-sync-status ctx (rest args))
       (= "conflicts" (first args)) (handle-sync-conflicts ctx (rest args))
+      (= "changes" (first args)) (handle-sync-changes ctx (rest args))
+      (= "resolve" (first args)) (handle-sync-resolve ctx (rest args))
       (= "push" (first args)) (handle-sync-push ctx (rest args))
       (= "pull" (first args)) (handle-sync-pull ctx (rest args))
       (= "reset-baseline" (first args)) (handle-sync-reset-baseline ctx (rest args))

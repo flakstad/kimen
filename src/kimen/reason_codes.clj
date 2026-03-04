@@ -83,6 +83,9 @@
 (def reason-remote-changed "remote_changed")
 (def reason-no-local-baseline "no_local_baseline")
 (def reason-overlapping-changes "overlapping_changes")
+(def reason-invalid-take "invalid_take")
+(def reason-no-overlapping-conflicts "no_overlapping_conflicts")
+(def reason-resolve-key-not-conflict "resolve_key_not_conflict")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -169,6 +172,9 @@
    reason-remote-changed
    reason-no-local-baseline
    reason-overlapping-changes
+   reason-invalid-take
+   reason-no-overlapping-conflicts
+   reason-resolve-key-not-conflict
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type
