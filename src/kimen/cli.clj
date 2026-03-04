@@ -61,6 +61,7 @@
     "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--json]"
     "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--json]"
     "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote) --yes [--json]"
+    "  kimen sync restore --backup <path> [--json]"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -1135,6 +1136,30 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-sync-restore-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :backup nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (or (= a "--backup") (str/starts-with? a "--backup="))
+          (let [[v next-args err] (parse-flag-value args "--backup")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :backup v))))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -2510,6 +2535,35 @@
         (catch Exception e
           (sync-error-result json? e))))))
 
+(defn- handle-sync-restore
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-restore-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [backup-path (some-> (:backup opts) str/trim)
+              _ (when (str/blank? backup-path)
+                  (throw (ex-info "--backup is required"
+                                  {:reason reasons/reason-sync-failed})))
+              backup-file (io/file backup-path)
+              _ (when-not (.exists backup-file)
+                  (throw (ex-info (format "backup file missing: %s" backup-path)
+                                  {:reason reasons/reason-input-missing})))
+              vault-path (vault-path/resolve-vault-path ctx nil)
+              _ (copy-file! backup-path vault-path)]
+          (if json?
+            (success-json {:ok true
+                           :action "sync_restore"
+                           :exit_code 0
+                           :backup_path backup-path
+                           :vault_path vault-path
+                           :restored true})
+            (result {:exit-code 0
+                     :stdout (format "ok (restored %s)\n" backup-path)})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
 (defn- handle-sync-init
   [ctx args]
   (let [[opts parse-error] (parse-sync-init-opts args)
@@ -2640,6 +2694,7 @@
       (= "push" (first args)) (handle-sync-push ctx (rest args))
       (= "pull" (first args)) (handle-sync-pull ctx (rest args))
       (= "reset-baseline" (first args)) (handle-sync-reset-baseline ctx (rest args))
+      (= "restore" (first args)) (handle-sync-restore ctx (rest args))
       :else (error-text 1 "unknown sync command"))))
 
 (defn- handle-vault-path

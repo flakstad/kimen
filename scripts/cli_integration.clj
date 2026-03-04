@@ -158,7 +158,14 @@
       (.delete (io/file vault-path))
       (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
         (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
-      (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) "sync_pull"))
+      (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) "sync_pull")
+      (let [restore-backup (str (.getPath temp-dir) "/manual-restore.backup.db")]
+        (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "restore-source" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+        (spit restore-backup (slurp vault-path))
+        (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "restore-mutated" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+        (expect-success-json! (run-kimen repo-root base-env ["sync" "restore" "--backup" restore-backup "--json"]) "sync_restore")
+        (let [restored (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")]
+          (ensure! (= "cmVzdG9yZS1zb3VyY2U=" (get restored "value_b64")) "expected source value after sync restore" {:restored restored}))))
 
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")

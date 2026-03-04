@@ -795,6 +795,41 @@
           (is (= exit-code/code-sync-failed exit-code))
           (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))))))
 
+(deftest sync-restore-restores-vault-from-backup
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        backup-path (str (.getPath dir) "/vault.backup.db")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "restore-source" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (spit backup-path (slurp vault-path))
+    (run-cli ["secret" "set" "api_key" "--value" "restore-mutated" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "restore" "--backup" backup-path "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_restore" (get payload "action")))
+      (is (= true (get payload "restored"))))
+
+    (let [{:keys [exit-code stdout]}
+          (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"value_b64\":\"cmVzdG9yZS1zb3VyY2U=\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "restore" "--backup" (str (.getPath dir) "/missing.backup") "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"input_missing\"")))))
+
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
