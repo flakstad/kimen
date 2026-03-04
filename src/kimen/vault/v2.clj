@@ -1,22 +1,23 @@
 (ns kimen.vault.v2
   (:require
-    [clojure.java.io :as io]
-    [clojure.string :as str]
-    [kimen.json :as json]
-    [kimen.reason-codes :as reasons])
+   [clojure.java.io :as io]
+   [clojure.string :as str]
+   [kimen.json :as json]
+   [kimen.reason-codes :as reasons])
   (:import
-    [java.security SecureRandom]
-    [java.time Instant]
-    [java.util Base64]
-    [javax.crypto Cipher SecretKeyFactory]
-    [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]
-    [java.nio.file Files Path Paths StandardCopyOption]
-    [java.nio.file.attribute PosixFilePermission]))
+   [java.nio.file Files Path Paths StandardCopyOption]
+   [java.nio.file.attribute PosixFilePermission]
+   [java.security SecureRandom]
+   [java.time Instant]
+   [java.util Base64]
+   [javax.crypto Cipher SecretKeyFactory]
+   [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]))
 
 (def format-version "kimen-v2")
 (def kdf-name "pbkdf2-hmac-sha256")
 (def cipher-name "aes-gcm")
-(def aad "kimen-v2|vault")
+(def aad-vault "kimen-v2|vault")
+(def aad-wrap-prefix "kimen-v2|wrap")
 (def default-iterations 210000)
 (def default-key-len-bytes 32)
 (def default-nonce-len 12)
@@ -62,31 +63,42 @@
         (.clearPassword spec)))))
 
 (defn- encrypt-bytes
-  [^bytes key ^bytes plaintext ^bytes nonce]
+  [^bytes key ^bytes plaintext ^bytes nonce aad]
   (let [cipher (Cipher/getInstance "AES/GCM/NoPadding")
         key-spec (SecretKeySpec. key "AES")
         gcm (GCMParameterSpec. 128 nonce)]
     (.init cipher Cipher/ENCRYPT_MODE key-spec gcm)
-    (.updateAAD cipher (.getBytes aad "UTF-8"))
+    (.updateAAD cipher (.getBytes (str aad) "UTF-8"))
     (.doFinal cipher plaintext)))
 
+(defn- auth-failure?
+  [^Exception e]
+  (let [class-name (.getName (class e))
+        msg (some-> (.getMessage e) str/lower-case)]
+    (or (str/includes? class-name "AEADBadTagException")
+        (and msg (or (str/includes? msg "tag mismatch")
+                     (str/includes? msg "mac check"))))))
+
 (defn- decrypt-bytes
-  [^bytes key ^bytes ciphertext ^bytes nonce]
+  [^bytes key ^bytes ciphertext ^bytes nonce aad wrong-passphrase? invalid-message]
   (try
     (let [cipher (Cipher/getInstance "AES/GCM/NoPadding")
           key-spec (SecretKeySpec. key "AES")
           gcm (GCMParameterSpec. 128 nonce)]
       (.init cipher Cipher/DECRYPT_MODE key-spec gcm)
-      (.updateAAD cipher (.getBytes aad "UTF-8"))
+      (.updateAAD cipher (.getBytes (str aad) "UTF-8"))
       (.doFinal cipher ciphertext))
     (catch Exception e
-      (let [class-name (.getName (class e))
-            msg (some-> (.getMessage e) str/lower-case)]
-        (if (or (str/includes? class-name "AEADBadTagException")
-                (and msg (or (str/includes? msg "tag mismatch")
-                             (str/includes? msg "mac check"))))
-          (fail! reasons/reason-wrong-passphrase "wrong passphrase")
-          (fail! reasons/reason-invalid-vault-file "invalid vault ciphertext"))))))
+      (if (and wrong-passphrase? (auth-failure? e))
+        (fail! reasons/reason-wrong-passphrase "wrong passphrase")
+        (fail! reasons/reason-invalid-vault-file invalid-message)))))
+
+(defn- concat-bytes
+  [^bytes a ^bytes b]
+  (let [out (byte-array (+ (alength a) (alength b)))]
+    (System/arraycopy a 0 out 0 (alength a))
+    (System/arraycopy b 0 out (alength a) (alength b))
+    out))
 
 (defn- empty-vault-data
   []
@@ -104,8 +116,8 @@
   [^Path p]
   (try
     (Files/setPosixFilePermissions
-      p
-      #{PosixFilePermission/OWNER_READ PosixFilePermission/OWNER_WRITE})
+     p
+     #{PosixFilePermission/OWNER_READ PosixFilePermission/OWNER_WRITE})
     (catch Exception _ nil)))
 
 (defn- write-file-atomic!
@@ -140,9 +152,41 @@
       (fail! reasons/reason-invalid-vault-file "missing encryption metadata"))
     (when-not (string? ciphertext-b64)
       (fail! reasons/reason-invalid-vault-file "missing ciphertext"))
+    (when (and (contains? kdf "wrapped_dek_b64")
+               (not (string? (get kdf "wrapped_dek_b64"))))
+      (fail! reasons/reason-invalid-vault-file "invalid wrapped key metadata"))
     {:kdf kdf
      :enc enc
      :ciphertext-b64 ciphertext-b64}))
+
+(defn- kdf-aad
+  [kdf]
+  (format "%s|%s|%s|%d|%d"
+          format-version
+          (get kdf "name")
+          (get kdf "salt_b64")
+          (long (or (get kdf "iterations") 0))
+          (long (or (get kdf "key_len") 0))))
+
+(defn- wrap-dek
+  [^bytes kek ^bytes dek kdf]
+  (let [nonce (random-bytes default-nonce-len)
+        ciphertext (encrypt-bytes kek dek nonce (str aad-wrap-prefix "|" (kdf-aad kdf)))]
+    (concat-bytes nonce ciphertext)))
+
+(defn- unwrap-dek
+  [^bytes kek wrapped-b64 kdf]
+  (let [wrapped (b64-decode wrapped-b64)]
+    (when (<= (alength wrapped) default-nonce-len)
+      (fail! reasons/reason-invalid-vault-file "invalid wrapped key payload"))
+    (let [nonce (byte-array default-nonce-len)
+          ciphertext (byte-array (- (alength wrapped) default-nonce-len))]
+      (System/arraycopy wrapped 0 nonce 0 default-nonce-len)
+      (System/arraycopy wrapped default-nonce-len ciphertext 0 (alength ciphertext))
+      (let [dek (decrypt-bytes kek ciphertext nonce (str aad-wrap-prefix "|" (kdf-aad kdf)) true "invalid wrapped key payload")]
+        (when-not (= default-key-len-bytes (alength dek))
+          (fail! reasons/reason-invalid-vault-file "invalid wrapped key length"))
+        dek))))
 
 (defn- decode-vault
   [m passphrase]
@@ -150,9 +194,15 @@
         kdf-name* (get kdf "name")
         iterations (long (or (get kdf "iterations") 0))
         key-len (long (or (get kdf "key_len") 0))
-        salt (b64-decode (or (get kdf "salt_b64") ""))
+        salt-b64 (or (get kdf "salt_b64") "")
+        salt (b64-decode salt-b64)
+        wrapped-dek-b64 (get kdf "wrapped_dek_b64")
         cipher* (get enc "cipher")
-        nonce (b64-decode (or (get enc "nonce_b64") ""))]
+        nonce (b64-decode (or (get enc "nonce_b64") ""))
+        kdf' {"name" kdf-name*
+              "iterations" iterations
+              "key_len" key-len
+              "salt_b64" salt-b64}]
     (when-not (= kdf-name* kdf-name)
       (fail! reasons/reason-invalid-vault-file "unsupported kdf"))
     (when-not (= cipher* cipher-name)
@@ -163,16 +213,23 @@
               (< (alength salt) 8)
               (< (alength nonce) 8))
       (fail! reasons/reason-invalid-vault-file "invalid vault crypto metadata"))
-    (let [key (derive-key passphrase salt iterations key-len)
-          plaintext (decrypt-bytes key (b64-decode ciphertext-b64) nonce)
-          decoded (json/read-str (String. plaintext "UTF-8"))]
+    (let [kek (derive-key passphrase salt iterations key-len)
+          data-key (if (some? wrapped-dek-b64)
+                     (do
+                       (when (str/blank? wrapped-dek-b64)
+                         (fail! reasons/reason-invalid-vault-file "invalid wrapped key metadata"))
+                       (unwrap-dek kek wrapped-dek-b64 kdf'))
+                     kek)
+          plaintext (decrypt-bytes data-key (b64-decode ciphertext-b64) nonce aad-vault true "invalid vault ciphertext")
+          decoded (json/read-str (String. plaintext "UTF-8"))
+          secrets (get decoded "secrets")]
       (when-not (map? decoded)
         (fail! reasons/reason-invalid-vault-file "invalid vault payload"))
-      {:meta {"kdf" kdf
+      {:meta {"kdf" (cond-> kdf'
+                       (some? wrapped-dek-b64) (assoc "wrapped_dek_b64" wrapped-dek-b64))
               "enc" {"cipher" cipher-name}
               "format_version" format-version}
-       :data (let [secrets (get decoded "secrets")]
-               {"secrets" (if (map? secrets) secrets {})})})))
+       :data {"secrets" (if (map? secrets) secrets {})}})))
 
 (defn- encode-vault
   [data passphrase kdf]
@@ -181,18 +238,22 @@
                (random-bytes default-salt-len))
         iterations (long (or (get kdf "iterations") default-iterations))
         key-len (long (or (get kdf "key_len") default-key-len-bytes))
-        key (derive-key passphrase salt iterations key-len)
+        salt-b64 (b64-encode salt)
+        kdf' {"name" kdf-name
+              "iterations" iterations
+              "key_len" key-len
+              "salt_b64" salt-b64}
+        kek (derive-key passphrase salt iterations key-len)
+        dek (random-bytes default-key-len-bytes)
+        wrapped-dek (wrap-dek kek dek kdf')
         nonce (random-bytes default-nonce-len)
         plaintext (.getBytes (json/write-str {"secrets" (or (get data "secrets") {})}) "UTF-8")
-        ciphertext (encrypt-bytes key plaintext nonce)]
+        ciphertext (encrypt-bytes dek plaintext nonce aad-vault)]
     {"format_version" format-version
-     "kdf" {"name" kdf-name
-             "iterations" iterations
-             "key_len" key-len
-             "salt_b64" (b64-encode salt)}
+     "kdf" (assoc kdf' "wrapped_dek_b64" (b64-encode wrapped-dek))
      "enc" {"cipher" cipher-name
              "nonce_b64" (b64-encode nonce)
-             "aad" aad}
+             "aad" aad-vault}
      "ciphertext_b64" (b64-encode ciphertext)}))
 
 (defn- load-vault-file
@@ -213,8 +274,10 @@
   (let [f (io/file path)]
     (when (.exists f)
       (fail! reasons/reason-vault-exists (format "vault already exists: %s" path))))
-  (let [encoded (encode-vault (empty-vault-data) passphrase {"iterations" default-iterations
-                                                              "key_len" default-key-len-bytes})]
+  (let [encoded (encode-vault (empty-vault-data)
+                              passphrase
+                              {"iterations" default-iterations
+                               "key_len" default-key-len-bytes})]
     (write-file-atomic! path (json/write-str encoded))
     path))
 
@@ -237,8 +300,9 @@
 
 (defn- save-vault!
   [{:keys [path meta]} passphrase data]
-  (let [kdf (or (get meta "kdf") {"iterations" default-iterations
-                                   "key_len" default-key-len-bytes})
+  (let [kdf (or (get meta "kdf")
+                {"iterations" default-iterations
+                 "key_len" default-key-len-bytes})
         encoded (encode-vault data passphrase kdf)]
     (write-file-atomic! path (json/write-str encoded))
     path))
@@ -332,7 +396,9 @@
   (when (str/blank? (str new-passphrase))
     (fail! reasons/reason-missing-passphrase "no passphrase provided"))
   (let [{:keys [data]} (open-vault path old-passphrase)
-        encoded (encode-vault data new-passphrase {"iterations" default-iterations
-                                                   "key_len" default-key-len-bytes})]
+        encoded (encode-vault data
+                              new-passphrase
+                              {"iterations" default-iterations
+                               "key_len" default-key-len-bytes})]
     (write-file-atomic! path (json/write-str encoded))
     path))

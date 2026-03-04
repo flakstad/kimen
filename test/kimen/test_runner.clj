@@ -9,7 +9,8 @@
     kimen.json-test
     kimen.mapfile-test
     kimen.reason-codes-test
-    kimen.sync-state-test])
+    kimen.sync-state-test
+    kimen.vault-v2-test])
 
 (defn main!
   []
