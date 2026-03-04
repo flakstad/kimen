@@ -8,7 +8,8 @@
     kimen.cli-test
     kimen.json-test
     kimen.mapfile-test
-    kimen.reason-codes-test])
+    kimen.reason-codes-test
+    kimen.sync-state-test])
 
 (defn main!
   []
