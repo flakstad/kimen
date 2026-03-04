@@ -545,6 +545,92 @@
         (is (= exit-code/code-sync-conflict exit-code))
         (is (str/includes? stderr "\"reason\":\"remote_changed\""))))))
 
+(deftest sync-push-conflict-when-remote-disappeared
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                                      {:config-path cfg-path})
+            payload (json/read-str stdout)
+            bundle-path (get payload "bundle_path")]
+        (.delete (io/file bundle-path))
+        (let [{:keys [exit-code stderr]}
+              (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
+                       {:config-path cfg-path})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (= "remote_disappeared" (get err "reason")))
+          (is (= "sync_reset_baseline_or_remote_recreate" (get err "recommended_action")))
+          (is (string? (get err "expected_rev"))))))))
+
+(deftest sync-status-and-conflicts-report-remote-disappeared
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                                      {:config-path cfg-path})
+            payload (json/read-str stdout)
+            bundle-path (get payload "bundle_path")]
+        (.delete (io/file bundle-path))
+        (let [{:keys [exit-code stdout stderr]}
+              (run-cli ["sync" "status" "--remote" "origin" "--json"] {}
+                       {:config-path cfg-path})
+              status (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= true (get status "has_conflict")))
+          (is (= "remote_disappeared" (get status "reason")))
+          (is (= "remote_disappeared" (first (get status "blockers"))))
+          (is (= "sync_reset_baseline_or_remote_recreate" (get status "recommended_action"))))
+        (let [{:keys [exit-code stderr]}
+              (run-cli ["sync" "status" "--remote" "origin" "--strict" "--json"] {}
+                       {:config-path cfg-path})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (= "remote_disappeared" (get err "reason")))
+          (is (= "sync_reset_baseline_or_remote_recreate" (get err "recommended_action"))))
+        (let [{:keys [exit-code stdout stderr]}
+              (run-cli ["sync" "conflicts" "--remote" "origin" "--json"] {}
+                       {:config-path cfg-path})
+              conflicts (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= true (get conflicts "has_conflict")))
+          (is (= "remote_disappeared" (get conflicts "reason")))
+          (is (= "remote_disappeared" (first (get conflicts "blockers"))))
+          (is (= "sync_reset_baseline_or_remote_recreate" (get conflicts "recommended_action"))))
+        (let [{:keys [exit-code stderr]}
+              (run-cli ["sync" "conflicts" "--remote" "origin" "--strict" "--json"] {}
+                       {:config-path cfg-path})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (= "remote_disappeared" (get err "reason")))
+          (is (= "sync_reset_baseline_or_remote_recreate" (get err "recommended_action"))))))))
+
 (deftest sync-conflicts-reports-local-and-remote-drift
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
