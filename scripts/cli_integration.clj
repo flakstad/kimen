@@ -101,6 +101,13 @@
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "open" "--in" bundle-path "--out-vault" opened-vault "--identity" id-path "--json"]) "bundle_open")
       (expect-error-json! (run-kimen repo-root base-env ["bundle" "open" "--json"]) 25 "missing_in"))
 
+    (expect-success-json! (run-kimen repo-root base-env ["remote" "add" "origin" "--path" (str (.getPath temp-dir) "/remote-a") "--identity" id-path "--json"]) "remote_add")
+    (expect-success-json! (run-kimen repo-root base-env ["remote" "get" "origin" "--json"]) "remote_get")
+    (expect-success-json! (run-kimen repo-root base-env ["remote" "set" "origin" "--path" (str (.getPath temp-dir) "/remote-b") "--json"]) "remote_set")
+    (expect-success-json! (run-kimen repo-root base-env ["remote" "list" "--json"]) "remote_list")
+    (expect-success-json! (run-kimen repo-root base-env ["remote" "rm" "origin" "--json"]) "remote_rm")
+    (expect-error-json! (run-kimen repo-root base-env ["remote" "add" "bad/name" "--path" (str (.getPath temp-dir) "/remote-c") "--json"]) 30 "invalid_remote_name")
+
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-deploy" "--out" workflow-deploy "--json"]) "init_ci_deploy")

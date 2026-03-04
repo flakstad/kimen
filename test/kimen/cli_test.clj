@@ -223,6 +223,79 @@
       (is (= exit-code/code-config-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"unknown_unlock_method\"")))))
 
+(deftest remote-lifecycle-and-typed-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        id-path (str (.getPath dir) "/bundle.agekey")
+        remote-a (str (.getPath dir) "/remote-a")
+        remote-b (str (.getPath dir) "/remote-b")]
+    (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["remote" "add" "origin" "--path" remote-a "--identity" id-path "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)
+          remote (get payload "remote")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "remote_add" (get payload "action")))
+      (is (= "origin" (get payload "name")))
+      (is (= "origin" (get remote "name")))
+      (is (= "fs" (get remote "type")))
+      (is (= remote-a (get remote "path")))
+      (is (str/starts-with? (get remote "recipient") "age1")))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["remote" "get" "origin" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "remote_get" (get payload "action")))
+      (is (= "origin" (get payload "name")))
+      (is (= remote-a (get-in payload ["remote" "path"]))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["remote" "set" "origin" "--path" remote-b "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "remote_set" (get payload "action")))
+      (is (= remote-b (get-in payload ["remote" "path"])))
+      (is (= false (get payload "baseline_reset"))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["remote" "list" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "remote_list" (get payload "action")))
+      (is (= 1 (get payload "count")))
+      (is (= "origin" (get-in payload ["remotes" 0 "name"]))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["remote" "rm" "origin" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "remote_rm" (get payload "action")))
+      (is (= "origin" (get payload "name"))))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["remote" "add" "bad/name" "--path" remote-a "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-remote-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_remote_name\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["remote" "set" "origin" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-remote-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_remote_set_fields\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["remote" "add" "origin" "--path" remote-a "--derive-recipient" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-remote-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_identity_for_recipient_derivation\"")))))
+
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")

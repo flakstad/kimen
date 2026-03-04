@@ -59,6 +59,21 @@
 (def reason-config-path-unavailable "config_path_unavailable")
 (def reason-config-failed "config_failed")
 
+(def reason-empty-remote-name "empty_remote_name")
+(def reason-invalid-remote-name "invalid_remote_name")
+(def reason-remote-not-found "remote_not_found")
+(def reason-remote-exists "remote_exists")
+(def reason-unsupported-remote-type "unsupported_remote_type")
+(def reason-missing-remote-set-fields "missing_remote_set_fields")
+(def reason-conflicting-derive-flags "conflicting_derive_flags")
+(def reason-conflicting-derive-recipient-inputs "conflicting_derive_recipient_inputs")
+(def reason-missing-identity-for-recipient-derivation "missing_identity_for_recipient_derivation")
+(def reason-recipient-derivation-failed "recipient_derivation_failed")
+(def reason-git-fields-require-git-type "git_fields_require_git_type")
+(def reason-missing-path "missing_path")
+(def reason-empty-path "empty_path")
+(def reason-remote-failed "remote_failed")
+
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
 (def reason-invalid-remote-type "invalid_remote_type")
@@ -119,6 +134,20 @@
    reason-invalid-config-json
    reason-config-path-unavailable
    reason-config-failed
+   reason-empty-remote-name
+   reason-invalid-remote-name
+   reason-remote-not-found
+   reason-remote-exists
+   reason-unsupported-remote-type
+   reason-missing-remote-set-fields
+   reason-conflicting-derive-flags
+   reason-conflicting-derive-recipient-inputs
+   reason-missing-identity-for-recipient-derivation
+   reason-recipient-derivation-failed
+   reason-git-fields-require-git-type
+   reason-missing-path
+   reason-empty-path
+   reason-remote-failed
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type

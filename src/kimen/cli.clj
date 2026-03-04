@@ -47,6 +47,11 @@
      "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
      "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
      "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
+     "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
+     "  kimen remote get <name> [--json]"
+     "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
+     "  kimen remote list [--json]"
+     "  kimen remote rm <name> [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -71,6 +76,8 @@
      "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
      ""]))
+
+(def remote-name-re #"^[A-Za-z0-9_.-]+$")
 
 (defn- json-line
   [x]
@@ -840,6 +847,104 @@
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
 
+(defn- parse-remote-name-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :name nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:name opts))
+          (recur (rest args) (assoc opts :name a))
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-remote-upsert-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :name nil
+               :type nil
+               :path nil
+               :recipient nil
+               :identity nil
+               :branch nil
+               :bundle-path nil
+               :derive-recipient? false
+               :no-derive-recipient? false
+               :type-set? false
+               :path-set? false
+               :recipient-set? false
+               :identity-set? false
+               :branch-set? false
+               :bundle-path-set? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--derive-recipient")
+          (recur (rest args) (assoc opts :derive-recipient? true))
+
+          (= a "--no-derive-recipient")
+          (recur (rest args) (assoc opts :no-derive-recipient? true))
+
+          (or (= a "--type") (str/starts-with? a "--type="))
+          (let [[v next-args err] (parse-flag-value args "--type")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :type v :type-set? true))))
+
+          (or (= a "--path") (str/starts-with? a "--path="))
+          (let [[v next-args err] (parse-flag-value args "--path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :path v :path-set? true))))
+
+          (or (= a "--recipient") (str/starts-with? a "--recipient="))
+          (let [[v next-args err] (parse-flag-value args "--recipient")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :recipient v :recipient-set? true))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity v :identity-set? true))))
+
+          (or (= a "--branch") (str/starts-with? a "--branch="))
+          (let [[v next-args err] (parse-flag-value args "--branch")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :branch v :branch-set? true))))
+
+          (or (= a "--bundle-path") (str/starts-with? a "--bundle-path="))
+          (let [[v next-args err] (parse-flag-value args "--bundle-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :bundle-path v :bundle-path-set? true))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:name opts))
+          (recur (rest args) (assoc opts :name a))
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
 (defn- parse-init-ci-pr-safety-opts
   [args]
   (loop [args args
@@ -1422,6 +1527,283 @@
 
       :else
       (error-text 1 "unknown config command"))))
+
+(defn- remote-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-remote-failed)]
+    (if json?
+      (error-json exit-code/code-remote-failed reason (.getMessage e))
+      (error-text exit-code/code-remote-failed (.getMessage e)))))
+
+(defn- validate-remote-name!
+  [name]
+  (let [name (some-> name str/trim)]
+    (when (str/blank? name)
+      (throw (ex-info "empty remote name" {:reason reasons/reason-empty-remote-name})))
+    (when-not (re-matches remote-name-re name)
+      (throw (ex-info (format "invalid remote name %s" (pr-str name))
+                      {:reason reasons/reason-invalid-remote-name})))
+    name))
+
+(defn- build-remote-map
+  [{:keys [name type path recipient identity branch bundle-path]}]
+  (let [type (config/normalize-remote-type type)
+        path (some-> path str/trim)
+        recipient (some-> recipient str/trim)
+        identity (some-> identity str/trim)
+        branch (some-> branch str/trim)
+        bundle-path (some-> bundle-path str/trim)
+        base (cond-> {"name" (some-> name str/trim)
+                      "type" type
+                      "path" path}
+               (not (str/blank? recipient)) (assoc "recipient" recipient)
+               (not (str/blank? identity)) (assoc "identity" identity))]
+    (if (= type "git")
+      (cond-> base
+        (not (str/blank? branch)) (assoc "branch" branch)
+        (not (str/blank? bundle-path)) (assoc "bundle_path" bundle-path))
+      base)))
+
+(defn- handle-remote-list
+  [ctx args]
+  (let [[opts parse-error] (parse-json-only-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (remote-error-result json? (ex-info parse-error {:reason reasons/reason-remote-failed}))
+      (try
+        (let [remotes (config/config-remote-list (:config-path ctx))]
+          (if json?
+            (success-json {:ok true
+                           :action "remote_list"
+                           :exit_code 0
+                           :remotes remotes
+                           :count (count remotes)})
+            (let [out (apply str
+                             (for [r remotes]
+                               (if (= "git" (get r "type"))
+                                 (format "%s\t%s\t%s@%s:%s\n"
+                                         (get r "name")
+                                         (get r "type")
+                                         (get r "path")
+                                         (get r "branch")
+                                         (get r "bundle_path"))
+                                 (format "%s\t%s\t%s\n"
+                                         (get r "name")
+                                         (get r "type")
+                                         (get r "path")))))]
+              (result {:exit-code 0
+                       :stdout out}))))
+        (catch Exception e
+          (remote-error-result json? e))))))
+
+(defn- handle-remote-get
+  [ctx args]
+  (let [[opts parse-error] (parse-remote-name-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (remote-error-result json? (ex-info parse-error {:reason reasons/reason-remote-failed}))
+      (try
+        (let [name (validate-remote-name! (:name opts))
+              remote (config/config-remote-get (:config-path ctx) name)]
+          (if json?
+            (success-json {:ok true
+                           :action "remote_get"
+                           :exit_code 0
+                           :name name
+                           :remote remote})
+            (let [recipient (some-> (get remote "recipient") str/trim not-empty)
+                  identity (some-> (get remote "identity") str/trim not-empty)
+                  lines [(str "name: " (get remote "name"))
+                         (str "type: " (get remote "type"))
+                         (str "path: " (get remote "path"))
+                         (when (= "git" (get remote "type"))
+                           (str "branch: " (get remote "branch")))
+                         (when (= "git" (get remote "type"))
+                           (str "bundle_path: " (get remote "bundle_path")))
+                         (if recipient
+                           (str "recipient: " recipient)
+                           "recipient: (none)")
+                         (if identity
+                           (str "identity: " identity)
+                           "identity: (none)")]]
+              (result {:exit-code 0
+                       :stdout (str (str/join "\n" (remove nil? lines)) "\n")}))))
+        (catch Exception e
+          (remote-error-result json? e))))))
+
+(defn- handle-remote-rm
+  [ctx args]
+  (let [[opts parse-error] (parse-remote-name-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (remote-error-result json? (ex-info parse-error {:reason reasons/reason-remote-failed}))
+      (try
+        (let [name (validate-remote-name! (:name opts))]
+          (config/config-remote-remove! (:config-path ctx) name)
+          (if json?
+            (success-json {:ok true
+                           :action "remote_rm"
+                           :exit_code 0
+                           :name name})
+            (result {:exit-code 0
+                     :stdout (format "ok (remote %s removed)\n" name)})))
+        (catch Exception e
+          (remote-error-result json? e))))))
+
+(defn- handle-remote-add
+  [ctx args]
+  (let [[opts parse-error] (parse-remote-upsert-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (remote-error-result json? (ex-info parse-error {:reason reasons/reason-remote-failed}))
+      (try
+        (let [name (validate-remote-name! (:name opts))
+              type (config/normalize-remote-type (or (:type opts) "fs"))
+              _ (when-not (#{"fs" "git"} type)
+                  (throw (ex-info (format "unsupported remote type %s (expected fs or git)" (pr-str type))
+                                  {:reason reasons/reason-unsupported-remote-type})))
+              _ (when (and (:derive-recipient? opts) (:no-derive-recipient? opts))
+                  (throw (ex-info "--derive-recipient cannot be combined with --no-derive-recipient"
+                                  {:reason reasons/reason-conflicting-derive-flags})))
+              _ (when (and (:derive-recipient? opts)
+                           (:recipient-set? opts)
+                           (not (str/blank? (:recipient opts))))
+                  (throw (ex-info "--derive-recipient cannot be combined with --recipient"
+                                  {:reason reasons/reason-conflicting-derive-recipient-inputs})))
+              _ (when (and (not= type "git")
+                           (or (:branch-set? opts) (:bundle-path-set? opts)))
+                  (throw (ex-info "--branch/--bundle-path are only valid for --type git"
+                                  {:reason reasons/reason-git-fields-require-git-type})))
+              path (some-> (:path opts) str/trim)
+              _ (when (str/blank? path)
+                  (throw (ex-info "--path is required" {:reason reasons/reason-missing-path})))
+              identity (some-> (:identity opts) str/trim)
+              recipient (some-> (:recipient opts) str/trim)
+              should-derive? (or (:derive-recipient? opts)
+                                 (and (not (:no-derive-recipient? opts))
+                                      (str/blank? recipient)
+                                      (not (str/blank? identity))))
+              _ (when (and should-derive? (str/blank? identity))
+                  (throw (ex-info "--derive-recipient requires --identity"
+                                  {:reason reasons/reason-missing-identity-for-recipient-derivation})))
+              recipient (if should-derive?
+                          (config/derive-recipient-from-identity-file identity)
+                          recipient)
+              remote (build-remote-map {:name name
+                                        :type type
+                                        :path path
+                                        :recipient recipient
+                                        :identity identity
+                                        :branch (:branch opts)
+                                        :bundle-path (:bundle-path opts)})
+              remote (config/config-remote-add! (:config-path ctx) remote)]
+          (if json?
+            (success-json {:ok true
+                           :action "remote_add"
+                           :exit_code 0
+                           :name name
+                           :remote remote})
+            (result {:exit-code 0
+                     :stdout (format "ok (remote %s)\n" name)})))
+        (catch Exception e
+          (remote-error-result json? e))))))
+
+(defn- handle-remote-set
+  [ctx args]
+  (let [[opts parse-error] (parse-remote-upsert-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (remote-error-result json? (ex-info parse-error {:reason reasons/reason-remote-failed}))
+      (try
+        (let [name (validate-remote-name! (:name opts))
+              _ (when (and (not (:type-set? opts))
+                           (not (:path-set? opts))
+                           (not (:recipient-set? opts))
+                           (not (:identity-set? opts))
+                           (not (:branch-set? opts))
+                           (not (:bundle-path-set? opts))
+                           (not (:derive-recipient? opts)))
+                  (throw (ex-info "set at least one of --type, --path, --recipient, --identity, --branch, --bundle-path, --derive-recipient"
+                                  {:reason reasons/reason-missing-remote-set-fields})))
+              _ (when (and (:derive-recipient? opts) (:no-derive-recipient? opts))
+                  (throw (ex-info "--derive-recipient cannot be combined with --no-derive-recipient"
+                                  {:reason reasons/reason-conflicting-derive-flags})))
+              _ (when (and (:derive-recipient? opts) (:recipient-set? opts))
+                  (throw (ex-info "--derive-recipient cannot be combined with --recipient"
+                                  {:reason reasons/reason-conflicting-derive-recipient-inputs})))
+              existing (config/config-remote-get (:config-path ctx) name)
+              type (if (:type-set? opts)
+                     (config/normalize-remote-type (:type opts))
+                     (get existing "type"))
+              _ (when-not (#{"fs" "git"} type)
+                  (throw (ex-info (format "unsupported remote type %s (expected fs or git)" (pr-str type))
+                                  {:reason reasons/reason-unsupported-remote-type})))
+              path (if (:path-set? opts)
+                     (some-> (:path opts) str/trim)
+                     (get existing "path"))
+              _ (when (and (:path-set? opts) (str/blank? path))
+                  (throw (ex-info "--path cannot be empty" {:reason reasons/reason-empty-path})))
+              recipient (if (:recipient-set? opts)
+                          (some-> (:recipient opts) str/trim)
+                          (some-> (get existing "recipient") str/trim))
+              identity (if (:identity-set? opts)
+                         (some-> (:identity opts) str/trim)
+                         (some-> (get existing "identity") str/trim))
+              should-derive? (or (:derive-recipient? opts)
+                                 (and (not (:no-derive-recipient? opts))
+                                      (not (:recipient-set? opts))
+                                      (:identity-set? opts)
+                                      (not (str/blank? identity))))
+              _ (when (and should-derive? (str/blank? identity))
+                  (throw (ex-info "--derive-recipient requires --identity (or existing remote identity)"
+                                  {:reason reasons/reason-missing-identity-for-recipient-derivation})))
+              recipient (if should-derive?
+                          (config/derive-recipient-from-identity-file identity)
+                          recipient)
+              branch (if (:branch-set? opts)
+                       (some-> (:branch opts) str/trim)
+                       (some-> (get existing "branch") str/trim))
+              bundle-path (if (:bundle-path-set? opts)
+                            (some-> (:bundle-path opts) str/trim)
+                            (some-> (get existing "bundle_path") str/trim))
+              _ (when (and (not= type "git")
+                           (or (:branch-set? opts) (:bundle-path-set? opts)))
+                  (throw (ex-info "--branch/--bundle-path are only valid for --type git"
+                                  {:reason reasons/reason-git-fields-require-git-type})))
+              remote-map (build-remote-map {:name name
+                                            :type type
+                                            :path path
+                                            :recipient recipient
+                                            :identity identity
+                                            :branch branch
+                                            :bundle-path bundle-path})
+              {:keys [remote baseline-reset?]} (config/config-remote-set! (:config-path ctx) name remote-map)]
+          (if json?
+            (success-json {:ok true
+                           :action "remote_set"
+                           :exit_code 0
+                           :name name
+                           :remote remote
+                           :baseline_reset baseline-reset?})
+            (result {:exit-code 0
+                     :stdout (str (format "ok (remote %s updated)\n" name)
+                                  (when baseline-reset?
+                                    "sync baseline reset (remote endpoint changed)\n"))})))
+        (catch Exception e
+          (remote-error-result json? e))))))
+
+(defn- handle-remote
+  [ctx args]
+  (let [args (vec args)]
+    (cond
+      (= "add" (first args)) (handle-remote-add ctx (rest args))
+      (= "get" (first args)) (handle-remote-get ctx (rest args))
+      (= "set" (first args)) (handle-remote-set ctx (rest args))
+      (= "list" (first args)) (handle-remote-list ctx (rest args))
+      (or (= "rm" (first args))
+          (= "remove" (first args))
+          (= "delete" (first args))) (handle-remote-rm ctx (rest args))
+      :else (error-text 1 "unknown remote command"))))
 
 (defn- handle-vault-path
   [ctx args]
@@ -2245,6 +2627,9 @@
 
       (= "init" (first args))
       (handle-init (rest args))
+
+      (= "remote" (first args))
+      (handle-remote ctx (rest args))
 
       (and (= "map" (first args)) (= "lint" (second args)))
       (handle-map-lint ctx (drop 2 args))

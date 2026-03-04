@@ -2,6 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [kimen.bundle :as bundle]
     [kimen.json :as json])
   (:import
     [java.nio.file Files Path Paths StandardCopyOption]
@@ -149,6 +150,80 @@
       path)))
 
 (def valid-unlock-methods #{"prompt" "env" "stdin" "exec"})
+(def remote-name-re #"^[A-Za-z0-9_.-]+$")
+(def valid-remote-types #{"fs" "git"})
+
+(defn normalize-remote-type
+  [raw]
+  (let [t (some-> raw str/lower-case str/trim)]
+    (if (str/blank? t) "fs" t)))
+
+(defn- trim-str
+  [s]
+  (some-> s str/trim))
+
+(defn- apply-remote-defaults
+  [remote]
+  (let [name (trim-str (get remote "name"))
+        type (normalize-remote-type (get remote "type"))
+        path (trim-str (get remote "path"))
+        recipient (trim-str (get remote "recipient"))
+        identity (trim-str (get remote "identity"))
+        branch (trim-str (get remote "branch"))
+        bundle-path (trim-str (get remote "bundle_path"))]
+    (cond-> {"name" name
+             "type" type
+             "path" path}
+      (not (str/blank? recipient)) (assoc "recipient" recipient)
+      (not (str/blank? identity)) (assoc "identity" identity)
+      (= type "git") (assoc "branch" (if (str/blank? branch) "main" branch))
+      (= type "git") (assoc "bundle_path" (if (str/blank? bundle-path) "vault.age" bundle-path)))))
+
+(defn- validate-remote-name!
+  [name]
+  (let [name (trim-str name)]
+    (when (str/blank? name)
+      (throw (ex-info "empty remote name" {:reason "empty_remote_name"})))
+    (when-not (re-matches remote-name-re name)
+      (throw (ex-info (format "invalid remote name %s" (pr-str name))
+                      {:reason "invalid_remote_name"})))
+    name))
+
+(defn- remote-endpoint-id
+  [remote]
+  (let [r (apply-remote-defaults remote)]
+    [(get r "type")
+     (get r "path")
+     (when (= "git" (get r "type")) (get r "branch"))
+     (when (= "git" (get r "type")) (get r "bundle_path"))]))
+
+(defn- find-remote-index
+  [remotes name]
+  (first
+    (keep-indexed (fn [idx remote]
+                    (when (= (trim-str (get remote "name")) name)
+                      idx))
+                  remotes)))
+
+(defn- validate-remote!
+  [remote]
+  (let [remote (apply-remote-defaults remote)
+        name (validate-remote-name! (get remote "name"))
+        type (normalize-remote-type (get remote "type"))
+        path (trim-str (get remote "path"))
+        branch (trim-str (get remote "branch"))
+        bundle-path (trim-str (get remote "bundle_path"))]
+    (when-not (contains? valid-remote-types type)
+      (throw (ex-info (format "unsupported remote type %s (expected fs or git)" (pr-str type))
+                      {:reason "unsupported_remote_type"})))
+    (when (str/blank? path)
+      (throw (ex-info "--path is required" {:reason "missing_path"})))
+    (when (and (not= type "git")
+               (or (not (str/blank? branch))
+                   (not (str/blank? bundle-path))))
+      (throw (ex-info "--branch/--bundle-path are only valid for --type git"
+                      {:reason "git_fields_require_git_type"})))
+    (assoc remote "name" name "type" type "path" path)))
 
 (defn config-show
   [config-path-override]
@@ -207,3 +282,103 @@
   [config-path-override]
   (let [[cfg _] (load-config config-path-override)]
     (save-config! config-path-override (dissoc cfg "unlock"))))
+
+(defn config-remote-list
+  [config-path-override]
+  (let [[cfg _] (load-config config-path-override)
+        remotes (->> (or (get cfg "remotes") [])
+                     (filter map?)
+                     (map apply-remote-defaults)
+                     (sort-by #(or (get % "name") ""))
+                     vec)]
+    remotes))
+
+(defn config-remote-get
+  [config-path-override name]
+  (let [name (validate-remote-name! name)
+        [cfg _] (load-config config-path-override)
+        remotes (vec (or (get cfg "remotes") []))
+        idx (find-remote-index remotes name)]
+    (when (nil? idx)
+      (throw (ex-info (format "remote %s not found" (pr-str name))
+                      {:reason "remote_not_found"})))
+    (apply-remote-defaults (nth remotes idx))))
+
+(defn derive-recipient-from-identity-file
+  [identity-path]
+  (try
+    (let [id (bundle/load-identity {:identity-file (trim-str identity-path)
+                                    :from-stdin? false
+                                    :stdin nil})]
+      (bundle/recipient-for-identity id))
+    (catch Exception e
+      (throw (ex-info (format "derive recipient from identity: %s" (.getMessage e))
+                      {:reason "recipient_derivation_failed"}
+                      e)))))
+
+(defn config-remote-add!
+  [config-path-override remote]
+  (let [name (validate-remote-name! (get remote "name"))
+        remote (validate-remote! remote)
+        [cfg _] (load-config config-path-override)
+        remotes (vec (or (get cfg "remotes") []))]
+    (when (some? (find-remote-index remotes name))
+      (throw (ex-info (format "remote %s already exists" (pr-str name))
+                      {:reason "remote_exists"})))
+    (let [updated (->> (conj remotes remote)
+                       (sort-by #(or (trim-str (get % "name")) ""))
+                       vec)]
+      (save-config! config-path-override (assoc cfg "remotes" updated))
+      (apply-remote-defaults remote))))
+
+(defn config-remote-set!
+  [config-path-override name remote]
+  (let [name (validate-remote-name! name)
+        remote (validate-remote! remote)
+        [cfg _] (load-config config-path-override)
+        remotes (vec (or (get cfg "remotes") []))
+        idx (find-remote-index remotes name)]
+    (when (nil? idx)
+      (throw (ex-info (format "remote %s not found" (pr-str name))
+                      {:reason "remote_not_found"})))
+    (let [old-remote (nth remotes idx)
+          endpoint-changed? (not= (remote-endpoint-id old-remote)
+                                  (remote-endpoint-id remote))
+          sync-map (if (map? (get cfg "sync")) (get cfg "sync") nil)
+          baseline-reset? (boolean (and endpoint-changed?
+                                        sync-map
+                                        (contains? sync-map name)))
+          remotes' (assoc remotes idx remote)
+          sync' (if baseline-reset?
+                  (let [next-sync (dissoc sync-map name)]
+                    (when (seq next-sync)
+                      next-sync))
+                  sync-map)
+          cfg' (cond-> (assoc cfg "remotes" remotes')
+                 sync' (assoc "sync" sync')
+                 (nil? sync') (dissoc "sync"))]
+      (save-config! config-path-override cfg')
+      {:remote (apply-remote-defaults remote)
+       :baseline-reset? baseline-reset?})))
+
+(defn config-remote-remove!
+  [config-path-override name]
+  (let [name (validate-remote-name! name)
+        [cfg _] (load-config config-path-override)
+        remotes (vec (or (get cfg "remotes") []))
+        idx (find-remote-index remotes name)]
+    (when (nil? idx)
+      (throw (ex-info (format "remote %s not found" (pr-str name))
+                      {:reason "remote_not_found"})))
+    (let [remotes' (vec (concat (subvec remotes 0 idx) (subvec remotes (inc idx))))
+          sync-map (if (map? (get cfg "sync")) (get cfg "sync") nil)
+          sync' (if sync-map
+                  (let [next-sync (dissoc sync-map name)]
+                    (when (seq next-sync)
+                      next-sync))
+                  nil)
+          cfg' (cond-> (assoc cfg "remotes" remotes')
+                 sync' (assoc "sync" sync')
+                 (nil? sync') (dissoc "sync"))]
+      (save-config! config-path-override cfg')
+      name)))
