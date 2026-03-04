@@ -756,6 +756,141 @@
           (is (string? (get err "expected_rev")))
           (is (string? (get err "actual_rev"))))))))
 
+(deftest sync-status-reports-local-vault-missing-blocker
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["remote" "add" "origin" "--path" remote-dir "--recipient" recipient "--identity" id-path "--json"] {}
+               {:config-path cfg-path})
+      (is (true? (.delete (io/file vault-path))))
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "status" "--remote" "origin" "--json"] {} {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= false (get payload "has_local")))
+        (is (= false (get payload "can_push")))
+        (is (some #(= "local_vault_missing" %) (get payload "blockers")))
+        (is (= "vault_init" (get payload "recommended_action")))))))
+
+(deftest sync-status-reports-missing-recipient-blocker
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["remote" "add" "origin" "--path" remote-dir "--json"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--remote" "origin" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= false (get payload "can_push")))
+      (is (some #(= "remote_recipient_missing" %) (get payload "blockers")))
+      (is (= "configure_remote_recipient" (get payload "recommended_action"))))))
+
+(deftest sync-status-reports-missing-identity-blocker-when-pull-needed
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        remote-bundle (str remote-dir "/vault.age")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "value" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (.mkdirs (io/file remote-dir))
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["bundle" "seal" "--vault" vault-path "--out" remote-bundle "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["remote" "add" "origin" "--path" remote-dir "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "status" "--remote" "origin" "--json"] {} {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= true (get payload "needs_pull")))
+        (is (some #(= "remote_identity_missing" %) (get payload "blockers")))
+        (is (= "configure_remote_identity" (get payload "recommended_action")))))))
+
+(deftest sync-pull-required-for-existing-remote
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        remote-bundle (str remote-dir "/vault.age")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "remote-value" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (.mkdirs (io/file remote-dir))
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          recipient (get (json/read-str stdout) "recipient")]
+      (run-cli ["bundle" "seal" "--vault" vault-path "--out" remote-bundle "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "local-new" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+      (run-cli ["remote" "add" "origin" "--path" remote-dir "--recipient" recipient "--identity" id-path "--json"] {}
+               {:config-path cfg-path})
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "status" "--remote" "origin" "--json"] {} {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= true (get payload "needs_pull")))
+        (is (= false (get payload "can_push"))))
+
+      (let [{:keys [exit-code stderr]}
+            (run-cli ["sync" "push" "--remote" "origin" "--json"] {} {:config-path cfg-path})]
+        (is (= exit-code/code-sync-conflict exit-code))
+        (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "pull" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                     {:config-path cfg-path})
+            payload (json/read-str stdout)
+            backup-path (get payload "backup_path")]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "sync_pull" (get payload "action")))
+        (is (= "origin" (get payload "remote")))
+        (is (string? backup-path))
+        (is (.exists (io/file backup-path)))
+        (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" backup-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                                 {:config-path cfg-path})]
+          (is (= 0 exit-code))
+          (is (str/includes? stdout "\"value_b64\":\"bG9jYWwtbmV3\""))))
+
+      (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                               {:config-path cfg-path})]
+        (is (= 0 exit-code))
+        (is (str/includes? stdout "\"value_b64\":\"cmVtb3RlLXZhbHVl\"")))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "status" "--remote" "origin" "--json"] {} {:config-path cfg-path})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= true (get payload "in_sync")))
+        (is (= true (get payload "can_push")))
+        (is (= false (get payload "needs_pull")))))))
+
 (deftest sync-push-pull-roundtrip
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
