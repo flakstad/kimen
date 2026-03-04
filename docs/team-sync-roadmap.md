@@ -68,5 +68,5 @@ Non-goal:
 ## Near-term execution focus
 
 - complete docs/API parity for all shipped sync behavior (README + docs)
-- keep fs/git sync e2e coverage green (`make sync-e2e-all`)
+- keep fs/git sync e2e coverage green (`make go-sync-e2e-all`)
 - preserve automation contract stability as sync ergonomics evolve

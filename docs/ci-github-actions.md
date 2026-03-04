@@ -53,17 +53,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
+          bb: latest
 
-      - run: go build -o kimen ./cmd/kimen
+      - run: ./bin/kimen version --json > /dev/null
 
       - name: Lint profile map
-        run: ./kimen map lint --profile linje-prod --json | tee kimen-map-lint.json
+        run: ./bin/kimen map lint --profile linje-prod --json | tee kimen-map-lint.json
 
       - name: Plan projection intent
-        run: ./kimen project plan --profile linje-prod --json -- ./bin/service --check | tee kimen-plan.json
+        run: ./bin/kimen project plan --profile linje-prod --json -- ./bin/service --check | tee kimen-plan.json
 ```
 
 Notes:
@@ -86,11 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
+          bb: latest
 
-      - run: go build -o kimen ./cmd/kimen
+      - run: ./bin/kimen version --json > /dev/null
 
       - name: Open vault bundle
         env:
@@ -99,7 +99,7 @@ jobs:
         run: |
           mkdir -p "$(dirname "$KIMEN_VAULT")"
           printf '%s\n' "$KIMEN_AGE_IDENTITY" \
-            | ./kimen bundle open \
+            | ./bin/kimen bundle open \
               --in vault.age \
               --identity-stdin \
               --out-vault "$KIMEN_VAULT" \
@@ -107,13 +107,13 @@ jobs:
               --json | tee kimen-bundle-open.json
 
       - name: Validate map before deploy
-        run: ./kimen map lint --profile linje-prod --json | tee kimen-map-lint.json
+        run: ./bin/kimen map lint --profile linje-prod --json | tee kimen-map-lint.json
 
       - name: Materialize envfile for deploy tooling
         env:
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
         run: |
-          ./kimen envfile \
+          ./bin/kimen envfile \
             --profile linje-prod \
             --out "${RUNNER_TEMP}/linje.env" \
             --json | tee kimen-envfile.json
@@ -122,7 +122,7 @@ jobs:
         env:
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
         run: |
-          ./kimen project run \
+          ./bin/kimen project run \
             --profile linje-prod \
             -- ./scripts/deploy.sh
 ```
@@ -168,11 +168,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
+          bb: latest
 
-      - run: go build -o kimen ./cmd/kimen
+      - run: ./bin/kimen version --json > /dev/null
 
       - name: Open vault bundle
         env:
@@ -180,13 +180,13 @@ jobs:
           KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
         run: |
           mkdir -p "$(dirname "$KIMEN_VAULT")"
-          printf '%s\n' "$KIMEN_AGE_IDENTITY" | ./kimen bundle open --in vault.age --identity-stdin --out-vault "$KIMEN_VAULT" --overwrite
+          printf '%s\n' "$KIMEN_AGE_IDENTITY" | ./bin/kimen bundle open --in vault.age --identity-stdin --out-vault "$KIMEN_VAULT" --overwrite
 
       - name: Use projections
         env:
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
         run: |
-          ./kimen run --env API_KEY=api_key -- your-build-step
+          ./bin/kimen run --env API_KEY=api_key -- your-build-step
 ```
 
 Notes:

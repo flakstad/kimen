@@ -78,6 +78,12 @@ These are scoped so the CLI remains the primary API and tests stay strong:
    - harden `bundle seal/open` flows for GitHub Actions usage
    - doc templates for common CI patterns
 
+5) **Idiomatic Clojure refactor pass**
+   - keep behavior/contract parity stable while reducing port-shaped code
+   - split large handlers into smaller pure transforms + thin IO shell steps
+   - replace repeated condition trees with data-driven dispatch where it improves clarity
+   - tighten namespace boundaries around FC/IS seams
+
 ## Parallel track: service UI + landing (separate repo)
 
 This is intentionally separate from the CLI/runtime repo:

@@ -6,7 +6,7 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 
 - [ ] `make release-check` passes.
 - [ ] `go test ./...` passes on the release commit.
-- [ ] `go build -o dist/kimen ./cmd/kimen` succeeds.
+- [ ] `make build` succeeds (produces `dist/kimen.jar` and `dist/kimen`).
 - [ ] Smoke pass completed for:
   - `vault`, `secret`, `run`, `render`, `envfile`
   - `plan` / `project plan`

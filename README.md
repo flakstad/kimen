@@ -106,11 +106,24 @@ See `docs/business.md`.
 
 ## Quickstart (current CLI)
 
-Build and install from source:
+Prerequisites:
+
+- Babashka (`bb`) for the default launcher and test loop
+- Java + Clojure CLI for JAR/native builds
+
+Build and install the Clojure launcher from source:
 
 ```bash
 make install
 ```
+
+Build a JAR artifact:
+
+```bash
+make build
+```
+
+Legacy Go build/test targets remain available as `go-*` targets during transition (for example `make go-test`).
 
 ## Development
 
@@ -128,11 +141,11 @@ chmod +x .githooks/pre-commit
 Run the end-to-end sync/conflict/recovery harness:
 
 ```bash
-make sync-e2e
-make sync-e2e-git
+make go-sync-e2e
+make go-sync-e2e-git
 ```
 
-`make sync-e2e-all` runs both harnesses. `make release-check` includes both fs + git sync E2E checks.
+`make go-sync-e2e-all` runs both harnesses. `make go-release-check` runs full legacy Go validation.
 
 Set a vault location (optional) and initialize:
 
@@ -211,7 +224,11 @@ git tag -l "v2026.*"
 gh run list --workflow release.yml --limit 5
 ```
 
-Pushing a matching tag triggers `.github/workflows/release.yml`, which runs GoReleaser using `.goreleaser.yaml` and publishes release artifacts.
+Pushing a matching tag triggers `.github/workflows/release.yml`, which builds and publishes:
+
+- `dist/kimen` (Babashka launcher script)
+- `dist/kimen.jar` (JVM artifact)
+- `dist/SHA256SUMS`
 
 ## Roadmap
 

@@ -39,5 +39,5 @@ Reference: `docs/team-sync-v1.md`
 ## Exit Criteria
 
 - [x] `go test ./...` passes
-- [x] `make sync-e2e-all` passes
+- [x] `make go-sync-e2e-all` passes
 - [x] Team Sync v1 docs published
