@@ -3569,6 +3569,55 @@
       :else
       nil)))
 
+(defn- sync-status-terse-line
+  [payload]
+  (format "remote=%s in_sync=%s can_push=%s needs_pull=%s has_lock=%s blockers=%s recommended_action=%s\n"
+          (:remote payload)
+          (:in_sync payload)
+          (:can_push payload)
+          (:needs_pull payload)
+          (:has_lock payload)
+          (if (seq (:blockers payload))
+            (str/join "," (:blockers payload))
+            "-")
+          (:recommended_action payload)))
+
+(defn- sync-status-lock-lines
+  [payload]
+  (if (:has_lock payload)
+    (cond-> [(format "push-lock: present (%s)" (:lock_path payload))]
+      (:lock_age payload) (conj (str "push-lock-age: " (:lock_age payload)))
+      (:lock_pid payload) (conj (str "push-lock-pid: " (:lock_pid payload)))
+      (:lock_host payload) (conj (str "push-lock-host: " (:lock_host payload)))
+      (:lock_user payload) (conj (str "push-lock-user: " (:lock_user payload)))
+      (:lock_created payload) (conj (str "push-lock-created: " (:lock_created payload)))
+      (:lock_error payload) (conj (str "push-lock-error: " (:lock_error payload))))
+    ["push-lock: (none)"]))
+
+(defn- sync-status-plain-lines
+  [payload stale-threshold-ms]
+  (cond-> [(format "remote: %s (%s)" (:remote payload) (:remote_type payload))
+           (str "path: " (:remote_path payload))
+           (str "remote-rev: " (or (:remote_rev payload) "(missing)"))
+           (str "last-seen-rev: " (or (:last_seen_rev payload) "(none)"))
+           (str "in-sync: " (:in_sync payload))
+           (str "can-push: " (:can_push payload))
+           (str "needs-pull: " (:needs_pull payload))
+           (str "lock-blocks-push: " (:lock_blocks_push payload))
+           (str "blockers: " (if (seq (:blockers payload))
+                               (str/join "," (:blockers payload))
+                               "(none)"))
+           (str "recommended-action: " (:recommended_action payload))]
+    (and (:has_lock payload) (pos? stale-threshold-ms))
+    (conj (str "likely-stale: " (:likely_stale payload)
+               " (threshold=" stale-threshold-ms "ms)"))
+
+    true
+    (into (sync-status-lock-lines payload))
+
+    true
+    (conj "")))
+
 (defn- handle-sync-status
   [ctx args]
   (let [[opts parse-error] (parse-sync-status-opts args)
@@ -3588,50 +3637,11 @@
             (success-json payload)
             (if (:terse? opts)
               (result {:exit-code 0
-                       :stdout (format "remote=%s in_sync=%s can_push=%s needs_pull=%s has_lock=%s blockers=%s recommended_action=%s\n"
-                                       (:remote payload)
-                                       (:in_sync payload)
-                                       (:can_push payload)
-                                       (:needs_pull payload)
-                                       (:has_lock payload)
-                                       (if (seq (:blockers payload))
-                                         (str/join "," (:blockers payload))
-                                         "-")
-                                       (:recommended_action payload))})
+                       :stdout (sync-status-terse-line payload)})
               (result {:exit-code 0
                        :stdout (str/join
                                 "\n"
-                                (cond-> [(format "remote: %s (%s)" (:remote payload) (:remote_type payload))
-                                         (str "path: " (:remote_path payload))
-                                         (str "remote-rev: " (or (:remote_rev payload) "(missing)"))
-                                         (str "last-seen-rev: " (or (:last_seen_rev payload) "(none)"))
-                                         (str "in-sync: " (:in_sync payload))
-                                         (str "can-push: " (:can_push payload))
-                                         (str "needs-pull: " (:needs_pull payload))
-                                         (str "lock-blocks-push: " (:lock_blocks_push payload))
-                                         (str "blockers: " (if (seq (:blockers payload))
-                                                             (str/join "," (:blockers payload))
-                                                             "(none)"))
-                                         (str "recommended-action: " (:recommended_action payload))]
-                                  (and (:has_lock payload)
-                                       (pos? (:stale-threshold-ms opts)))
-                                  (conj (str "likely-stale: " (:likely_stale payload)
-                                             " (threshold=" (:stale-threshold-ms opts) "ms)"))
-
-                                  (:has_lock payload)
-                                  (into (cond-> [(format "push-lock: present (%s)" (:lock_path payload))]
-                                          (:lock_age payload) (conj (str "push-lock-age: " (:lock_age payload)))
-                                          (:lock_pid payload) (conj (str "push-lock-pid: " (:lock_pid payload)))
-                                          (:lock_host payload) (conj (str "push-lock-host: " (:lock_host payload)))
-                                          (:lock_user payload) (conj (str "push-lock-user: " (:lock_user payload)))
-                                          (:lock_created payload) (conj (str "push-lock-created: " (:lock_created payload)))
-                                          (:lock_error payload) (conj (str "push-lock-error: " (:lock_error payload)))))
-
-                                  (not (:has_lock payload))
-                                  (conj "push-lock: (none)")
-
-                                  true
-                                  (conj "")))}))))
+                                (sync-status-plain-lines payload (:stale-threshold-ms opts)))}))))
         (catch Exception e
           (sync-error-result json? e))))))
 
