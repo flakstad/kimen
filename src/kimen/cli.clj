@@ -3088,9 +3088,29 @@
                           {:reason reasons/reason-resolve-key-not-conflict})))
         selected))))
 
+(defn- sync-state-active?
+  [entry]
+  (let [last-seen (some-> (get entry "last_seen_rev") str/trim not-empty)
+        local-hash (some-> (get entry "local_hash") str/trim not-empty)
+        baseline (normalize-hash-map (get entry "baseline_secret_hashes"))]
+    (or (some? last-seen)
+        (some? local-hash)
+        (seq baseline))))
+
+(defn- infer-sync-remote-from-state
+  [config-path remotes]
+  (let [candidates (->> remotes
+                        (filter (fn [remote]
+                                  (sync-state-active?
+                                   (config/config-sync-entry config-path (get remote "name")))))
+                        vec)]
+    (when (= 1 (count candidates))
+      (first candidates))))
+
 (defn- select-sync-remote!
   [ctx remote-opt]
   (let [remotes (config/config-remote-list (:config-path ctx))
+        from-sync (infer-sync-remote-from-state (:config-path ctx) remotes)
         requested (or (some-> remote-opt str/trim not-empty)
                       (some-> (System/getenv env-remote-name) str/trim not-empty))]
     (when (empty? remotes)
@@ -3100,6 +3120,9 @@
       (or (some #(when (= requested (get % "name")) %) remotes)
           (throw (ex-info (format "remote %s not found" (pr-str requested))
                           {:reason reasons/reason-remote-not-found})))
+
+      (some? from-sync)
+      from-sync
 
       (= 1 (count remotes))
       (first remotes)

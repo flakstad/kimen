@@ -422,6 +422,27 @@
       (is (nil? stderr))
       (is (= "origin" (get payload "remote"))))))
 
+(deftest sync-status-selection-prefers-unique-sync-state-remote
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        remote-alpha (str (.getPath dir) "/remote-alpha")
+        remote-beta (str (.getPath dir) "/remote-beta")
+        remote-origin (str (.getPath dir) "/remote-origin")]
+    (run-cli ["remote" "add" "alpha" "--path" remote-alpha "--json"] {} {:config-path cfg-path})
+    (run-cli ["remote" "add" "beta" "--path" remote-beta "--json"] {} {:config-path cfg-path})
+    (run-cli ["remote" "add" "origin" "--path" remote-origin "--json"] {} {:config-path cfg-path})
+    (let [cfg (json/read-str (slurp cfg-path))]
+      (spit cfg-path
+            (str (json/write-str
+                  (assoc cfg "sync" {"beta" {"last_seen_rev" "abc123"}}))
+                 "\n")))
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "beta" (get payload "remote"))))))
+
 (deftest sync-status-and-conflicts-strict-and-stale-threshold
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
