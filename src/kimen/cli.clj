@@ -4129,7 +4129,7 @@
       (try
         (when (neg? (:if-older-than-ms opts))
           (throw (ex-info "--if-older-than must be >= 0"
-                          {:reason reasons/reason-sync-failed})))
+                          {:reason reasons/reason-invalid-if-older-than})))
         (let [remote (-> (select-sync-remote! ctx (:remote opts))
                          ensure-fs-remote!)
               remote-name (get remote "name")
@@ -4145,7 +4145,7 @@
                              :remote remote-name
                              :lock_path lock-path
                              :removed false
-                             :reason "lock_missing"})
+                             :reason reasons/reason-lock-missing})
               (result {:exit-code 0
                        :stdout (format "no lock file found for remote %s\n" remote-name)}))
             (let [lock-age-ms (max 0 (- (System/currentTimeMillis) (.lastModified lock-file)))
@@ -4156,10 +4156,11 @@
                                               lock-path
                                               (quot lock-age-ms 1000)
                                               (quot if-older-than-ms 1000))
-                                      {:reason reasons/reason-sync-failed})))
+                                      {:reason reasons/reason-lock-too-new
+                                       :recommended_action "wait_or_sync_unlock"})))
                   _ (when-not (:yes? opts)
                       (throw (ex-info "refusing to remove lock without --yes"
-                                      {:reason reasons/reason-sync-failed})))
+                                      {:reason reasons/reason-unlock-confirmation-required})))
                   removed? (.delete lock-file)
                   lock-missing-after? (not (.exists lock-file))
                   age-str (str (quot lock-age-ms 1000) "s")]
@@ -4171,7 +4172,7 @@
                                          :remote remote-name
                                          :lock_path lock-path
                                          :removed removed?}
-                                  (not removed?) (assoc :reason "lock_missing")
+                                  (not removed?) (assoc :reason reasons/reason-lock-missing)
                                   removed? (assoc :lock_age age-str
                                                   :confirmed true)))
                   (if removed?

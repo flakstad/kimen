@@ -1247,12 +1247,17 @@
       (let [{:keys [exit-code stderr]} (run-cli ["sync" "unlock" "--remote" "origin" "--json"] {}
                                                 {:config-path cfg-path})]
         (is (= exit-code/code-sync-failed exit-code))
-        (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
+        (is (str/includes? stderr "\"reason\":\"unlock_confirmation_required\"")))
 
       (let [{:keys [exit-code stderr]} (run-cli ["sync" "unlock" "--remote" "origin" "--if-older-than" "5m" "--yes" "--json"] {}
                                                 {:config-path cfg-path})]
         (is (= exit-code/code-sync-failed exit-code))
-        (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
+        (is (str/includes? stderr "\"reason\":\"lock_too_new\"")))
+
+      (let [{:keys [exit-code stderr]} (run-cli ["sync" "unlock" "--remote" "origin" "--if-older-than" "-1s" "--yes" "--json"] {}
+                                                {:config-path cfg-path})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"invalid_if_older_than\"")))
 
       (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "unlock" "--remote" "origin" "--yes" "--json"] {}
                                                        {:config-path cfg-path})

@@ -90,6 +90,10 @@
 (def reason-conflicting-dry-run-lock-flags "conflicting_dry_run_lock_flags")
 (def reason-invalid-stale-threshold "invalid_stale_threshold")
 (def reason-conflicting-check-and-dry-run "conflicting_check_and_dry_run")
+(def reason-invalid-if-older-than "invalid_if_older_than")
+(def reason-lock-too-new "lock_too_new")
+(def reason-unlock-confirmation-required "unlock_confirmation_required")
+(def reason-lock-missing "lock_missing")
 (def reason-overlapping-changes "overlapping_changes")
 (def reason-invalid-take "invalid_take")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
@@ -189,6 +193,10 @@
    reason-conflicting-dry-run-lock-flags
    reason-invalid-stale-threshold
    reason-conflicting-check-and-dry-run
+   reason-invalid-if-older-than
+   reason-lock-too-new
+   reason-unlock-confirmation-required
+   reason-lock-missing
    reason-overlapping-changes
    reason-invalid-take
    reason-no-overlapping-conflicts
