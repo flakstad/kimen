@@ -348,6 +348,39 @@
       (is (= exit-code/code-sync-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"invalid_remote_name\"")))))
 
+(deftest sync-status-selection-and-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        remote-a (str (.getPath dir) "/remote-a")
+        remote-b (str (.getPath dir) "/remote-b")
+        remote-origin (str (.getPath dir) "/remote-origin")]
+    (let [{:keys [exit-code stderr]} (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"no_remotes_configured\"")))
+
+    (run-cli ["remote" "add" "alpha" "--path" remote-a "--json"] {} {:config-path cfg-path})
+    (run-cli ["remote" "add" "beta" "--path" remote-b "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stderr]} (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"multiple_remotes_configured\"")))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--remote" "alpha" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_status" (get payload "action")))
+      (is (= "alpha" (get payload "remote"))))
+
+    (run-cli ["remote" "add" "origin" "--path" remote-origin "--json"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "status" "--json"] {} {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "origin" (get payload "remote"))))))
+
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")

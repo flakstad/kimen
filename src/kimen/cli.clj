@@ -53,6 +53,7 @@
      "  kimen remote list [--json]"
      "  kimen remote rm <name> [--json]"
      "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
+     "  kimen sync status [--remote <name>] [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -79,6 +80,7 @@
      ""]))
 
 (def remote-name-re #"^[A-Za-z0-9_.-]+$")
+(def env-remote-name "KIMEN_REMOTE")
 
 (defn- json-line
   [x]
@@ -1037,6 +1039,30 @@
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
 
+(defn- parse-sync-status-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :remote nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
 (defn- parse-init-ci-pr-safety-opts
   [args]
   (loop [args args
@@ -1920,6 +1946,111 @@
      :recommended_action recommended-action
      :next_command (sync-init-next-command remote-name recommended-action)}))
 
+(defn- fs-remote-bundle-path
+  [remote]
+  (let [path (some-> (get remote "path") str/trim)
+        bundle-path (some-> (get remote "bundle_path") str/trim)
+        bundle-path (if (str/blank? bundle-path) "vault.age" bundle-path)
+        path (when (some? path) (str/replace path #"/+$" ""))]
+    (when-not (str/blank? path)
+      (if (str/ends-with? path ".age")
+        path
+        (str path "/" bundle-path)))))
+
+(defn- select-sync-remote!
+  [ctx remote-opt]
+  (let [remotes (config/config-remote-list (:config-path ctx))
+        requested (or (some-> remote-opt str/trim not-empty)
+                      (some-> (System/getenv env-remote-name) str/trim not-empty))]
+    (when (empty? remotes)
+      (throw (ex-info "no remotes configured" {:reason reasons/reason-no-remotes-configured})))
+    (cond
+      requested
+      (or (some #(when (= requested (get % "name")) %) remotes)
+          (throw (ex-info (format "remote %s not found" (pr-str requested))
+                          {:reason reasons/reason-remote-not-found})))
+
+      (= 1 (count remotes))
+      (first remotes)
+
+      :else
+      (or (some #(when (= "origin" (get % "name")) %) remotes)
+          (throw (ex-info "multiple remotes configured; choose --remote"
+                          {:reason reasons/reason-multiple-remotes-configured}))))))
+
+(defn- sync-status-payload
+  [ctx remote]
+  (let [remote-name (get remote "name")
+        remote-type (or (some-> (get remote "type") str/trim not-empty) "fs")
+        remote-path (some-> (get remote "path") str/trim)
+        bundle-path (when (= remote-type "fs") (fs-remote-bundle-path remote))
+        lock-path (when bundle-path (str bundle-path ".lock"))
+        has-remote (boolean (and bundle-path (.exists (io/file bundle-path))))
+        has-lock (boolean (and lock-path (.exists (io/file lock-path))))
+        vault-path (vault-path/resolve-vault-path ctx nil)
+        has-local (boolean (.exists (io/file vault-path)))
+        recipient (some-> (get remote "recipient") str/trim not-empty)
+        identity (some-> (get remote "identity") str/trim not-empty)
+        blockers (cond-> []
+                   (and has-local (nil? recipient)) (conj "remote_recipient_missing")
+                   (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
+                   has-lock (conj "remote_lock_present"))
+        can-push (boolean (and has-local (not has-lock) (some? recipient)))
+        needs-pull (boolean (and has-remote (not has-local)))
+        in-sync false
+        recommended-action
+        (cond
+          has-lock "wait_or_sync_unlock"
+          (and has-local (nil? recipient)) "configure_remote_recipient"
+          (and has-remote (not has-local) (nil? identity)) "configure_remote_identity"
+          (and has-remote (not has-local)) "sync_pull"
+          has-local "sync_push"
+          :else "vault_init")]
+    {:ok true
+     :action "sync_status"
+     :exit_code 0
+     :remote remote-name
+     :remote_type remote-type
+     :remote_path remote-path
+     :bundle_path bundle-path
+     :vault_path vault-path
+     :has_remote has-remote
+     :has_lock has-lock
+     :has_local has-local
+     :in_sync in-sync
+     :can_push can-push
+     :needs_pull needs-pull
+     :lock_blocks_push has-lock
+     :likely_stale false
+     :lock_age_seconds 0
+     :blockers blockers
+     :recommended_action recommended-action}))
+
+(defn- handle-sync-status
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-status-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (select-sync-remote! ctx (:remote opts))
+              payload (sync-status-payload ctx remote)]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (format "remote=%s in_sync=%s can_push=%s needs_pull=%s has_lock=%s blockers=%s recommended_action=%s\n"
+                                     (:remote payload)
+                                     (:in_sync payload)
+                                     (:can_push payload)
+                                     (:needs_pull payload)
+                                     (:has_lock payload)
+                                     (if (seq (:blockers payload))
+                                       (str/join "," (:blockers payload))
+                                       "-")
+                                     (:recommended_action payload))})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
 (defn- handle-sync-init
   [ctx args]
   (let [[opts parse-error] (parse-sync-init-opts args)
@@ -2043,6 +2174,7 @@
   (let [args (vec args)]
     (cond
       (= "init" (first args)) (handle-sync-init ctx (rest args))
+      (= "status" (first args)) (handle-sync-status ctx (rest args))
       :else (error-text 1 "unknown sync command"))))
 
 (defn- handle-vault-path

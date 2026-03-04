@@ -73,6 +73,8 @@
 (def reason-missing-path "missing_path")
 (def reason-empty-path "empty_path")
 (def reason-remote-failed "remote_failed")
+(def reason-no-remotes-configured "no_remotes_configured")
+(def reason-multiple-remotes-configured "multiple_remotes_configured")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -149,6 +151,8 @@
    reason-missing-path
    reason-empty-path
    reason-remote-failed
+   reason-no-remotes-configured
+   reason-multiple-remotes-configured
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type
