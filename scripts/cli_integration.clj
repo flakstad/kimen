@@ -264,9 +264,15 @@
             (expect-success-json! (run-kimen repo-root env-a ["secret" "set" "api_key" "--value" "team-v2" "--vault" git-vault-a "--passphrase-cmd" pass-cmd "--json"]) "set")
             (let [push-dry-run (expect-success-json! (run-kimen repo-root env-a ["sync" "push" "--dry-run" "--json"]) "sync_push_dry_run")
                   status-after (expect-success-json! (run-kimen repo-root env-a ["sync" "status" "--json"]) "sync_status")
-                  lock-flag-error (expect-error-json! (run-kimen repo-root env-a ["sync" "push" "--lock-wait" "1s" "--json"]) 32 "lock_flags_require_fs_remote")]
+                  lock-flag-error (expect-error-json! (run-kimen repo-root env-a ["sync" "push" "--lock-wait" "1s" "--json"]) 32 "lock_flags_require_fs_remote")
+                  clear-baseline (expect-success-json! (run-kimen repo-root env-a ["sync" "reset-baseline" "--remote" "origin" "--clear" "--yes" "--json"]) "sync_reset_baseline")
+                  to-remote-baseline (expect-success-json! (run-kimen repo-root env-a ["sync" "reset-baseline" "--remote" "origin" "--to-remote" "--yes" "--passphrase-cmd" pass-cmd "--json"]) "sync_reset_baseline")
+                  changes-after-baseline (expect-success-json! (run-kimen repo-root env-a ["sync" "changes" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"]) "sync_changes")]
               (ensure! (= "git" (get push-dry-run "remote_type")) "expected git remote type on sync push dry-run" {:push-dry-run push-dry-run})
               (ensure! (= remote-rev-before (get status-after "remote_rev")) "expected remote rev unchanged after git push dry-run" {:status-before status-before :status-after status-after})
+              (ensure! (= "clear" (get clear-baseline "mode")) "expected clear mode for git reset-baseline --clear" {:clear-baseline clear-baseline})
+              (ensure! (= "to_remote" (get to-remote-baseline "mode")) "expected to_remote mode for git reset-baseline --to-remote" {:to-remote-baseline to-remote-baseline})
+              (ensure! (= true (get changes-after-baseline "has_baseline")) "expected has_baseline=true after git baseline refresh" {:changes-after-baseline changes-after-baseline})
               (ensure! (= 32 (get lock-flag-error "exit_code")) "expected lock-flags-require-fs payload for git lock-flag rejection" {:lock-flag-error lock-flag-error}))))
         (println "skipping git integration checks: git unavailable")))
 

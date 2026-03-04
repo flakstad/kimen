@@ -1931,6 +1931,54 @@
           (is (= exit-code/code-sync-failed exit-code))
           (is (= "unlock_requires_fs_remote" (get err "reason"))))))))
 
+(deftest sync-git-remote-reset-baseline-and-changes
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-path (str (.getPath dir) "/config.json")
+          vault-path (str (.getPath dir) "/vault.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--branch" "main"
+                  "--bundle-path" "vault.age"
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-path})
+        (run-cli ["sync" "push" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "reset-baseline" "--remote" "origin" "--clear" "--yes" "--json"] {}
+                                                         {:config-path cfg-path})
+              clear-payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "clear" (get clear-payload "mode"))))
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "reset-baseline" "--remote" "origin" "--to-remote" "--yes" "--passphrase-cmd" pass-cmd "--json"] {}
+                                                         {:config-path cfg-path})
+              to-remote-payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "to_remote" (get to-remote-payload "mode")))
+          (is (string? (get to-remote-payload "new_rev"))))
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "changes" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                                                         {:config-path cfg-path})
+              changes-payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= "sync_changes" (get changes-payload "action")))
+          (is (= true (get changes-payload "has_baseline"))))))))
+
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
