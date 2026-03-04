@@ -2632,6 +2632,8 @@
       (or (str/includes? msg "refusing to reset baseline without --yes")
           (str/includes? msg "sync reset-baseline requires --yes")) reasons/reason-reset-baseline-confirmation-required
       (str/includes? msg "remote bundle is missing; cannot set baseline to remote") reasons/reason-remote-bundle-missing-for-baseline
+      (str/includes? msg "cannot resolve conflicts without baseline key hashes") reasons/reason-reconcile-baseline-missing
+      (str/includes? msg "cannot reconcile without baseline key hashes") reasons/reason-reconcile-baseline-missing
       (str/includes? msg "--if-older-than must be >= 0") reasons/reason-invalid-if-older-than
       (str/includes? msg "sync unlock is only supported for fs remotes") reasons/reason-unlock-requires-fs-remote
       (and (str/includes? msg "refusing to unlock") (str/includes? msg "lock is only")) reasons/reason-lock-too-new
@@ -3905,7 +3907,8 @@
               {:keys [remote_rev has_remote]} (remote-revision remote)
               _ (when-not has_remote
                   (throw (ex-info "remote bundle is missing"
-                                  {:reason reasons/reason-remote-bundle-missing})))
+                                  {:reason reasons/reason-remote-missing
+                                   :recommended_action "sync_reset_baseline_or_remote_recreate"})))
               vault-path (vault-path/resolve-vault-path ctx nil)
               _ (when-not (.exists (io/file vault-path))
                   (throw (ex-info (format "local vault missing: %s" vault-path)
@@ -3916,8 +3919,9 @@
               sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
               baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
               _ (when (nil? baseline)
-                  (throw (ex-info "cannot resolve conflicts without baseline key hashes; run `kimen sync changes` after a clean sync first"
-                                  {:reason reasons/reason-no-local-baseline})))
+                  (throw (ex-info "cannot resolve conflicts without baseline key hashes; run `kimen sync pull` first"
+                                  {:reason reasons/reason-reconcile-baseline-missing
+                                   :recommended_action "sync_pull"})))
               analysis (analyze-sync-changes baseline (:hashes local-snap) (:hashes remote-snap))
               _ (when (empty? (:conflict-keys analysis))
                   (throw (ex-info "no overlapping key conflicts to resolve"
@@ -4192,8 +4196,8 @@
                                   {:reason reasons/reason-overlapping-changes
                                    :recommended_action "manual_reconcile"})))
               _ (when (and reconcile? has-conflict (nil? baseline-secret-hashes-in))
-                  (throw (ex-info "cannot reconcile without baseline key hashes; run sync changes after a clean sync"
-                                  {:reason reasons/reason-no-local-baseline
+                  (throw (ex-info "cannot reconcile without baseline key hashes; run `kimen sync pull` first"
+                                  {:reason reasons/reason-reconcile-baseline-missing
                                    :recommended_action "sync_pull"})))
               reconcile-passphrase (when (and reconcile? has-conflict)
                                      (resolve-passphrase! ctx opts))

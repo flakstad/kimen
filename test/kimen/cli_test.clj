@@ -962,12 +962,12 @@
         (is (string? backup-path))
         (is (.exists (io/file backup-path)))
         (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" backup-path "--passphrase-cmd" pass-cmd "--json"] {}
-                                                 {:config-path cfg-path})]
+                                                  {:config-path cfg-path})]
           (is (= 0 exit-code))
           (is (str/includes? stdout "\"value_b64\":\"bG9jYWwtbmV3\""))))
 
       (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
-                                               {:config-path cfg-path})]
+                                                {:config-path cfg-path})]
         (is (= 0 exit-code))
         (is (str/includes? stdout "\"value_b64\":\"cmVtb3RlLXZhbHVl\"")))
 
@@ -1136,7 +1136,7 @@
         (is (= true (get payload "has_local"))))
 
       (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
-                                               {:config-path cfg-path})]
+                                                {:config-path cfg-path})]
         (is (= 0 exit-code))
         (is (str/includes? stdout "\"value_b64\":\"bG9jYWwtbmV3\"")))
 
@@ -1620,11 +1620,11 @@
         (is (= 2 (get payload "merged_key_count"))))
 
       (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
-                                               {:config-path cfg-a})]
+                                                {:config-path cfg-a})]
         (is (= 0 exit-code))
         (is (str/includes? stdout "\"value_b64\":\"YTItbG9jYWw=\"")))
       (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "db_pw" "--unsafe-stdout" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
-                                               {:config-path cfg-a})]
+                                                {:config-path cfg-a})]
         (is (= 0 exit-code))
         (is (str/includes? stdout "\"value_b64\":\"cDItcmVtb3Rl\"")))
 
@@ -2363,6 +2363,13 @@
           recipient (get keygen "recipient")]
       (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
                {:config-path cfg-path})
+
+      (let [{:keys [exit-code stderr]}
+            (run-cli ["sync" "resolve" "--remote" "origin" "--take" "remote" "--passphrase-cmd" pass-cmd "--json"] {}
+                     {:config-path cfg-path})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"remote_missing\"")))
+
       (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
                {:config-path cfg-path})
 
@@ -2395,7 +2402,15 @@
               (run-cli ["sync" "resolve" "--remote" "origin" "--take" "remote" "--key" "does_not_exist" "--passphrase-cmd" pass-cmd "--json"] {}
                        {:config-path cfg-path})]
           (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"resolve_keys_not_conflicts\"")))))))
+          (is (str/includes? stderr "\"reason\":\"resolve_keys_not_conflicts\""))))
+
+      (run-cli ["sync" "reset-baseline" "--remote" "origin" "--clear" "--yes" "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [exit-code stderr]}
+            (run-cli ["sync" "resolve" "--remote" "origin" "--take" "remote" "--passphrase-cmd" pass-cmd "--json"] {}
+                     {:config-path cfg-path})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"reconcile_baseline_missing\""))))))
 
 (deftest sync-git-remote-push-pull-roundtrip
   (if-not (git-available?)
