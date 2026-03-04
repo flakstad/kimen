@@ -2590,7 +2590,7 @@
   (let [t (remote-type remote)]
     (when-not (= t "fs")
       (throw (ex-info "sync unlock is only supported for fs remotes"
-                      {:reason reasons/reason-unsupported-remote-type})))
+                      {:reason reasons/reason-unlock-requires-fs-remote})))
     remote))
 
 (defn- remote-lock-path
@@ -3767,7 +3767,7 @@
                            (or (pos? (:lock-wait-ms opts))
                                (pos? (:break-stale-lock-after-ms opts))))
                   (throw (ex-info "--lock-wait/--break-stale-lock-after are only supported for fs remotes"
-                                  {:reason reasons/reason-sync-failed})))
+                                  {:reason reasons/reason-lock-flags-require-fs-remote})))
               lock-path (when lock-supported? (remote-lock-path remote))
               _ (when (and lock-supported? (str/blank? lock-path))
                   (throw (ex-info "remote lock path is empty" {:reason reasons/reason-missing-path})))

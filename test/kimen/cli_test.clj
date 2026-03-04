@@ -1898,7 +1898,38 @@
                                                   {:config-path cfg-path})
               err (json/read-str stderr)]
           (is (= exit-code/code-sync-failed exit-code))
-          (is (= exit-code/code-sync-failed (get err "exit_code"))))))))
+          (is (= exit-code/code-sync-failed (get err "exit_code")))
+          (is (= "lock_flags_require_fs_remote" (get err "reason"))))))))
+
+(deftest sync-git-remote-unlock-requires-fs-remote
+  (if-not (git-available?)
+    (is true)
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          repo-path (str (.getPath dir) "/team.git")
+          _ (run-git! nil "init" "--bare" repo-path)
+          cfg-path (str (.getPath dir) "/config.json")
+          vault-path (str (.getPath dir) "/vault.db")
+          id-path (str (.getPath dir) "/sync.agekey")
+          pass-cmd "printf test-passphrase"]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+      (run-cli ["secret" "set" "api_key" "--value" "v1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+            keygen (json/read-str stdout)
+            recipient (get keygen "recipient")]
+        (run-cli ["remote" "add" "origin"
+                  "--type" "git"
+                  "--path" repo-path
+                  "--recipient" recipient
+                  "--identity" id-path
+                  "--json"] {}
+                 {:config-path cfg-path})
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "unlock" "--yes" "--json"] {}
+                                                  {:config-path cfg-path})
+              err (json/read-str stderr)]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (= "unlock_requires_fs_remote" (get err "reason"))))))))
 
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

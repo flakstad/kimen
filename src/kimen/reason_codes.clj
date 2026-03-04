@@ -88,9 +88,11 @@
 (def reason-invalid-lock-wait "invalid_lock_wait")
 (def reason-invalid-break-stale-lock-after "invalid_break_stale_lock_after")
 (def reason-conflicting-dry-run-lock-flags "conflicting_dry_run_lock_flags")
+(def reason-lock-flags-require-fs-remote "lock_flags_require_fs_remote")
 (def reason-invalid-stale-threshold "invalid_stale_threshold")
 (def reason-conflicting-check-and-dry-run "conflicting_check_and_dry_run")
 (def reason-invalid-if-older-than "invalid_if_older_than")
+(def reason-unlock-requires-fs-remote "unlock_requires_fs_remote")
 (def reason-lock-too-new "lock_too_new")
 (def reason-unlock-confirmation-required "unlock_confirmation_required")
 (def reason-lock-missing "lock_missing")
@@ -191,9 +193,11 @@
    reason-invalid-lock-wait
    reason-invalid-break-stale-lock-after
    reason-conflicting-dry-run-lock-flags
+   reason-lock-flags-require-fs-remote
    reason-invalid-stale-threshold
    reason-conflicting-check-and-dry-run
    reason-invalid-if-older-than
+   reason-unlock-requires-fs-remote
    reason-lock-too-new
    reason-unlock-confirmation-required
    reason-lock-missing
