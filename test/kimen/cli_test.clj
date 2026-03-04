@@ -541,9 +541,13 @@
       (spit bundle-path "tampered-remote\n")
       (let [{:keys [exit-code stderr]}
             (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
-                     {:config-path cfg-path})]
+                     {:config-path cfg-path})
+            err (json/read-str stderr)]
         (is (= exit-code/code-sync-conflict exit-code))
-        (is (str/includes? stderr "\"reason\":\"remote_changed\""))))))
+        (is (= "remote_changed" (get err "reason")))
+        (is (= "sync_pull" (get err "recommended_action")))
+        (is (string? (get err "expected_rev")))
+        (is (string? (get err "actual_rev")))))))
 
 (deftest sync-push-conflict-when-remote-disappeared
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -689,9 +693,13 @@
 
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
-                       {:config-path cfg-path})]
+                       {:config-path cfg-path})
+              err (json/read-str stderr)]
           (is (= exit-code/code-sync-conflict exit-code))
-          (is (str/includes? stderr "\"reason\":\"remote_changed\"")))
+          (is (= "remote_changed" (get err "reason")))
+          (is (= "sync_pull" (get err "recommended_action")))
+          (is (string? (get err "expected_rev")))
+          (is (string? (get err "actual_rev"))))
 
         (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--force" "--json"] {}
@@ -708,9 +716,12 @@
 
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
-                       {:config-path fresh-cfg})]
+                       {:config-path fresh-cfg})
+              err (json/read-str stderr)]
           (is (= exit-code/code-sync-conflict exit-code))
-          (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))
+          (is (= "no_local_baseline" (get err "reason")))
+          (is (= "sync_pull" (get err "recommended_action")))
+          (is (string? (get err "actual_rev"))))
 
         (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--force" "--json"] {}
