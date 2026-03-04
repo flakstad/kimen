@@ -494,6 +494,15 @@
       (is (= "sync_init" (get payload "action"))))
 
     (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "push" "--remote" "origin" "--dry-run" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_push_dry_run" (get payload "action")))
+      (is (= true (get payload "dry_run"))))
+
+    (let [{:keys [exit-code stdout stderr]}
           (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                    {:config-path cfg-path})
           payload (json/read-str stdout)]

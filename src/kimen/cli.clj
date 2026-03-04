@@ -3540,7 +3540,7 @@
                                    :recommended_action "sync_pull"})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
-                           :action "sync_push"
+                           :action "sync_push_dry_run"
                            :exit_code 0
                            :remote remote-name
                            :remote_type "fs"
