@@ -1,88 +1,89 @@
 (ns kimen.cli
   (:require
-    [clojure.java.io :as io]
-    [clojure.string :as str]
-    [kimen.bundle :as bundle]
-    [kimen.commands.doctor :as doctor]
-    [kimen.commands.init :as init]
-    [kimen.commands.map-lint :as map-lint]
-    [kimen.commands.plan :as plan]
-    [kimen.commands.version :as version]
-    [kimen.config :as config]
-    [kimen.exit-code :as exit-code]
-    [kimen.json :as json]
-    [kimen.mapfile :as mapfile]
-    [kimen.passphrase :as passphrase]
-    [kimen.projection :as projection]
-    [kimen.reason-codes :as reasons]
-    [kimen.vault-path :as vault-path]
-    [kimen.vault.v2 :as vault-v2])
+   [clojure.java.io :as io]
+   [clojure.string :as str]
+   [kimen.bundle :as bundle]
+   [kimen.commands.doctor :as doctor]
+   [kimen.commands.init :as init]
+   [kimen.commands.map-lint :as map-lint]
+   [kimen.commands.plan :as plan]
+   [kimen.commands.version :as version]
+   [kimen.config :as config]
+   [kimen.exit-code :as exit-code]
+   [kimen.json :as json]
+   [kimen.mapfile :as mapfile]
+   [kimen.passphrase :as passphrase]
+   [kimen.projection :as projection]
+   [kimen.reason-codes :as reasons]
+   [kimen.vault-path :as vault-path]
+   [kimen.vault.v2 :as vault-v2])
   (:import
-    [java.security MessageDigest]
-    [java.nio.file Files StandardCopyOption]
-    [java.util Base64]))
+   [java.security MessageDigest]
+   [java.nio.file Files StandardCopyOption]
+   [java.util Base64]))
 
 (def usage
   (str/join
-    "\n"
-    ["kimen (clojure rewrite, early preview)"
-     ""
-     "usage:"
-     "  kimen version [--json]"
-     "  kimen config path [--json]"
-     "  kimen config show [--pretty=false]"
-     "  kimen config vault set <vault-path> [--json]"
-     "  kimen config vault show [--json]"
-     "  kimen config vault clear [--json]"
-     "  kimen config unlock set <prompt|env|stdin|exec> [-- <command> [args...]] [--json]"
-     "  kimen config unlock show [--json]"
-     "  kimen config unlock clear [--json]"
-     "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-     "  kimen vault info [--vault <path>] [--json]"
-     "  kimen vault path [--vault <path>] [--json]"
-     "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--json]"
-     "  kimen secret list [--vault <path>] [--json]"
-     "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
-     "  kimen secret rm <name> [--vault <path>] [--json]"
-     "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
-     "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
-     "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
-     "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
-     "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
-     "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
-     "  kimen remote get <name> [--json]"
-     "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
-     "  kimen remote list [--json]"
-     "  kimen remote rm <name> [--json]"
-     "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
-     "  kimen sync status [--remote <name>] [--json]"
-     "  kimen sync conflicts [--remote <name>] [--json]"
-     "  kimen sync push [--remote <name>] [--dry-run] [--json]"
-     "  kimen sync pull [--remote <name>] [--dry-run] [--json]"
-     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
-     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
-     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
-     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
-     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-     "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
-     "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
-     "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json]"
-     "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
-     ""]))
+   "\n"
+   ["kimen (clojure rewrite, early preview)"
+    ""
+    "usage:"
+    "  kimen version [--json]"
+    "  kimen config path [--json]"
+    "  kimen config show [--pretty=false]"
+    "  kimen config vault set <vault-path> [--json]"
+    "  kimen config vault show [--json]"
+    "  kimen config vault clear [--json]"
+    "  kimen config unlock set <prompt|env|stdin|exec> [-- <command> [args...]] [--json]"
+    "  kimen config unlock show [--json]"
+    "  kimen config unlock clear [--json]"
+    "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen vault info [--vault <path>] [--json]"
+    "  kimen vault path [--vault <path>] [--json]"
+    "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--json]"
+    "  kimen secret list [--vault <path>] [--json]"
+    "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
+    "  kimen secret rm <name> [--vault <path>] [--json]"
+    "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
+    "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
+    "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
+    "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
+    "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
+    "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
+    "  kimen remote get <name> [--json]"
+    "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
+    "  kimen remote list [--json]"
+    "  kimen remote rm <name> [--json]"
+    "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
+    "  kimen sync status [--remote <name>] [--json]"
+    "  kimen sync conflicts [--remote <name>] [--json]"
+    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--json]"
+    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--json]"
+    "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--json]"
+    "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
+    "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
+    "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
+    "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
+    "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json]"
+    "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
+    ""]))
 
 (def project-usage
   (str/join
-    "\n"
-    ["kimen project"
-     ""
-     "usage:"
-     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
-     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-     ""]))
+   "\n"
+   ["kimen project"
+    ""
+    "usage:"
+    "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
+    "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    ""]))
 
 (def remote-name-re #"^[A-Za-z0-9_.-]+$")
 (def env-remote-name "KIMEN_REMOTE")
@@ -1073,6 +1074,8 @@
   (loop [args args
          opts {:json? false
                :dry-run? false
+               :force? false
+               :reconcile? false
                :remote nil}]
     (if (empty? args)
       [opts nil]
@@ -1083,6 +1086,12 @@
 
           (= a "--dry-run")
           (recur (rest args) (assoc opts :dry-run? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (= a "--reconcile")
+          (recur (rest args) (assoc opts :reconcile? true))
 
           (or (= a "--remote") (str/starts-with? a "--remote="))
           (let [[v next-args err] (parse-flag-value args "--remote")]
@@ -1392,10 +1401,10 @@
 (defn- resolve-passphrase!
   [ctx opts]
   (passphrase/resolve-passphrase
-    {:config-path (:config-path ctx)
-     :stdin (or (:stdin ctx) System/in)}
-    {:passphrase-cmd (:passphrase-cmd opts)
-     :passphrase-stdin? (:passphrase-stdin? opts)}))
+   {:config-path (:config-path ctx)
+    :stdin (or (:stdin ctx) System/in)}
+   {:passphrase-cmd (:passphrase-cmd opts)
+    :passphrase-stdin? (:passphrase-stdin? opts)}))
 
 (defn- read-secret-value-from-stdin
   [ctx]
@@ -2095,7 +2104,7 @@
      :has_remote has-remote
      :has_lock has-lock
      :has_local has-local
-      :in_sync in-sync
+     :in_sync in-sync
      :remote_changed remote-changed
      :local_changed local-changed
      :has_conflict has-conflict
@@ -2174,8 +2183,16 @@
   [ctx args]
   (let [[opts parse-error] (parse-sync-transfer-opts args)
         json? (:json? opts)]
-    (if parse-error
+    (cond
+      parse-error
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+
+      (:reconcile? opts)
+      (sync-error-result json?
+                         (ex-info "--reconcile is only valid for sync pull"
+                                  {:reason reasons/reason-sync-failed}))
+
+      :else
       (try
         (let [remote (-> (select-sync-remote! ctx (:remote opts))
                          ensure-fs-remote!)
@@ -2190,6 +2207,7 @@
               remote-exists? (boolean (and (not (str/blank? bundle-path))
                                            (.exists (io/file bundle-path))))
               remote-rev-before (when remote-exists? (file-sha256-hex bundle-path))
+              force? (boolean (:force? opts))
               _ (when (str/blank? bundle-path)
                   (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
               _ (when (.exists (io/file lock-path))
@@ -2200,10 +2218,10 @@
               _ (when (nil? recipient)
                   (throw (ex-info "remote recipient is not configured (set --recipient on `remote add`)"
                                   {:reason reasons/reason-remote-recipient-missing})))
-              _ (when (and remote-exists? (nil? last-seen))
+              _ (when (and (not force?) remote-exists? (nil? last-seen))
                   (throw (ex-info "remote has data but no local baseline; run sync pull first"
                                   {:reason reasons/reason-no-local-baseline})))
-              _ (when (and remote-exists? last-seen remote-rev-before (not= last-seen remote-rev-before))
+              _ (when (and (not force?) remote-exists? last-seen remote-rev-before (not= last-seen remote-rev-before))
                   (throw (ex-info "remote changed since last baseline; run sync pull"
                                   {:reason reasons/reason-remote-changed})))]
           (if (:dry-run? opts)
@@ -2216,6 +2234,7 @@
                            :bundle_path bundle-path
                            :vault_path vault-path
                            :dry_run true
+                           :forced force?
                            :has_local has-local
                            :can_push true}]
               (if json?
@@ -2238,6 +2257,7 @@
                              :remote_rev remote-rev
                              :last_seen_rev remote-rev
                              :local_hash local-hash
+                             :forced force?
                              :has_local true
                              :can_push true}]
                 (if json?
@@ -2251,8 +2271,16 @@
   [ctx args]
   (let [[opts parse-error] (parse-sync-transfer-opts args)
         json? (:json? opts)]
-    (if parse-error
+    (cond
+      parse-error
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+
+      (:force? opts)
+      (sync-error-result json?
+                         (ex-info "--force is only valid for sync push"
+                                  {:reason reasons/reason-sync-failed}))
+
+      :else
       (try
         (let [remote (-> (select-sync-remote! ctx (:remote opts))
                          ensure-fs-remote!)
@@ -2272,7 +2300,18 @@
               identity (bundle/load-identity {:identity-file identity-path
                                               :from-stdin? false
                                               :stdin nil})
-              remote-rev (file-sha256-hex bundle-path)]
+              remote-rev (file-sha256-hex bundle-path)
+              sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
+              last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
+              local-hash-before (when local-exists? (file-sha256-hex vault-path))
+              last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
+              remote-changed (boolean (and last-seen remote-rev (not= last-seen remote-rev)))
+              local-changed (boolean (and local-exists? last-local-hash local-hash-before (not= last-local-hash local-hash-before)))
+              has-conflict (boolean (and remote-changed local-changed))
+              reconcile? (boolean (:reconcile? opts))
+              _ (when (and has-conflict (not reconcile?))
+                  (throw (ex-info "local and remote have overlapping changes; rerun with --reconcile"
+                                  {:reason reasons/reason-overlapping-changes})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
                            :action "sync_pull"
@@ -2284,6 +2323,10 @@
                            :vault_path vault-path
                            :remote_rev remote-rev
                            :dry_run true
+                           :reconcile reconcile?
+                           :remote_changed remote-changed
+                           :local_changed local-changed
+                           :has_conflict has-conflict
                            :has_remote true
                            :has_local local-exists?}]
               (if json?
@@ -2291,7 +2334,7 @@
                 (result {:exit-code 0
                          :stdout (format "dry-run: would pull %s -> %s\n" bundle-path vault-path)})))
             (let [backup-path (when local-exists?
-                (let [p (str vault-path ".bak." (System/currentTimeMillis))]
+                                (let [p (str vault-path ".bak." (System/currentTimeMillis))]
                                   (copy-file! vault-path p)
                                   p))
                   _ (bundle/open-to-vault-file bundle-path vault-path identity true)
@@ -2308,6 +2351,10 @@
                            :remote_rev remote-rev
                            :last_seen_rev remote-rev
                            :local_hash local-hash
+                           :reconciled (boolean (and reconcile? has-conflict))
+                           :remote_changed remote-changed
+                           :local_changed local-changed
+                           :has_conflict has-conflict
                            :has_remote true
                            :has_local true
                            :backup_path backup-path}]
@@ -2315,6 +2362,61 @@
                 (success-json payload)
                 (result {:exit-code 0
                          :stdout (format "ok (pulled %s)\n" remote-name)})))))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
+(defn- sync-transfer-args
+  [{:keys [remote json? dry-run? force? reconcile?]}]
+  (cond-> []
+    (some? remote) (conj "--remote" remote)
+    dry-run? (conj "--dry-run")
+    force? (conj "--force")
+    reconcile? (conj "--reconcile")
+    json? (conj "--json")))
+
+(defn- handle-sync-auto
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-transfer-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (select-sync-remote! ctx (:remote opts))
+              status (sync-status-payload ctx remote)
+              remote-name (:remote status)
+              push-args (sync-transfer-args {:remote remote-name
+                                             :json? json?
+                                             :dry-run? (:dry-run? opts)
+                                             :force? (:force? opts)})
+              pull-args (sync-transfer-args {:remote remote-name
+                                             :json? json?
+                                             :dry-run? (:dry-run? opts)
+                                             :reconcile? (:reconcile? opts)})
+              decision (cond
+                         (:has_lock status) :blocked-lock
+                         (:has_conflict status) (if (:reconcile? opts) :pull :blocked-overlap)
+                         (:remote_changed status) :pull
+                         (:needs_pull status) :pull
+                         (:local_changed status) :push
+                         (and (:has_local status) (:can_push status) (not (:has_remote status))) :push
+                         :else :noop)]
+          (case decision
+            :push (handle-sync-push ctx push-args)
+            :pull (handle-sync-pull ctx pull-args)
+            :blocked-lock (sync-error-result json? (ex-info "remote lock present"
+                                                            {:reason reasons/reason-remote-lock-present}))
+            :blocked-overlap (sync-error-result json? (ex-info "local and remote have overlapping changes; rerun with --reconcile"
+                                                               {:reason reasons/reason-overlapping-changes}))
+            :noop (if json?
+                    (success-json {:ok true
+                                   :action "sync_auto"
+                                   :exit_code 0
+                                   :remote remote-name
+                                   :decision "noop"
+                                   :recommended_action (:recommended_action status)
+                                   :in_sync (:in_sync status)})
+                    (result {:exit-code 0
+                             :stdout (format "ok (sync noop %s)\n" remote-name)}))))
         (catch Exception e
           (sync-error-result json? e))))))
 
@@ -2440,6 +2542,8 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args)
+          (str/starts-with? (first args) "-")) (handle-sync-auto ctx args)
       (= "init" (first args)) (handle-sync-init ctx (rest args))
       (= "status" (first args)) (handle-sync-status ctx (rest args))
       (= "conflicts" (first args)) (handle-sync-conflicts ctx (rest args))

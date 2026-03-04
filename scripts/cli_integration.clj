@@ -99,36 +99,60 @@
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "recipient" "--identity" id-path "--json"]) "bundle_recipient")
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" vault-path "--out" bundle-path "--recipient" recipient "--json"]) "bundle_seal")
       (expect-success-json! (run-kimen repo-root base-env ["bundle" "open" "--in" bundle-path "--out-vault" opened-vault "--identity" id-path "--json"]) "bundle_open")
-      (expect-error-json! (run-kimen repo-root base-env ["bundle" "open" "--json"]) 25 "missing_in"))
+      (ensure! (Arrays/equals
+                 (Files/readAllBytes (.toPath (java.io.File. vault-path)))
+                 (Files/readAllBytes (.toPath (java.io.File. opened-vault))))
+               "opened bundle vault differs from source vault"
+               {:vault vault-path :opened opened-vault})
+      (expect-error-json! (run-kimen repo-root base-env ["bundle" "open" "--json"]) 25 "missing_in")
 
-    (expect-success-json! (run-kimen repo-root base-env ["remote" "add" "origin" "--path" (str (.getPath temp-dir) "/remote-a") "--identity" id-path "--json"]) "remote_add")
-    (expect-success-json! (run-kimen repo-root base-env ["remote" "get" "origin" "--json"]) "remote_get")
-    (expect-success-json! (run-kimen repo-root base-env ["remote" "set" "origin" "--path" (str (.getPath temp-dir) "/remote-b") "--json"]) "remote_set")
-    (expect-success-json! (run-kimen repo-root base-env ["remote" "list" "--json"]) "remote_list")
-    (expect-success-json! (run-kimen repo-root base-env ["remote" "rm" "origin" "--json"]) "remote_rm")
-    (expect-error-json! (run-kimen repo-root base-env ["remote" "add" "bad/name" "--path" (str (.getPath temp-dir) "/remote-c") "--json"]) 30 "invalid_remote_name")
+      (expect-success-json! (run-kimen repo-root base-env ["remote" "add" "origin" "--path" (str (.getPath temp-dir) "/remote-a") "--identity" id-path "--json"]) "remote_add")
+      (expect-success-json! (run-kimen repo-root base-env ["remote" "get" "origin" "--json"]) "remote_get")
+      (expect-success-json! (run-kimen repo-root base-env ["remote" "set" "origin" "--path" (str (.getPath temp-dir) "/remote-b") "--json"]) "remote_set")
+      (expect-success-json! (run-kimen repo-root base-env ["remote" "list" "--json"]) "remote_list")
+      (expect-success-json! (run-kimen repo-root base-env ["remote" "rm" "origin" "--json"]) "remote_rm")
+      (expect-error-json! (run-kimen repo-root base-env ["remote" "add" "bad/name" "--path" (str (.getPath temp-dir) "/remote-c") "--json"]) 30 "invalid_remote_name")
 
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--identity" id-path "--json"]) "sync_init")
-    (expect-error-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--json"]) 32 "remote_exists")
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--update" "--path" (str (.getPath temp-dir) "/sync-remote-b") "--json"]) "sync_init")
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) "sync_push")
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "conflicts" "--remote" "team" "--json"]) "sync_conflicts")
-    (.delete (io/file vault-path))
-    (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
-      (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
-    (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) "sync_pull")
+      (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--identity" id-path "--recipient" recipient "--json"]) "sync_init")
+      (expect-error-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--json"]) 32 "remote_exists")
+      (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--update" "--path" (str (.getPath temp-dir) "/sync-remote-b") "--recipient" recipient "--json"]) "sync_init")
+      (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")
+      (let [sync-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) "sync_push")
+            sync-bundle-path (get sync-push "bundle_path")
+            remote-vault (str (.getPath temp-dir) "/remote-writer.vault.db")]
+        (ensure! (string? sync-bundle-path) "missing sync bundle path" {:sync-push sync-push})
+        (spit sync-bundle-path "tampered-remote\n")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "remote_changed")
+        (let [force-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--force" "--json"]) "sync_push")]
+          (ensure! (= true (get force-push "forced")) "expected forced=true for sync push --force" {:force-push force-push}))
+
+        (expect-success-json! (run-kimen repo-root base-env ["sync" "conflicts" "--remote" "team" "--json"]) "sync_conflicts")
+        (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "local-change" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+        (expect-success-json! (run-kimen repo-root base-env ["vault" "init" "--vault" remote-vault "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
+        (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "remote-win" "--vault" remote-vault "--passphrase-cmd" pass-cmd "--json"]) "set")
+        (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" remote-vault "--out" sync-bundle-path "--recipient" recipient "--json"]) "bundle_seal")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) 32 "overlapping_changes")
+        (let [pull (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--reconcile" "--json"]) "sync_pull")
+              api-key (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")
+              sync-auto-noop (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--json"]) "sync_auto")]
+          (ensure! (= true (get pull "reconciled")) "expected reconciled=true for sync pull --reconcile" {:pull pull})
+          (ensure! (= "cmVtb3RlLXdpbg==" (get api-key "value_b64")) "expected remote value after reconcile pull" {:api-key api-key})
+          (ensure! (= "noop" (get sync-auto-noop "decision")) "expected sync auto noop after reconcile pull" {:sync-auto sync-auto-noop}))
+        (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "auto-push" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
+        (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--json"]) "sync_push"))
+
+      (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--reconcile" "--json"]) 32 "sync_failed")
+      (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--force" "--json"]) 32 "sync_failed")
+      (.delete (io/file vault-path))
+      (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
+        (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
+      (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) "sync_pull"))
 
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-deploy" "--out" workflow-deploy "--json"]) "init_ci_deploy")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-sync-gate" "--out" workflow-sync "--json"]) "init_ci_sync_gate")
 
-    (ensure! (Arrays/equals
-               (Files/readAllBytes (.toPath (java.io.File. vault-path)))
-               (Files/readAllBytes (.toPath (java.io.File. opened-vault))))
-             "opened bundle vault differs from source vault"
-             {:vault vault-path :opened opened-vault})
     (println "cli integration tests passed")
     0))
 
