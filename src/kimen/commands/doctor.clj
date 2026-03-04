@@ -7,6 +7,7 @@
     [kimen.commands.map-lint :as map-lint]
     [kimen.config :as config]
     [kimen.mapfile :as mapfile]
+    [kimen.sync-state :as sync-state]
     [kimen.vault-path :as vault-path]
     [kimen.vault.v2 :as vault-v2])
   (:import
@@ -184,29 +185,6 @@
         path
         (str path "/" bundle-path)))))
 
-(defn- sync-conflict-message
-  [last-seen remote-rev has-remote]
-  (let [last-seen (trim-not-blank last-seen)
-        remote-rev (trim-not-blank remote-rev)]
-    (cond
-      (and (not has-remote) (nil? last-seen))
-      nil
-
-      (and (not has-remote) (some? last-seen))
-      (format "remote bundle disappeared since last sync (expected rev %s)" last-seen)
-
-      (and has-remote (nil? last-seen))
-      (format "remote has data (rev %s) but local baseline is empty; run `kimen sync pull`"
-              (or remote-rev "unknown"))
-
-      (and has-remote (not= last-seen remote-rev))
-      (format "remote changed (expected rev %s, found %s); run `kimen sync pull`, re-apply changes, then push"
-              last-seen
-              (or remote-rev "unknown"))
-
-      :else
-      nil)))
-
 (defn- remote-sync-state-check
   [state cfg remote name transport-ok?]
   (if-not transport-ok?
@@ -222,9 +200,9 @@
                                         [nil false]
                                         (file-revision bundle-path))
               check-name (str "remote_" name "_sync_state")
-              conflict-msg (sync-conflict-message last-seen remote-rev has-remote)]
-          (if (some? conflict-msg)
-            (add-check state check-name doctor-status-warning conflict-msg)
+              conflict (sync-state/detect-conflict last-seen remote-rev has-remote)]
+          (if (:has-conflict conflict)
+            (add-check state check-name doctor-status-warning (or (:message conflict) "remote sync state conflict"))
             (if has-remote
               (add-check state check-name doctor-status-ok "baseline matches remote revision")
               (add-check state check-name doctor-status-ok "no baseline and remote has no bundle yet"))))))))
