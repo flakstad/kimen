@@ -3500,6 +3500,35 @@
       (is (str/includes? stdout "\"ok\":false"))
       (is (str/includes? stdout "\"warning_count\":")))))
 
+(deftest doctor-strict-passes-when-no-warnings
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        map-path (str (.getPath dir) "/ok.kmap")
+        pass-cmd "printf test-passphrase"]
+    (spit map-path "env API_KEY=api_key\n")
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "unlock" "set" "exec" "--json" "--" "printf" "test-passphrase"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--map" map-path "--strict" "--json"] {}
+                                                     {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= true (get payload "ok")))
+      (is (= 0 (get payload "warning_count"))))))
+
+(deftest doctor-allow-missing-vault-human-output
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        missing-vault (str (.getPath dir) "/missing-vault.db")]
+    (run-cli ["config" "vault" "set" missing-vault "--json"] {} {:config-path cfg-path})
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["doctor" "--allow-missing-vault"] {}
+                                                     {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "vault file not found")))))
+
 (deftest init-ci-pr-safety-json-writes-workflow
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         out-path (str (.getPath dir) "/.github/workflows/kimen-pr-safety.yml")
