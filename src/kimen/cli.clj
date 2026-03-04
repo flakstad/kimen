@@ -60,6 +60,7 @@
     "  kimen sync push [--remote <name>] [--dry-run] [--force] [--json]"
     "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--json]"
     "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--json]"
+    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote) --yes [--json]"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -1092,6 +1093,42 @@
 
           (= a "--reconcile")
           (recur (rest args) (assoc opts :reconcile? true))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-sync-reset-baseline-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :remote nil
+               :clear? false
+               :to-remote? false
+               :yes? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--clear")
+          (recur (rest args) (assoc opts :clear? true))
+
+          (= a "--to-remote")
+          (recur (rest args) (assoc opts :to-remote? true))
+
+          (= a "--yes")
+          (recur (rest args) (assoc opts :yes? true))
 
           (or (= a "--remote") (str/starts-with? a "--remote="))
           (let [[v next-args err] (parse-flag-value args "--remote")]
@@ -2420,6 +2457,59 @@
         (catch Exception e
           (sync-error-result json? e))))))
 
+(defn- handle-sync-reset-baseline
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-reset-baseline-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (-> (select-sync-remote! ctx (:remote opts))
+                         ensure-fs-remote!)
+              remote-name (get remote "name")
+              clear? (:clear? opts)
+              to-remote? (:to-remote? opts)]
+          (when-not (:yes? opts)
+            (throw (ex-info "sync reset-baseline requires --yes"
+                            {:reason reasons/reason-sync-failed})))
+          (when (= clear? to-remote?)
+            (throw (ex-info "choose exactly one of --clear or --to-remote"
+                            {:reason reasons/reason-sync-failed})))
+          (if clear?
+            (do
+              (config/config-sync-clear! (:config-path ctx) remote-name)
+              (if json?
+                (success-json {:ok true
+                               :action "sync_reset_baseline"
+                               :exit_code 0
+                               :remote remote-name
+                               :mode "clear"})
+                (result {:exit-code 0
+                         :stdout (format "ok (sync baseline cleared for %s)\n" remote-name)})))
+            (let [bundle-path (fs-remote-bundle-path remote)
+                  _ (when (str/blank? bundle-path)
+                      (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+                  _ (when-not (.exists (io/file bundle-path))
+                      (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                                      {:reason reasons/reason-remote-bundle-missing})))
+                  remote-rev (file-sha256-hex bundle-path)
+                  vault-path (vault-path/resolve-vault-path ctx nil)
+                  local-hash (when (.exists (io/file vault-path))
+                               (file-sha256-hex vault-path))
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)]
+              (if json?
+                (success-json {:ok true
+                               :action "sync_reset_baseline"
+                               :exit_code 0
+                               :remote remote-name
+                               :mode "to_remote"
+                               :remote_rev remote-rev
+                               :local_hash local-hash})
+                (result {:exit-code 0
+                         :stdout (format "ok (sync baseline set to remote for %s)\n" remote-name)})))))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
 (defn- handle-sync-init
   [ctx args]
   (let [[opts parse-error] (parse-sync-init-opts args)
@@ -2549,6 +2639,7 @@
       (= "conflicts" (first args)) (handle-sync-conflicts ctx (rest args))
       (= "push" (first args)) (handle-sync-push ctx (rest args))
       (= "pull" (first args)) (handle-sync-pull ctx (rest args))
+      (= "reset-baseline" (first args)) (handle-sync-reset-baseline ctx (rest args))
       :else (error-text 1 "unknown sync command"))))
 
 (defn- handle-vault-path

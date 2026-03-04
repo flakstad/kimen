@@ -403,3 +403,14 @@
          cfg' (assoc cfg "sync" (assoc sync-map remote-name entry'))]
      (save-config! config-path-override cfg')
      entry')))
+
+(defn config-sync-clear!
+  [config-path-override remote-name]
+  (let [[cfg _] (load-config config-path-override)
+        sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
+        next-sync (dissoc sync-map remote-name)
+        cfg' (if (seq next-sync)
+               (assoc cfg "sync" next-sync)
+               (dissoc cfg "sync"))]
+    (save-config! config-path-override cfg')
+    remote-name))
