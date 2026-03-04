@@ -108,6 +108,10 @@
     (expect-success-json! (run-kimen repo-root base-env ["remote" "rm" "origin" "--json"]) "remote_rm")
     (expect-error-json! (run-kimen repo-root base-env ["remote" "add" "bad/name" "--path" (str (.getPath temp-dir) "/remote-c") "--json"]) 30 "invalid_remote_name")
 
+    (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--identity" id-path "--json"]) "sync_init")
+    (expect-error-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--path" (str (.getPath temp-dir) "/sync-remote-a") "--json"]) 32 "remote_exists")
+    (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--update" "--path" (str (.getPath temp-dir) "/sync-remote-b") "--json"]) "sync_init")
+
     (expect-success-json! (run-kimen repo-root base-env ["doctor" "--map" map-path "--bundle-in" bundle-path "--identity" id-path "--json"]) "doctor")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-pr-safety" "--out" workflow-pr "--json"]) "init_ci_pr_safety")
     (expect-success-json! (run-kimen repo-root base-env ["init" "ci-deploy" "--out" workflow-deploy "--json"]) "init_ci_deploy")

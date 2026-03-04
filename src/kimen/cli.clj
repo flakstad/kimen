@@ -52,6 +52,7 @@
      "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
      "  kimen remote list [--json]"
      "  kimen remote rm <name> [--json]"
+     "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
      "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
      "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -945,6 +946,97 @@
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
 
+(defn- parse-sync-init-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :update? false
+               :no-check? false
+               :remote-flag nil
+               :remote-arg nil
+               :type nil
+               :path nil
+               :recipient nil
+               :identity nil
+               :branch nil
+               :bundle-path nil
+               :type-set? false
+               :path-set? false
+               :recipient-set? false
+               :identity-set? false
+               :branch-set? false
+               :bundle-path-set? false}]
+    (if (empty? args)
+      (let [remote-flag (some-> (:remote-flag opts) str/trim not-empty)
+            remote-arg (some-> (:remote-arg opts) str/trim not-empty)]
+        (cond
+          (and remote-flag remote-arg (not= remote-flag remote-arg))
+          [opts "remote name mismatch between arg and --remote"]
+
+          :else
+          [(assoc opts :remote (or remote-flag remote-arg "origin")) nil]))
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--update")
+          (recur (rest args) (assoc opts :update? true))
+
+          (= a "--no-check")
+          (recur (rest args) (assoc opts :no-check? true))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-flag v))))
+
+          (or (= a "--type") (str/starts-with? a "--type="))
+          (let [[v next-args err] (parse-flag-value args "--type")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :type v :type-set? true))))
+
+          (or (= a "--path") (str/starts-with? a "--path="))
+          (let [[v next-args err] (parse-flag-value args "--path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :path v :path-set? true))))
+
+          (or (= a "--recipient") (str/starts-with? a "--recipient="))
+          (let [[v next-args err] (parse-flag-value args "--recipient")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :recipient v :recipient-set? true))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity v :identity-set? true))))
+
+          (or (= a "--branch") (str/starts-with? a "--branch="))
+          (let [[v next-args err] (parse-flag-value args "--branch")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :branch v :branch-set? true))))
+
+          (or (= a "--bundle-path") (str/starts-with? a "--bundle-path="))
+          (let [[v next-args err] (parse-flag-value args "--bundle-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :bundle-path v :bundle-path-set? true))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:remote-arg opts))
+          (recur (rest args) (assoc opts :remote-arg a))
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
 (defn- parse-init-ci-pr-safety-opts
   [args]
   (loop [args args
@@ -1805,6 +1897,154 @@
           (= "delete" (first args))) (handle-remote-rm ctx (rest args))
       :else (error-text 1 "unknown remote command"))))
 
+(defn- sync-error-result
+  [json? e]
+  (let [reason (or (:reason (ex-data e)) reasons/reason-sync-failed)]
+    (if json?
+      (error-json exit-code/code-sync-failed reason (.getMessage e))
+      (error-text exit-code/code-sync-failed (.getMessage e)))))
+
+(defn- sync-init-next-command
+  [remote-name recommended-action]
+  (case recommended-action
+    "vault_init" "kimen vault init"
+    "sync_push" (format "kimen sync push --remote %s" remote-name)
+    nil))
+
+(defn- sync-init-check
+  [ctx remote-name]
+  (let [vault-path (vault-path/resolve-vault-path ctx nil)
+        vault-exists? (.exists (io/file vault-path))
+        recommended-action (if vault-exists? "sync_push" "vault_init")]
+    {:check_ok true
+     :recommended_action recommended-action
+     :next_command (sync-init-next-command remote-name recommended-action)}))
+
+(defn- handle-sync-init
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-init-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote-name (validate-remote-name! (:remote opts))
+              existing (try
+                         (config/config-remote-get (:config-path ctx) remote-name)
+                         (catch clojure.lang.ExceptionInfo e
+                           (if (= reasons/reason-remote-not-found (:reason (ex-data e)))
+                             nil
+                             (throw e))))
+              _ (when (and existing (not (:update? opts)))
+                  (throw (ex-info (format "remote %s already exists (use --update)" (pr-str remote-name))
+                                  {:reason reasons/reason-remote-exists})))
+              type (if (:type-set? opts)
+                     (config/normalize-remote-type (:type opts))
+                     (or (some-> (get existing "type") str/trim not-empty) "fs"))
+              _ (when-not (#{"fs" "git"} type)
+                  (throw (ex-info (format "unsupported remote type %s (expected fs or git)" (pr-str type))
+                                  {:reason reasons/reason-unsupported-remote-type})))
+              path (if (:path-set? opts)
+                     (some-> (:path opts) str/trim)
+                     (some-> (get existing "path") str/trim))
+              _ (when (and (nil? existing) (str/blank? path))
+                  (throw (ex-info "--path is required" {:reason reasons/reason-missing-path})))
+              recipient (if (:recipient-set? opts)
+                          (some-> (:recipient opts) str/trim)
+                          (some-> (get existing "recipient") str/trim))
+              identity (if (:identity-set? opts)
+                         (some-> (:identity opts) str/trim)
+                         (some-> (get existing "identity") str/trim))
+              branch (if (:branch-set? opts)
+                       (some-> (:branch opts) str/trim)
+                       (some-> (get existing "branch") str/trim))
+              bundle-path (if (:bundle-path-set? opts)
+                            (some-> (:bundle-path opts) str/trim)
+                            (some-> (get existing "bundle_path") str/trim))
+              _ (when (and (not= type "git")
+                           (or (:branch-set? opts) (:bundle-path-set? opts)))
+                  (throw (ex-info "--branch/--bundle-path are only valid for --type git"
+                                  {:reason reasons/reason-git-fields-require-git-type})))
+              should-derive? (and (not (:recipient-set? opts))
+                                  (str/blank? recipient)
+                                  (not (str/blank? identity)))
+              recipient (if should-derive?
+                          (config/derive-recipient-from-identity-file identity)
+                          recipient)
+              derived-recipient? (and should-derive? (not (str/blank? recipient)))
+              remote-map (build-remote-map {:name remote-name
+                                            :type type
+                                            :path path
+                                            :recipient recipient
+                                            :identity identity
+                                            :branch branch
+                                            :bundle-path bundle-path})
+              {:keys [remote-config created updated baseline-reset]}
+              (if existing
+                (let [{:keys [remote baseline-reset?]} (config/config-remote-set! (:config-path ctx) remote-name remote-map)]
+                  {:remote-config remote
+                   :created false
+                   :updated true
+                   :baseline-reset baseline-reset?})
+                {:remote-config (config/config-remote-add! (:config-path ctx) remote-map)
+                 :created true
+                 :updated false
+                 :baseline-reset false})
+              check-fields (if (:no-check? opts)
+                             {:check_skipped true}
+                             (sync-init-check ctx remote-name))
+              payload (merge {:ok true
+                              :action "sync_init"
+                              :exit_code 0
+                              :remote remote-name
+                              :created created
+                              :updated updated
+                              :derived_recipient derived-recipient?
+                              :baseline_reset baseline-reset
+                              :remote_config remote-config}
+                             check-fields)]
+          (if json?
+            (success-json payload)
+            (let [recipient* (some-> (get remote-config "recipient") str/trim not-empty)
+                  identity* (some-> (get remote-config "identity") str/trim not-empty)
+                  lines [(if created
+                           (format "ok (sync remote %s created)" remote-name)
+                           (format "ok (sync remote %s updated)" remote-name))
+                         (str "type: " (get remote-config "type"))
+                         (str "path: " (get remote-config "path"))
+                         (when (= "git" (get remote-config "type"))
+                           (str "branch: " (get remote-config "branch")))
+                         (when (= "git" (get remote-config "type"))
+                           (str "bundle-path: " (get remote-config "bundle_path")))
+                         (if recipient*
+                           (str "recipient: " recipient*)
+                           "recipient: (none)")
+                         (if identity*
+                           (str "identity: " identity*)
+                           "identity: (none)")
+                         (when derived-recipient?
+                           "derived-recipient: true")
+                         (when baseline-reset
+                           "sync-baseline-reset: true")
+                         (when (:check_skipped payload)
+                           "status-check: skipped (--no-check)")
+                         (when (:check_ok payload)
+                           "status: ok")
+                         (when-let [recommended-action (:recommended_action payload)]
+                           (str "recommended-action: " recommended-action))
+                         (when-let [next-command (:next_command payload)]
+                           (str "next: " next-command))]]
+              (result {:exit-code 0
+                       :stdout (str (str/join "\n" (remove nil? lines)) "\n")}))))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
+(defn- handle-sync
+  [ctx args]
+  (let [args (vec args)]
+    (cond
+      (= "init" (first args)) (handle-sync-init ctx (rest args))
+      :else (error-text 1 "unknown sync command"))))
+
 (defn- handle-vault-path
   [ctx args]
   (let [[opts parse-error] (parse-vault-auth-opts args)
@@ -2630,6 +2870,9 @@
 
       (= "remote" (first args))
       (handle-remote ctx (rest args))
+
+      (= "sync" (first args))
+      (handle-sync ctx (rest args))
 
       (and (= "map" (first args)) (= "lint" (second args)))
       (handle-map-lint ctx (drop 2 args))

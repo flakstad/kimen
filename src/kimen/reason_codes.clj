@@ -79,6 +79,7 @@
 (def reason-invalid-remote-type "invalid_remote_type")
 (def reason-output-is-directory "output_is_directory")
 (def reason-output-exists "output_exists")
+(def reason-sync-failed "sync_failed")
 
 (defn all-reason-codes
   []
@@ -152,4 +153,5 @@
    reason-init-failed
    reason-invalid-remote-type
    reason-output-is-directory
-   reason-output-exists])
+   reason-output-exists
+   reason-sync-failed])

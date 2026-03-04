@@ -296,6 +296,58 @@
       (is (= exit-code/code-remote-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"missing_identity_for_recipient_derivation\"")))))
 
+(deftest sync-init-create-update-and-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        id-path (str (.getPath dir) "/bundle.agekey")
+        remote-a (str (.getPath dir) "/remote-a")
+        remote-b (str (.getPath dir) "/remote-b")
+        vault-path (str (.getPath dir) "/vault.db")]
+    (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "init" "--remote" "origin" "--path" remote-a "--identity" id-path "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_init" (get payload "action")))
+      (is (= "origin" (get payload "remote")))
+      (is (= true (get payload "created")))
+      (is (= false (get payload "updated")))
+      (is (= true (get payload "derived_recipient")))
+      (is (= true (get payload "check_ok")))
+      (is (= "vault_init" (get payload "recommended_action")))
+      (is (= "kimen vault init" (get payload "next_command"))))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "init" "--remote" "origin" "--path" remote-a "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"remote_exists\"")))
+
+    (let [cfg (json/read-str (slurp cfg-path))]
+      (spit cfg-path
+            (str (json/write-str (assoc cfg "sync" {"origin" {"last_seen_rev" "abc123"}}))
+                 "\n")))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "init" "--remote" "origin" "--update" "--path" remote-b "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= true (get payload "updated")))
+      (is (= true (get payload "baseline_reset")))
+      (is (= remote-b (get-in payload ["remote_config" "path"]))))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "init" "--remote" "bad/name" "--path" remote-a "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_remote_name\"")))))
+
 (deftest vault-and-secret-lifecycle
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
