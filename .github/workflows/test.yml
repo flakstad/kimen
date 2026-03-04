@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  go-test:
+  clojure-test:
     strategy:
       fail-fast: false
       matrix:
@@ -13,14 +13,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
-          cache: true
-      - run: go vet ./...
-      - run: go test ./...
+          bb: latest
+      - run: bb test
 
-  sync-e2e:
+  clojure-itest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          bb: latest
+      - run: bb itest
+
+  go-reference:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,5 +35,4 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: make sync-e2e
-      - run: make sync-e2e-git
+      - run: go test ./...

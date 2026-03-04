@@ -1,11 +1,15 @@
-BINARY_NAME=kimen
+BINARY_NAME := kimen
+INSTALL_BIN_DIR ?= $(HOME)/.local/bin
+ARGS ?=
 
-.PHONY: prep-cache build run install tidy fmt vet test sync-e2e sync-e2e-git sync-e2e-all release-check release-snapshot clj-run clj-test bb-run bb-test bb-itest bb-test-all
+.PHONY: build build-jar build-native run install \
+	test test-unit test-integration test-all release-check \
+	clj-run clj-test bb-run bb-test bb-itest bb-test-all \
+	tidy fmt vet \
+	go-prep-cache go-build go-run go-install go-test go-vet go-fmt go-tidy \
+	go-sync-e2e go-sync-e2e-git go-sync-e2e-all go-release-check go-release-snapshot
 
-# Go caches:
-# - Default is to use a shared per-user cache dir so isolated agent dirs (worktrees/copies)
-#   do not "redownload the world" on each build/test.
-# - Override by setting GO_CACHE_DIR (or pre-setting GOMODCACHE/GOCACHE).
+# Go caches are kept for reference/parity targets.
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	DEFAULT_GO_CACHE_DIR := $(HOME)/Library/Caches/kimen-go
@@ -14,7 +18,6 @@ else
 endif
 
 GO_CACHE_DIR ?= $(DEFAULT_GO_CACHE_DIR)
-
 export GOMODCACHE ?= $(GO_CACHE_DIR)/gomodcache
 export GOCACHE ?= $(GO_CACHE_DIR)/gocache
 
@@ -27,25 +30,86 @@ LDFLAGS ?= \
 	-X kimen/internal/buildinfo.Commit=$(COMMIT) \
 	-X kimen/internal/buildinfo.Date=$(DATE)
 
-prep-cache:
+# Clojure-first targets
+build: build-jar
+
+build-jar:
+	clojure -T:build uber
+	@mkdir -p ./dist
+	@cp ./target/kimen.jar ./dist/kimen.jar
+	@cp ./bin/kimen ./dist/$(BINARY_NAME)
+	@chmod +x ./dist/$(BINARY_NAME)
+	@echo "Built ./dist/kimen.jar and ./dist/$(BINARY_NAME)"
+
+build-native:
+	clojure -T:build native
+
+run:
+	bb run -- $(ARGS)
+
+install: build-jar
+	@mkdir -p "$(INSTALL_BIN_DIR)"
+	@cp ./bin/$(BINARY_NAME) "$(INSTALL_BIN_DIR)/$(BINARY_NAME)"
+	@chmod +x "$(INSTALL_BIN_DIR)/$(BINARY_NAME)"
+	@echo "Installed launcher: $(INSTALL_BIN_DIR)/$(BINARY_NAME)"
+	@echo "Artifacts: ./dist/kimen.jar ./dist/$(BINARY_NAME)"
+
+test: test-all
+
+test-unit:
+	bb test
+
+test-integration:
+	bb itest
+
+test-all:
+	bb test-all
+
+release-check: test-all build-jar
+
+# Direct task aliases
+clj-run:
+	clojure -M:run -- $(ARGS)
+
+clj-test:
+	clojure -M:test
+
+bb-run:
+	bb run -- $(ARGS)
+
+bb-test:
+	bb test
+
+bb-itest:
+	bb itest
+
+bb-test-all:
+	bb test-all
+
+# Legacy Go aliases (kept for reference and parity verification)
+tidy: go-tidy
+fmt: go-fmt
+vet: go-vet
+
+go-prep-cache:
 	@mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" ./dist
 
-build: prep-cache
+go-build: go-prep-cache
 	go build -ldflags "$(LDFLAGS)" -o ./dist/$(BINARY_NAME) ./cmd/kimen
 
-run: prep-cache
+go-run: go-prep-cache
 	go run -ldflags "$(LDFLAGS)" ./cmd/kimen
 
-tidy: prep-cache
+go-tidy: go-prep-cache
 	go mod tidy
 
-fmt:
+go-fmt:
 	gofmt -w .
 
-vet: prep-cache
+go-vet: go-prep-cache
 	go vet ./...
 
-test: prep-cache
+go-test: go-prep-cache
 	@# If an in-repo module cache exists under tmp/, `go test ./...` will walk it and fail.
 	@# These caches are often read-only, so we rename them into an ignored dir (leading '_').
 	@# If a previous ignored cache already exists, move the new one aside (to avoid leaving tmp/gomodcache behind).
@@ -67,37 +131,19 @@ test: prep-cache
 	fi
 	go test ./...
 
-sync-e2e: build
+go-sync-e2e: go-build
 	./scripts/e2e-sync.sh
 
-sync-e2e-git: build
+go-sync-e2e-git: go-build
 	./scripts/e2e-sync-git.sh
 
-sync-e2e-all: sync-e2e sync-e2e-git
+go-sync-e2e-all: go-sync-e2e go-sync-e2e-git
 
-install: prep-cache test build
+go-install: go-prep-cache go-test go-build
 	go install -ldflags "$(LDFLAGS)" ./cmd/kimen
 	@BIN_DIR="$$(go env GOBIN)"; if [ -z "$$BIN_DIR" ]; then BIN_DIR="$$(go env GOPATH)/bin"; fi; echo "Installed: $$BIN_DIR/$(BINARY_NAME)"
 
-release-check: vet test build sync-e2e-all
+go-release-check: go-vet go-test go-build go-sync-e2e-all
 
-release-snapshot: prep-cache
+go-release-snapshot: go-prep-cache
 	goreleaser release --snapshot --clean
-
-clj-run:
-	clojure -M:run
-
-clj-test:
-	clojure -M:test
-
-bb-run:
-	bb run -- version --json
-
-bb-test:
-	bb test
-
-bb-itest:
-	bb itest
-
-bb-test-all:
-	bb test-all

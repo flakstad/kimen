@@ -41,17 +41,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
-      KIMEN_CONFIG: ${{ github.workspace }}/.kimen-ci/config.toml
+      KIMEN_CONFIG: ${{ github.workspace }}/.kimen-ci/config.json
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
-          cache: true
+          bb: latest
 
-      - name: Build kimen
-        run: go build -o kimen ./cmd/kimen
+      - name: Smoke-check kimen launcher
+        run: ./bin/kimen version --json > /dev/null
 
       - name: Template checklist
         shell: bash
@@ -124,7 +123,7 @@ jobs:
           REMOTE_TYPE="${{ inputs.remote_type }}"
 
           if [[ "$REMOTE_TYPE" == "git" ]]; then
-            ./kimen remote add "$REMOTE_NAME" \
+            ./bin/kimen remote add "$REMOTE_NAME" \
               --type git \
               --path "${{ inputs.remote_path }}" \
               --branch "${{ inputs.remote_branch }}" \
@@ -133,7 +132,7 @@ jobs:
               --identity "$KIMEN_IDENTITY_FILE" \
               --json | tee kimen-remote-add.json
           else
-            ./kimen remote add "$REMOTE_NAME" \
+            ./bin/kimen remote add "$REMOTE_NAME" \
               --type fs \
               --path "${{ inputs.remote_path }}" \
               --recipient "$KIMEN_AGE_RECIPIENT" \
@@ -146,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$KIMEN_VAULT")"
-          ./kimen bundle open \
+          ./bin/kimen bundle open \
             --in "${{ inputs.local_bundle }}" \
             --identity "$KIMEN_IDENTITY_FILE" \
             --out-vault "$KIMEN_VAULT" \
@@ -167,7 +166,7 @@ jobs:
             PROFILE_FLAG=( --profile "$PROFILE" )
           fi
 
-          ./kimen sync preflight \
+          ./bin/kimen sync preflight \
             --remote "$REMOTE_NAME" \
             --strict \
             --stale-threshold "$STALE_THRESHOLD" \

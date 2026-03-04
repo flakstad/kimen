@@ -40,8 +40,8 @@ func TestCLI_InitCIPrSafety_JSONWritesWorkflow(t *testing.T) {
 		"name: kimen-pr-safety",
 		`default: "qa"`,
 		`default: "echo lint-check"`,
-		`./kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json`,
-		`./kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json`,
+		`./bin/kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json`,
+		`./bin/kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json`,
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(content, snippet) {
@@ -82,7 +82,7 @@ func TestCLI_InitCIDeploy_JSONWritesWorkflow(t *testing.T) {
 		`default: "stage"`,
 		`default: "./scripts/release.sh --dry-run"`,
 		`--in vault.age \`,
-		`./kimen project run --profile "${{ inputs.profile }}" -- "${DEPLOY_CMD[@]}"`,
+		`./bin/kimen project run --profile "${{ inputs.profile }}" -- "${DEPLOY_CMD[@]}"`,
 	}
 	for _, snippet := range wantSnippets {
 		if !strings.Contains(content, snippet) {
@@ -133,7 +133,7 @@ func TestCLI_InitCISyncGate_JSONWritesWorkflow(t *testing.T) {
 		`default: "secrets/vault.age"`,
 		`default: "prod"`,
 		`default: "15m"`,
-		`./kimen sync preflight \`,
+		`./bin/kimen sync preflight \`,
 		`--stale-threshold "$STALE_THRESHOLD" \`,
 		`--json | tee kimen-sync-preflight.json`,
 	}

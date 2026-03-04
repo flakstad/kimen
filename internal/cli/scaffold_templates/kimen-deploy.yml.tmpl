@@ -18,13 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
-          cache: true
+          bb: latest
 
-      - name: Build kimen
-        run: go build -o kimen ./cmd/kimen
+      - name: Smoke-check kimen launcher
+        run: ./bin/kimen version --json > /dev/null
 
       - name: Template checklist
         shell: bash
@@ -71,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$KIMEN_VAULT")"
-          ./kimen bundle open \
+          ./bin/kimen bundle open \
             --in vault.age \
             --identity "$KIMEN_IDENTITY_FILE" \
             --out-vault "$KIMEN_VAULT" \
@@ -82,13 +81,13 @@ jobs:
         env:
           KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
-        run: ./kimen doctor --profile "${{ inputs.profile }}" --bundle-in vault.age --identity "$KIMEN_IDENTITY_FILE" --strict --json | tee kimen-doctor.json
+        run: ./bin/kimen doctor --profile "${{ inputs.profile }}" --bundle-in vault.age --identity "$KIMEN_IDENTITY_FILE" --strict --json | tee kimen-doctor.json
 
       - name: Render envfile artifact
         env:
           KIMEN_VAULT: ${{ github.workspace }}/.kimen-ci/vault.db
           KIMEN_PASSPHRASE: ${{ secrets.KIMEN_PASSPHRASE }}
-        run: ./kimen envfile --profile "${{ inputs.profile }}" --out "${RUNNER_TEMP}/app.env" --json | tee kimen-envfile.json
+        run: ./bin/kimen envfile --profile "${{ inputs.profile }}" --out "${RUNNER_TEMP}/app.env" --json | tee kimen-envfile.json
 
       - name: Deploy with scoped projection
         shell: bash
@@ -99,7 +98,7 @@ jobs:
           set -euo pipefail
           # shellcheck disable=SC2206
           DEPLOY_CMD=( ${{ inputs.deploy_command }} )
-          ./kimen project run --profile "${{ inputs.profile }}" -- "${DEPLOY_CMD[@]}"
+          ./bin/kimen project run --profile "${{ inputs.profile }}" -- "${DEPLOY_CMD[@]}"
 
       - name: Upload Kimen artifacts
         if: always()

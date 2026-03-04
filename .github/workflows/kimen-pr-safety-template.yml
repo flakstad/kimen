@@ -18,13 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
-          cache: true
+          bb: latest
 
-      - name: Build kimen
-        run: go build -o kimen ./cmd/kimen
+      - name: Smoke-check kimen launcher
+        run: ./bin/kimen version --json > /dev/null
 
       - name: Template checklist
         shell: bash
@@ -43,11 +42,11 @@ jobs:
           set -euo pipefail
           PROFILE="${{ inputs.profile }}"
 
-          ./kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json
+          ./bin/kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json
 
           # shellcheck disable=SC2206
           CMD=( ${{ inputs.command }} )
-          ./kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json
+          ./bin/kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json
 
       - name: Upload Kimen artifacts
         if: always()

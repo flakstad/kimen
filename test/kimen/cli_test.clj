@@ -3549,7 +3549,7 @@
       (is (str/includes? body "name: kimen-deploy"))
       (is (str/includes? body "default: \"stage\""))
       (is (str/includes? body "default: \"./scripts/release.sh --dry-run\""))
-      (is (str/includes? body "./kimen project run --profile")))))
+      (is (str/includes? body "./bin/kimen project run --profile")))))
 
 (deftest doctor-bundle-identity-checks
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

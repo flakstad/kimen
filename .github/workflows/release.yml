@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,17 +17,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Clojure + Babashka
+        uses: DeLaGuardo/setup-clojure@13.2
         with:
-          go-version-file: go.mod
-          cache: true
+          cli: latest
+          bb: latest
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Test
+        run: bb test-all
+
+      - name: Build release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          clojure -T:build uber
+          mkdir -p dist
+          cp target/kimen.jar dist/kimen.jar
+          cp bin/kimen dist/kimen
+          chmod +x dist/kimen
+          (cd dist && shasum -a 256 kimen kimen.jar > SHA256SUMS)
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
         with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            dist/kimen
+            dist/kimen.jar
+            dist/SHA256SUMS
