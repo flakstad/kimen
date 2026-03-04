@@ -85,6 +85,9 @@
 (def reason-no-local-baseline "no_local_baseline")
 (def reason-manual-pull-required "manual_pull_required")
 (def reason-push-blocked "push_blocked")
+(def reason-invalid-lock-wait "invalid_lock_wait")
+(def reason-invalid-break-stale-lock-after "invalid_break_stale_lock_after")
+(def reason-conflicting-dry-run-lock-flags "conflicting_dry_run_lock_flags")
 (def reason-overlapping-changes "overlapping_changes")
 (def reason-invalid-take "invalid_take")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
@@ -179,6 +182,9 @@
    reason-no-local-baseline
    reason-manual-pull-required
    reason-push-blocked
+   reason-invalid-lock-wait
+   reason-invalid-break-stale-lock-after
+   reason-conflicting-dry-run-lock-flags
    reason-overlapping-changes
    reason-invalid-take
    reason-no-overlapping-conflicts

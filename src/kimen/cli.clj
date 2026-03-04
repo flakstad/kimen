@@ -58,7 +58,7 @@
     "  kimen sync preflight [--remote <name>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--stale-threshold <dur>] [--strict] [--allow-missing-vault] [--only <check>] [--skip <check>] [--json]"
     "  kimen sync status [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
     "  kimen sync conflicts [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
-    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--lock-wait <dur>] [--break-stale-lock-after <dur>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
@@ -1129,6 +1129,10 @@
                :dry-run? false
                :force? false
                :reconcile? false
+               :lock-wait nil
+               :lock-wait-ms 0
+               :break-stale-lock-after nil
+               :break-stale-lock-after-ms 0
                :passphrase-cmd nil
                :passphrase-stdin? false
                :remote nil}]
@@ -1147,6 +1151,28 @@
 
           (= a "--reconcile")
           (recur (rest args) (assoc opts :reconcile? true))
+
+          (or (= a "--lock-wait") (str/starts-with? a "--lock-wait="))
+          (let [[v next-args err] (parse-flag-value args "--lock-wait")]
+            (if err
+              [opts err]
+              (let [[ms parse-err] (parse-duration-ms v)]
+                (if parse-err
+                  [opts parse-err]
+                  (recur next-args (assoc opts
+                                          :lock-wait v
+                                          :lock-wait-ms ms))))))
+
+          (or (= a "--break-stale-lock-after") (str/starts-with? a "--break-stale-lock-after="))
+          (let [[v next-args err] (parse-flag-value args "--break-stale-lock-after")]
+            (if err
+              [opts err]
+              (let [[ms parse-err] (parse-duration-ms v)]
+                (if parse-err
+                  [opts parse-err]
+                  (recur next-args (assoc opts
+                                          :break-stale-lock-after v
+                                          :break-stale-lock-after-ms ms))))))
 
           (= a "--passphrase-stdin")
           (recur (rest args) (assoc opts :passphrase-stdin? true))
@@ -2550,6 +2576,37 @@
   (when-let [bundle-path (fs-remote-bundle-path remote)]
     (str bundle-path ".lock")))
 
+(defn- lock-age-ms
+  [^java.io.File lock-file]
+  (max 0 (- (System/currentTimeMillis) (.lastModified lock-file))))
+
+(defn- clear-push-lock-if-allowed!
+  [^java.io.File lock-file break-stale-lock-after-ms]
+  (when (and (.exists lock-file)
+             (pos? break-stale-lock-after-ms)
+             (>= (lock-age-ms lock-file) break-stale-lock-after-ms))
+    (.delete lock-file)))
+
+(defn- await-push-lock-clear!
+  [lock-path lock-wait-ms break-stale-lock-after-ms]
+  (let [lock-file (io/file lock-path)
+        wait-ms (long (max 0 (or lock-wait-ms 0)))
+        break-ms (long (max 0 (or break-stale-lock-after-ms 0)))
+        deadline (+ (System/currentTimeMillis) wait-ms)]
+    (loop [stale-lock-broken false]
+      (let [stale-lock-broken (or stale-lock-broken
+                                  (boolean (clear-push-lock-if-allowed! lock-file break-ms)))]
+        (if-not (.exists lock-file)
+          {:locked? false
+           :stale_lock_broken stale-lock-broken}
+          (let [now (System/currentTimeMillis)]
+            (if (>= now deadline)
+              {:locked? true
+               :stale_lock_broken stale-lock-broken}
+              (do
+                (Thread/sleep (long (min 100 (max 1 (- deadline now)))))
+                (recur stale-lock-broken)))))))))
+
 (defn- copy-file!
   [src dst]
   (Files/copy (.toPath (io/file src))
@@ -3418,6 +3475,23 @@
                          (ex-info "--reconcile is only valid for sync pull"
                                   {:reason reasons/reason-sync-failed}))
 
+      (neg? (:lock-wait-ms opts))
+      (sync-error-result json?
+                         (ex-info "--lock-wait must be >= 0"
+                                  {:reason reasons/reason-invalid-lock-wait}))
+
+      (neg? (:break-stale-lock-after-ms opts))
+      (sync-error-result json?
+                         (ex-info "--break-stale-lock-after must be >= 0"
+                                  {:reason reasons/reason-invalid-break-stale-lock-after}))
+
+      (and (:dry-run? opts)
+           (or (pos? (:lock-wait-ms opts))
+               (pos? (:break-stale-lock-after-ms opts))))
+      (sync-error-result json?
+                         (ex-info "--dry-run cannot be combined with --lock-wait/--break-stale-lock-after"
+                                  {:reason reasons/reason-conflicting-dry-run-lock-flags}))
+
       :else
       (try
         (let [remote (-> (select-sync-remote! ctx (:remote opts))
@@ -3436,7 +3510,11 @@
               force? (boolean (:force? opts))
               _ (when (str/blank? bundle-path)
                   (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-              _ (when (.exists (io/file lock-path))
+              lock-state (await-push-lock-clear! lock-path
+                                                 (:lock-wait-ms opts)
+                                                 (:break-stale-lock-after-ms opts))
+              stale-lock-broken? (boolean (:stale_lock_broken lock-state))
+              _ (when (:locked? lock-state)
                   (throw (ex-info "remote lock present" {:reason reasons/reason-remote-lock-present})))
               _ (when-not has-local
                   (throw (ex-info (format "local vault missing: %s" vault-path)
@@ -3471,6 +3549,7 @@
                            :vault_path vault-path
                            :dry_run true
                            :forced force?
+                           :stale_lock_broken stale-lock-broken?
                            :has_local has-local
                            :can_push true}]
               (if json?
@@ -3498,6 +3577,7 @@
                              :local_hash local-hash
                              :has_baseline_hashes (boolean baseline-secret-hashes)
                              :forced force?
+                             :stale_lock_broken stale-lock-broken?
                              :has_local true
                              :can_push true}]
                 (if json?
@@ -3518,6 +3598,12 @@
       (:force? opts)
       (sync-error-result json?
                          (ex-info "--force is only valid for sync push"
+                                  {:reason reasons/reason-sync-failed}))
+
+      (or (pos? (:lock-wait-ms opts))
+          (pos? (:break-stale-lock-after-ms opts)))
+      (sync-error-result json?
+                         (ex-info "--lock-wait/--break-stale-lock-after are only supported for sync push"
                                   {:reason reasons/reason-sync-failed}))
 
       :else

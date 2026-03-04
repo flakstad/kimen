@@ -721,6 +721,59 @@
           (is (= "sync_push" (get force-payload "action")))
           (is (= true (get force-payload "forced"))))))))
 
+(deftest sync-push-lock-wait-and-break-stale-lock
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                                      {:config-path cfg-path})
+            push-payload (json/read-str stdout)
+            bundle-path (get push-payload "bundle_path")
+            lock-path (str bundle-path ".lock")
+            lock-file (io/file lock-path)]
+        (spit lock-path "held\n")
+
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--remote" "origin" "--lock-wait" "-1s" "--json"] {}
+                                                  {:config-path cfg-path})]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (str/includes? stderr "\"reason\":\"invalid_lock_wait\"")))
+
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--remote" "origin" "--break-stale-lock-after" "-1s" "--json"] {}
+                                                  {:config-path cfg-path})]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (str/includes? stderr "\"reason\":\"invalid_break_stale_lock_after\"")))
+
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--remote" "origin" "--dry-run" "--lock-wait" "1s" "--json"] {}
+                                                  {:config-path cfg-path})]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (str/includes? stderr "\"reason\":\"conflicting_dry_run_lock_flags\"")))
+
+        (let [{:keys [exit-code stderr]} (run-cli ["sync" "push" "--remote" "origin" "--lock-wait" "20ms" "--json"] {}
+                                                  {:config-path cfg-path})]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (str/includes? stderr "\"reason\":\"remote_lock_present\"")))
+
+        (.setLastModified lock-file (- (System/currentTimeMillis) (* 2 60 1000)))
+        (let [{:keys [exit-code stdout stderr]} (run-cli ["sync" "push" "--remote" "origin" "--break-stale-lock-after" "1m" "--passphrase-cmd" pass-cmd "--json"] {}
+                                                         {:config-path cfg-path})
+              payload (json/read-str stdout)]
+          (is (= 0 exit-code))
+          (is (nil? stderr))
+          (is (= true (get payload "stale_lock_broken")))
+          (is (false? (.exists lock-file))))))))
+
 (deftest sync-pull-reconcile-required-for-overlapping-changes
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
@@ -976,6 +1029,11 @@
       (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
     (let [{:keys [exit-code stderr]}
           (run-cli ["sync" "pull" "--force" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "pull" "--lock-wait" "1s" "--json"] {}
                    {:config-path cfg-path})]
       (is (= exit-code/code-sync-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"sync_failed\"")))))

@@ -140,7 +140,11 @@
           (let [unlock (expect-success-json! (run-kimen repo-root base-env ["sync" "unlock" "--remote" "team" "--yes" "--json"]) "sync_unlock")
                 unlock-missing (expect-success-json! (run-kimen repo-root base-env ["sync" "unlock" "--remote" "team" "--yes" "--json"]) "sync_unlock")]
             (ensure! (= true (get unlock "removed")) "expected sync unlock to remove lock file" {:unlock unlock})
-            (ensure! (= false (get unlock-missing "removed")) "expected sync unlock missing lock response" {:unlock-missing unlock-missing})))
+            (ensure! (= false (get unlock-missing "removed")) "expected sync unlock missing lock response" {:unlock-missing unlock-missing}))
+          (spit lock-path "stale\n")
+          (.setLastModified (io/file lock-path) (- (System/currentTimeMillis) (* 2 60 1000)))
+          (let [stale-break (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--break-stale-lock-after" "1m" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")]
+            (ensure! (= true (get stale-break "stale_lock_broken")) "expected stale_lock_broken=true for stale lock push" {:stale-break stale-break})))
         (spit sync-bundle-path "tampered-remote\n")
         (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "remote_changed")
         (let [to-remote (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--to-remote" "--yes" "--json"]) "sync_reset_baseline")
