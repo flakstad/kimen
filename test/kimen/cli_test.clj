@@ -197,7 +197,18 @@
           (run-cli ["plan" "--map" "current.kmap" "--against-profile" "../bad" "--json"]
                    {"current.kmap" "env A=a\n"})]
       (is (= exit-code/code-plan-failed exit-code))
-      (is (str/includes? stderr "\"reason\":\"invalid_profile_name\"")))))
+      (is (str/includes? stderr "\"reason\":\"invalid_profile_name\""))))
+
+  (testing "invalid against specs are wrapped with a typed reason"
+    (let [current-src "env API_KEY=api_key\n"
+          against-src "envpath API_KEY_PATH=conf/missing.txt\n"
+          {:keys [exit-code stderr]}
+          (run-cli ["plan" "--map" "current.kmap" "--against-map" "bad-against.kmap" "--json"]
+                   {"current.kmap" current-src
+                    "bad-against.kmap" against-src})]
+      (is (= exit-code/code-plan-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"invalid_against_spec\""))
+      (is (str/includes? stderr "against spec is invalid")))))
 
 (deftest unknown-command-exits-1
   (let [{:keys [exit-code stderr]} (run-cli ["nope"] {})]

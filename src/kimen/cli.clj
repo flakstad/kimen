@@ -2075,13 +2075,33 @@
       (try
         (let [{:keys [request env-paths]} (resolve-mappings! ctx opts reasons/reason-plan-failed)
               {:keys [against-request against-env-paths against-label]} (resolve-against-mappings! ctx opts reasons/reason-plan-failed)
-              payload (plan/plan-from-mappings {:request request
-                                                :env-paths env-paths
-                                                :mode (:mode opts)
-                                                :command (:command opts)
-                                                :against-request against-request
-                                                :against-env-paths against-env-paths
-                                                :against-label against-label})]
+              _ (when against-request
+                  (plan/plan-from-mappings {:request request
+                                            :env-paths env-paths
+                                            :mode (:mode opts)
+                                            :command (:command opts)}))
+              payload
+              (if against-request
+                (try
+                  (plan/plan-from-mappings {:request request
+                                            :env-paths env-paths
+                                            :mode (:mode opts)
+                                            :command (:command opts)
+                                            :against-request against-request
+                                            :against-env-paths against-env-paths
+                                            :against-label against-label})
+                  (catch clojure.lang.ExceptionInfo e
+                    (let [reason (:reason (ex-data e))]
+                      (if (or (= reason reasons/reason-envpath-requires-projected-files)
+                              (= reason reasons/reason-envpath-missing-projected-file))
+                        (throw (ex-info (format "against spec is invalid: %s" (.getMessage e))
+                                        {:reason reasons/reason-invalid-against-spec}
+                                        e))
+                        (throw e)))))
+                (plan/plan-from-mappings {:request request
+                                          :env-paths env-paths
+                                          :mode (:mode opts)
+                                          :command (:command opts)}))]
           (if json?
             (success-json payload)
             (result {:exit-code 0
