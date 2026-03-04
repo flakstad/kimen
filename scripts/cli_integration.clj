@@ -137,6 +137,7 @@
     (expect-success-json! (run-kimen repo-root base-env ["vault" "path" "--json"]) "vault_path")
 
     (let [legacy-shim (str (.getPath temp-dir) "/legacy-go-kimen.sh")
+          dry-run-target-vault-path (str (.getPath temp-dir) "/migrated.dry-run.vault.db")
           migrated-vault-path (str (.getPath temp-dir) "/migrated.vault.db")
           _ (spit legacy-shim
                   (str "#!/usr/bin/env bash\n"
@@ -156,6 +157,20 @@
                        "echo \"unsupported legacy shim command\" >&2\n"
                        "exit 1\n"))
           _ (.setExecutable (io/file legacy-shim) true)
+          migrate-dry-run (expect-success-json!
+                           (run-bb repo-root
+                                   base-env
+                                   ["migrate-go-vault"
+                                    "--"
+                                    "--source-bin" legacy-shim
+                                    "--source-vault" (str (.getPath temp-dir) "/legacy.vault.db")
+                                    "--source-passphrase-cmd" "printf legacy-passphrase"
+                                    "--target-vault" dry-run-target-vault-path
+                                    "--target-passphrase-cmd" pass-cmd
+                                    "--init-target"
+                                    "--dry-run"
+                                    "--json"])
+                           "migrate_go_vault")
           migrate-result (expect-success-json!
                           (run-bb repo-root
                                   base-env
@@ -167,7 +182,7 @@
                                    "--target-vault" migrated-vault-path
                                    "--target-passphrase-cmd" pass-cmd
                                    "--init-target"
-                                   "--json"])
+                                  "--json"])
                           "migrate_go_vault")
           migrated-list (expect-success-json!
                          (run-kimen repo-root base-env ["secret" "list" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
@@ -178,6 +193,8 @@
           migrated-token (expect-success-json!
                           (run-kimen repo-root base-env ["secret" "get" "legacy_token" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
                           "get")]
+      (ensure! (= true (get migrate-dry-run "dry_run")) "expected dry_run=true from migration dry-run payload" {:migrate-dry-run migrate-dry-run})
+      (ensure! (false? (.exists (io/file dry-run-target-vault-path))) "migration dry-run should not create target vault" {:dry-run-target-vault-path dry-run-target-vault-path})
       (ensure! (= 2 (get migrate-result "count")) "expected two migrated secrets" {:migrate-result migrate-result})
       (ensure! (= ["legacy_api" "legacy_token"] (get migrated-list "names")) "unexpected migrated secret names" {:migrated-list migrated-list})
       (ensure! (= "bGVnYWN5LWFwaQ==" (get migrated-api "value_b64")) "unexpected migrated legacy_api value" {:migrated-api migrated-api})
