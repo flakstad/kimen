@@ -4,6 +4,7 @@
    [clojure.java.shell :as sh]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
+   [kimen.bundle :as bundle]
    [kimen.cli :as cli]
    [kimen.commands.init :as init]
    [kimen.exit-code :as exit-code]
@@ -2446,6 +2447,109 @@
                      {:config-path cfg-path})]
         (is (= exit-code/code-sync-failed exit-code))
         (is (str/includes? stderr "\"reason\":\"reconcile_baseline_missing\""))))))
+
+(deftest sync-resolve-reports-local-vault-missing-after-apply
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        remote-vault-path (str (.getPath dir) "/remote-vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [{:keys [stdout]} (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                                      {:config-path cfg-path})
+            push-payload (json/read-str stdout)
+            bundle-path (get push-payload "bundle_path")]
+        (run-cli ["secret" "set" "api_key" "--value" "a2-local" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                 {:config-path cfg-path})
+        (run-cli ["vault" "init" "--vault" remote-vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                 {:config-path cfg-path})
+        (run-cli ["secret" "set" "api_key" "--value" "a3-remote" "--vault" remote-vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                 {:config-path cfg-path})
+        (run-cli ["bundle" "seal" "--vault" remote-vault-path "--out" bundle-path "--recipient" recipient "--json"] {}
+                 {:config-path cfg-path})
+
+        (let [orig-apply @#'cli/apply-sync-resolve-remote!
+              {:keys [exit-code stderr]}
+              (with-redefs [cli/apply-sync-resolve-remote!
+                            (fn [path pp keys secrets]
+                              (orig-apply path pp keys secrets)
+                              (.delete (io/file path)))]
+                (run-cli ["sync" "resolve" "--remote" "origin" "--take" "remote" "--key" "api_key" "--passphrase-cmd" pass-cmd "--json"] {}
+                         {:config-path cfg-path}))]
+          (is (= exit-code/code-sync-failed exit-code))
+          (is (str/includes? stderr "\"reason\":\"local_vault_missing_after_resolve\"")))))))
+
+(deftest sync-pull-reports-local-vault-missing-after-open
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-a (str (.getPath dir) "/config-a.json")
+        cfg-b (str (.getPath dir) "/config-b.json")
+        vault-a (str (.getPath dir) "/vault-a.db")
+        vault-b (str (.getPath dir) "/vault-b.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+    (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+    (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-a})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-a})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-a})
+
+      (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-b})
+      (let [orig-open bundle/open-to-vault-file
+            {:keys [exit-code stderr]}
+            (with-redefs [bundle/open-to-vault-file
+                          (fn [bundle-path out-vault identity overwrite?]
+                            (orig-open bundle-path out-vault identity overwrite?)
+                            (.delete (io/file out-vault)))]
+              (run-cli ["sync" "pull" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                       {:config-path cfg-b}))]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"local_vault_missing_after_pull\""))))))
+
+(deftest sync-push-reports-local-vault-disappeared-before-baseline-update
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-path (str (.getPath dir) "/config.json")
+        vault-path (str (.getPath dir) "/vault.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["config" "vault" "set" vault-path "--json"] {} {:config-path cfg-path})
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-path})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-path})
+      (let [orig-seal bundle/seal-vault-file
+            {:keys [exit-code stderr]}
+            (with-redefs [bundle/seal-vault-file
+                          (fn [vault-path* out-path recipients]
+                            (orig-seal vault-path* out-path recipients)
+                            (.delete (io/file vault-path*)))]
+              (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                       {:config-path cfg-path}))]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"local_vault_disappeared_before_baseline_update\""))))))
 
 (deftest sync-git-remote-push-pull-roundtrip
   (if-not (git-available?)

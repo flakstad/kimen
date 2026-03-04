@@ -3929,6 +3929,10 @@
               selected-keys (resolve-sync-selected-keys! (:keys opts) (:conflict-keys analysis))
               _ (when (= take "remote")
                   (apply-sync-resolve-remote! vault-path passphrase selected-keys (:secrets remote-snap)))
+              _ (when (and (= take "remote")
+                           (not (.exists (io/file vault-path))))
+                  (throw (ex-info "local vault missing after sync resolve"
+                                  {:reason reasons/reason-local-vault-missing-after-resolve})))
               local-resolved (if (= take "remote")
                                (load-vault-snapshot vault-path passphrase false)
                                local-snap)
@@ -3938,9 +3942,12 @@
                                             (dissoc acc k)))
                                         baseline
                                         selected-keys)
-              remaining (analyze-sync-changes baseline-resolved
+                  remaining (analyze-sync-changes baseline-resolved
                                               (:hashes local-resolved)
                                               (:hashes remote-snap))
+              _ (when-not (.exists (io/file vault-path))
+                  (throw (ex-info "local vault missing after sync resolve"
+                                  {:reason reasons/reason-local-vault-missing-after-resolve})))
               local-hash (file-sha256-hex vault-path)
               next-entry (cond-> (merge (or sync-entry {})
                                         {"local_hash" local-hash
@@ -4117,6 +4124,9 @@
 
                     (throw (ex-info (format "unsupported remote type %s" (pr-str remote-type))
                                     {:reason reasons/reason-unsupported-remote-type})))
+                  _ (when-not (.exists (io/file vault-path))
+                      (throw (ex-info "local vault disappeared before baseline update"
+                                      {:reason reasons/reason-local-vault-disappeared-before-baseline-update})))
                   local-hash (file-sha256-hex vault-path)
                   sync-passphrase (maybe-sync-passphrase ctx opts)
                   baseline-secret-hashes (when sync-passphrase
@@ -4252,6 +4262,9 @@
                                      (+ (count (:local-only-changed-keys reconcile-analysis))
                                         (count (:remote-only-changed-keys reconcile-analysis)))
                                      0)
+                  _ (when-not (.exists (io/file vault-path))
+                      (throw (ex-info "local vault missing after pull"
+                                      {:reason reasons/reason-local-vault-missing-after-pull})))
                   local-hash (file-sha256-hex vault-path)
                   sync-passphrase (or reconcile-passphrase
                                       (maybe-sync-passphrase ctx opts))
