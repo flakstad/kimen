@@ -127,6 +127,31 @@
     (is (= reasons/reason-wrong-passphrase
            (ex-reason #(vault-v2/open-vault vault-path passphrase))))))
 
+(deftest tampered-ciphertext-is-rejected
+  (let [vault-path (random-vault-path)
+        passphrase "passphrase"]
+    (vault-v2/init-vault! vault-path passphrase)
+    (vault-v2/set-secret! vault-path passphrase "api_key" "value")
+
+    (let [payload (json/read-str (slurp vault-path))
+          ciphertext (b64-decode (get payload "ciphertext_b64"))
+          idx (dec (alength ciphertext))
+          original (bit-and (aget ciphertext idx) 0xFF)]
+      (aset-byte ciphertext idx (unchecked-byte (bit-xor original 0xFF)))
+      (spit vault-path (str (json/write-str (assoc payload "ciphertext_b64" (b64-encode ciphertext))) "\n")))
+
+    (is (= reasons/reason-wrong-passphrase
+           (ex-reason #(vault-v2/open-vault vault-path passphrase))))))
+
+(deftest invalid-empty-wrapped-dek-metadata-is-rejected
+  (let [vault-path (random-vault-path)
+        passphrase "passphrase"]
+    (vault-v2/init-vault! vault-path passphrase)
+    (let [payload (json/read-str (slurp vault-path))]
+      (spit vault-path (str (json/write-str (assoc-in payload ["kdf" "wrapped_dek_b64"] "")) "\n")))
+    (is (= reasons/reason-invalid-vault-file
+           (ex-reason #(vault-v2/open-vault vault-path passphrase))))))
+
 (deftest legacy-vault-read-and-upgrade
   (let [vault-path (random-vault-path)
         passphrase "legacy-passphrase"

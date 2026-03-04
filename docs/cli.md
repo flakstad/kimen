@@ -234,8 +234,8 @@ Use cases:
 
 How it works (high level):
 
-- Derives a key-encryption-key (KEK) from your passphrase (Argon2id).
-- Generates a random data-encryption-key (DEK) for encrypting secret records.
+- Derives a key-encryption-key (KEK) from your passphrase (PBKDF2-HMAC-SHA256).
+- Generates a random data-encryption-key (DEK) for encrypting vault payload data.
 - Stores the DEK wrapped under the KEK, plus format/KDF metadata.
 
 Examples:
