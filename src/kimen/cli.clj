@@ -56,6 +56,7 @@
      "  kimen remote rm <name> [--json]"
      "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
      "  kimen sync status [--remote <name>] [--json]"
+     "  kimen sync conflicts [--remote <name>] [--json]"
      "  kimen sync push [--remote <name>] [--dry-run] [--json]"
      "  kimen sync pull [--remote <name>] [--dry-run] [--json]"
      "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
@@ -2053,21 +2054,27 @@
         has-local (boolean (.exists (io/file vault-path)))
         recipient (some-> (get remote "recipient") str/trim not-empty)
         identity (some-> (get remote "identity") str/trim not-empty)
+        sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
         remote-rev (when has-remote (file-sha256-hex bundle-path))
-        last-seen (some-> (config/config-sync-entry (:config-path ctx) remote-name)
-                          (get "last_seen_rev")
-                          str/trim
-                          not-empty)
+        last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
+        local-hash (when has-local (file-sha256-hex vault-path))
+        last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
+        remote-changed (boolean (and has-remote last-seen remote-rev (not= last-seen remote-rev)))
+        local-changed (boolean (and has-local last-local-hash local-hash (not= last-local-hash local-hash)))
+        has-conflict (boolean (and remote-changed local-changed))
         blockers (cond-> []
                    (and has-local (nil? recipient)) (conj "remote_recipient_missing")
                    (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
                    has-lock (conj "remote_lock_present"))
         can-push (boolean (and has-local (not has-lock) (some? recipient)))
         needs-pull (boolean (and has-remote (not has-local)))
-        in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev)))
+        in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev) (not local-changed)))
         recommended-action
         (cond
+          has-conflict "sync_pull_reconcile"
           has-lock "wait_or_sync_unlock"
+          remote-changed "sync_pull"
+          local-changed "sync_push"
           (and has-local (nil? recipient)) "configure_remote_recipient"
           (and has-remote (not has-local) (nil? identity)) "configure_remote_identity"
           (and has-remote (not has-local)) "sync_pull"
@@ -2083,10 +2090,15 @@
      :vault_path vault-path
      :remote_rev remote-rev
      :last_seen_rev last-seen
+     :local_hash local-hash
+     :last_local_hash last-local-hash
      :has_remote has-remote
      :has_lock has-lock
      :has_local has-local
-     :in_sync in-sync
+      :in_sync in-sync
+     :remote_changed remote-changed
+     :local_changed local-changed
+     :has_conflict has-conflict
      :can_push can-push
      :needs_pull needs-pull
      :lock_blocks_push has-lock
@@ -2120,6 +2132,44 @@
         (catch Exception e
           (sync-error-result json? e))))))
 
+(defn- handle-sync-conflicts
+  [ctx args]
+  (let [[opts parse-error] (parse-sync-status-opts args)
+        json? (:json? opts)]
+    (if parse-error
+      (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+      (try
+        (let [remote (select-sync-remote! ctx (:remote opts))
+              status (sync-status-payload ctx remote)
+              payload {:ok true
+                       :action "sync_conflicts"
+                       :exit_code 0
+                       :remote (:remote status)
+                       :remote_type (:remote_type status)
+                       :remote_path (:remote_path status)
+                       :bundle_path (:bundle_path status)
+                       :remote_rev (:remote_rev status)
+                       :last_seen_rev (:last_seen_rev status)
+                       :has_remote (:has_remote status)
+                       :has_local (:has_local status)
+                       :local_hash (:local_hash status)
+                       :last_local_hash (:last_local_hash status)
+                       :remote_changed (:remote_changed status)
+                       :local_changed (:local_changed status)
+                       :has_conflict (:has_conflict status)
+                       :recommended_action (:recommended_action status)}]
+          (if json?
+            (success-json payload)
+            (result {:exit-code 0
+                     :stdout (format "remote=%s has_conflict=%s remote_changed=%s local_changed=%s recommended_action=%s\n"
+                                     (:remote payload)
+                                     (:has_conflict payload)
+                                     (:remote_changed payload)
+                                     (:local_changed payload)
+                                     (:recommended_action payload))})))
+        (catch Exception e
+          (sync-error-result json? e))))))
+
 (defn- handle-sync-push
   [ctx args]
   (let [[opts parse-error] (parse-sync-transfer-opts args)
@@ -2135,6 +2185,11 @@
               recipient (some-> (get remote "recipient") str/trim not-empty)
               vault-path (vault-path/resolve-vault-path ctx nil)
               has-local (boolean (.exists (io/file vault-path)))
+              sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
+              last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
+              remote-exists? (boolean (and (not (str/blank? bundle-path))
+                                           (.exists (io/file bundle-path))))
+              remote-rev-before (when remote-exists? (file-sha256-hex bundle-path))
               _ (when (str/blank? bundle-path)
                   (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
               _ (when (.exists (io/file lock-path))
@@ -2144,7 +2199,13 @@
                                   {:reason reasons/reason-local-vault-missing})))
               _ (when (nil? recipient)
                   (throw (ex-info "remote recipient is not configured (set --recipient on `remote add`)"
-                                  {:reason reasons/reason-remote-recipient-missing})))]
+                                  {:reason reasons/reason-remote-recipient-missing})))
+              _ (when (and remote-exists? (nil? last-seen))
+                  (throw (ex-info "remote has data but no local baseline; run sync pull first"
+                                  {:reason reasons/reason-no-local-baseline})))
+              _ (when (and remote-exists? last-seen remote-rev-before (not= last-seen remote-rev-before))
+                  (throw (ex-info "remote changed since last baseline; run sync pull"
+                                  {:reason reasons/reason-remote-changed})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
                            :action "sync_push"
@@ -2164,7 +2225,8 @@
             (do
               (bundle/seal-vault-file vault-path bundle-path [recipient])
               (let [remote-rev (file-sha256-hex bundle-path)
-                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev)
+                    local-hash (file-sha256-hex vault-path)
+                    _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)
                     payload {:ok true
                              :action "sync_push"
                              :exit_code 0
@@ -2175,6 +2237,7 @@
                              :vault_path vault-path
                              :remote_rev remote-rev
                              :last_seen_rev remote-rev
+                             :local_hash local-hash
                              :has_local true
                              :can_push true}]
                 (if json?
@@ -2208,7 +2271,8 @@
                                   {:reason reasons/reason-remote-identity-missing})))
               identity (bundle/load-identity {:identity-file identity-path
                                               :from-stdin? false
-                                              :stdin nil})]
+                                              :stdin nil})
+              remote-rev (file-sha256-hex bundle-path)]
           (if (:dry-run? opts)
             (let [payload {:ok true
                            :action "sync_pull"
@@ -2218,6 +2282,7 @@
                            :remote_path (get remote "path")
                            :bundle_path bundle-path
                            :vault_path vault-path
+                           :remote_rev remote-rev
                            :dry_run true
                            :has_remote true
                            :has_local local-exists?}]
@@ -2226,12 +2291,12 @@
                 (result {:exit-code 0
                          :stdout (format "dry-run: would pull %s -> %s\n" bundle-path vault-path)})))
             (let [backup-path (when local-exists?
-                                (let [p (str vault-path ".bak." (System/currentTimeMillis))]
+                (let [p (str vault-path ".bak." (System/currentTimeMillis))]
                                   (copy-file! vault-path p)
                                   p))
                   _ (bundle/open-to-vault-file bundle-path vault-path identity true)
-                  remote-rev (file-sha256-hex bundle-path)
-                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev)
+                  local-hash (file-sha256-hex vault-path)
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash)
                   payload {:ok true
                            :action "sync_pull"
                            :exit_code 0
@@ -2242,6 +2307,7 @@
                            :vault_path vault-path
                            :remote_rev remote-rev
                            :last_seen_rev remote-rev
+                           :local_hash local-hash
                            :has_remote true
                            :has_local true
                            :backup_path backup-path}]
@@ -2376,6 +2442,7 @@
     (cond
       (= "init" (first args)) (handle-sync-init ctx (rest args))
       (= "status" (first args)) (handle-sync-status ctx (rest args))
+      (= "conflicts" (first args)) (handle-sync-conflicts ctx (rest args))
       (= "push" (first args)) (handle-sync-push ctx (rest args))
       (= "pull" (first args)) (handle-sync-pull ctx (rest args))
       :else (error-text 1 "unknown sync command"))))

@@ -80,6 +80,8 @@
 (def reason-remote-recipient-missing "remote_recipient_missing")
 (def reason-remote-identity-missing "remote_identity_missing")
 (def reason-remote-lock-present "remote_lock_present")
+(def reason-remote-changed "remote_changed")
+(def reason-no-local-baseline "no_local_baseline")
 
 (def reason-doctor-failed "doctor_failed")
 (def reason-init-failed "init_failed")
@@ -163,6 +165,8 @@
    reason-remote-recipient-missing
    reason-remote-identity-missing
    reason-remote-lock-present
+   reason-remote-changed
+   reason-no-local-baseline
    reason-doctor-failed
    reason-init-failed
    reason-invalid-remote-type

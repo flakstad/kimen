@@ -390,13 +390,16 @@
     (get sync-map remote-name)))
 
 (defn config-sync-mark-seen!
-  [config-path-override remote-name remote-rev]
-  (let [[cfg _] (load-config config-path-override)
-        sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
-        entry (if (map? (get sync-map remote-name)) (get sync-map remote-name) {})
-        entry' (assoc entry
-                      "last_seen_rev" remote-rev
-                      "updated_at" (str (java.time.Instant/now)))
-        cfg' (assoc cfg "sync" (assoc sync-map remote-name entry'))]
-    (save-config! config-path-override cfg')
-    entry'))
+  ([config-path-override remote-name remote-rev]
+   (config-sync-mark-seen! config-path-override remote-name remote-rev nil))
+  ([config-path-override remote-name remote-rev local-hash]
+   (let [[cfg _] (load-config config-path-override)
+         sync-map (if (map? (get cfg "sync")) (get cfg "sync") {})
+         entry (if (map? (get sync-map remote-name)) (get sync-map remote-name) {})
+         entry' (cond-> (assoc entry
+                               "last_seen_rev" remote-rev
+                               "updated_at" (str (java.time.Instant/now)))
+                  (some? local-hash) (assoc "local_hash" local-hash))
+         cfg' (assoc cfg "sync" (assoc sync-map remote-name entry'))]
+     (save-config! config-path-override cfg')
+     entry')))

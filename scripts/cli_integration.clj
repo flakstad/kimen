@@ -113,6 +113,7 @@
     (expect-success-json! (run-kimen repo-root base-env ["sync" "init" "--remote" "team" "--update" "--path" (str (.getPath temp-dir) "/sync-remote-b") "--json"]) "sync_init")
     (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")
     (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) "sync_push")
+    (expect-success-json! (run-kimen repo-root base-env ["sync" "conflicts" "--remote" "team" "--json"]) "sync_conflicts")
     (.delete (io/file vault-path))
     (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
       (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
