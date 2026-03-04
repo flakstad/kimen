@@ -42,6 +42,7 @@
     "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen vault info [--vault <path>] [--json]"
     "  kimen vault path [--vault <path>] [--json]"
+    "  kimen vault rekey [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>|--old-passphrase-file <path>] [--new-passphrase-stdin|--new-passphrase-cmd <cmd>|--new-passphrase-file <path>|--new-passphrase-env <VAR>] [--dry-run] [--no-backup|--backup-dir <path>] [--json]"
     "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--json]"
     "  kimen secret list [--vault <path>] [--json]"
     "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
@@ -358,6 +359,89 @@
             (if err
               [opts err]
               (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          (recur (rest args) (update opts :rest conj a)))))))
+
+(defn- parse-vault-rekey-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :vault-path nil
+               :passphrase-cmd nil
+               :passphrase-stdin? false
+               :old-passphrase-file nil
+               :new-passphrase-cmd nil
+               :new-passphrase-stdin? false
+               :new-passphrase-file nil
+               :new-passphrase-env nil
+               :dry-run? false
+               :no-backup? false
+               :backup-dir nil
+               :rest []}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (= a "--new-passphrase-stdin")
+          (recur (rest args) (assoc opts :new-passphrase-stdin? true))
+
+          (= a "--dry-run")
+          (recur (rest args) (assoc opts :dry-run? true))
+
+          (= a "--no-backup")
+          (recur (rest args) (assoc opts :no-backup? true))
+
+          (or (= a "--vault") (str/starts-with? a "--vault="))
+          (let [[v next-args err] (parse-flag-value args "--vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :vault-path v))))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (or (= a "--old-passphrase-file") (str/starts-with? a "--old-passphrase-file="))
+          (let [[v next-args err] (parse-flag-value args "--old-passphrase-file")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :old-passphrase-file v))))
+
+          (or (= a "--new-passphrase-cmd") (str/starts-with? a "--new-passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--new-passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :new-passphrase-cmd v))))
+
+          (or (= a "--new-passphrase-file") (str/starts-with? a "--new-passphrase-file="))
+          (let [[v next-args err] (parse-flag-value args "--new-passphrase-file")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :new-passphrase-file v))))
+
+          (or (= a "--new-passphrase-env") (str/starts-with? a "--new-passphrase-env="))
+          (let [[v next-args err] (parse-flag-value args "--new-passphrase-env")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :new-passphrase-env v))))
+
+          (or (= a "--backup-dir") (str/starts-with? a "--backup-dir="))
+          (let [[v next-args err] (parse-flag-value args "--backup-dir")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :backup-dir v))))
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
@@ -4807,6 +4891,175 @@
       (= "restore" (first args)) (handle-sync-restore ctx (rest args))
       :else (error-text 1 "unknown sync command"))))
 
+(defn- parse-cmd-string
+  [s]
+  (->> (str/split (str/trim (str s)) #"\s+")
+       (remove str/blank?)
+       vec))
+
+(defn- read-passphrase-line!
+  [input reason message]
+  (let [br (java.io.BufferedReader. (java.io.InputStreamReader. input))
+        line (some-> (.readLine br) str/trim)]
+    (if (str/blank? line)
+      (throw (ex-info message {:reason reason}))
+      line)))
+
+(defn- read-passphrase-file!
+  [path reason message]
+  (let [line (-> (slurp path) str/split-lines first str/trim)]
+    (if (str/blank? line)
+      (throw (ex-info message {:reason reason}))
+      line)))
+
+(defn- passphrase-from-cmd!
+  [cmd-str empty-msg missing-msg missing-reason]
+  (when (str/blank? cmd-str)
+    (throw (ex-info empty-msg {:reason reasons/reason-empty-passphrase-command})))
+  (let [argv (parse-cmd-string cmd-str)]
+    (when (empty? argv)
+      (throw (ex-info empty-msg {:reason reasons/reason-empty-passphrase-command})))
+    (let [[cmd & args] argv
+          {:keys [exit out err]} (apply sh/sh (concat [cmd] args [:out :string :err :string]))]
+      (when-not (zero? exit)
+        (throw (ex-info (format "passphrase command failed: %s"
+                                (or (some-> err str/trim not-empty)
+                                    (some-> out str/trim not-empty)
+                                    "non-zero exit"))
+                        {:reason reasons/reason-passphrase-command-failed})))
+      (let [line (some-> out str/split-lines first str/trim)]
+        (if (str/blank? line)
+          (throw (ex-info missing-msg {:reason missing-reason}))
+          line)))))
+
+(defn- prompt-new-passphrase-for-rekey!
+  []
+  (if-let [console (System/console)]
+    (let [pass-a (.readPassword console "New passphrase: " (object-array 0))
+          pass-b (.readPassword console "Confirm new passphrase: " (object-array 0))
+          a (some-> pass-a String. str/trim)
+          b (some-> pass-b String. str/trim)]
+      (cond
+        (str/blank? a)
+        (throw (ex-info "empty new passphrase"
+                        {:reason reasons/reason-empty-new-passphrase}))
+
+        (not= a b)
+        (throw (ex-info "new passphrase confirmation does not match"
+                        {:reason reasons/reason-new-passphrase-mismatch}))
+
+        :else
+        a))
+    (throw (ex-info "no new passphrase provided (use --new-passphrase-file/--new-passphrase-cmd/--new-passphrase-stdin/--new-passphrase-env or run in a tty)"
+                    {:reason reasons/reason-missing-new-passphrase}))))
+
+(defn- resolve-old-passphrase-for-rekey!
+  [ctx opts]
+  (let [old-file-set? (some? (:old-passphrase-file opts))
+        old-file (some-> (:old-passphrase-file opts) str/trim)]
+    (when (and old-file-set?
+               (or (:passphrase-stdin? opts)
+                   (some-> (:passphrase-cmd opts) str/trim not-empty)))
+      (throw (ex-info "use only one old passphrase source: --passphrase-cmd, --passphrase-stdin, or --old-passphrase-file"
+                      {:reason reasons/reason-conflicting-passphrase-sources})))
+    (if old-file-set?
+      (read-passphrase-file! old-file
+                             reasons/reason-missing-passphrase
+                             "no passphrase provided")
+      (resolve-passphrase! ctx opts))))
+
+(defn- resolve-new-passphrase-for-rekey!
+  [ctx opts]
+  (let [new-cmd-set? (some? (:new-passphrase-cmd opts))
+        new-file-set? (some? (:new-passphrase-file opts))
+        new-env-set? (some? (:new-passphrase-env opts))
+        new-stdin? (:new-passphrase-stdin? opts)
+        source-count (count (filter true? [new-cmd-set? new-file-set? new-env-set? new-stdin?]))]
+    (when (> source-count 1)
+      (throw (ex-info "use only one new passphrase source: --new-passphrase-cmd, --new-passphrase-stdin, --new-passphrase-file, or --new-passphrase-env"
+                      {:reason reasons/reason-conflicting-passphrase-sources})))
+    (cond
+      new-file-set?
+      (read-passphrase-file! (some-> (:new-passphrase-file opts) str/trim)
+                             reasons/reason-empty-new-passphrase
+                             "empty new passphrase")
+
+      new-cmd-set?
+      (passphrase-from-cmd! (:new-passphrase-cmd opts)
+                            "empty --new-passphrase-cmd"
+                            "empty new passphrase"
+                            reasons/reason-empty-new-passphrase)
+
+      new-stdin?
+      (read-passphrase-line! (or (:stdin ctx) System/in)
+                             reasons/reason-empty-new-passphrase
+                             "empty new passphrase")
+
+      new-env-set?
+      (let [env-name (some-> (:new-passphrase-env opts) str/trim)
+            env-value (some-> (getenv ctx env-name) str)]
+        (if (str/blank? (some-> env-value str/trim))
+          (throw (ex-info (format "new passphrase environment variable %s is empty or unset" env-name)
+                          {:reason reasons/reason-missing-new-passphrase}))
+          env-value))
+
+      :else
+      (prompt-new-passphrase-for-rekey!))))
+
+(defn- vault-dir-file
+  [vault-path]
+  (or (.getParentFile (io/file vault-path))
+      (io/file ".")))
+
+(defn- vault-rekey-backup-dir-file
+  [vault-path backup-dir]
+  (if-let [d (some-> backup-dir str/trim not-empty)]
+    (io/file d)
+    (vault-dir-file vault-path)))
+
+(defn- assert-backup-dir-exists!
+  [vault-path backup-dir]
+  (let [dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
+        dir-path (.getPath dir-file)]
+    (when-not (.exists dir-file)
+      (throw (ex-info (format "backup directory not found: %s" dir-path)
+                      {:reason reasons/reason-vault-failed})))
+    (when-not (.isDirectory dir-file)
+      (throw (ex-info (format "backup directory is not a directory: %s" dir-path)
+                      {:reason reasons/reason-vault-failed})))
+    dir-file))
+
+(defn- same-directory?
+  [a b]
+  (= (.getCanonicalPath (io/file a))
+     (.getCanonicalPath (io/file b))))
+
+(defn- vault-rekey-preflight!
+  [vault-path old-passphrase backup-enabled? backup-dir dry-run?]
+  (vault-v2/list-secret-names vault-path old-passphrase)
+  (when (and backup-enabled? dry-run?)
+    (assert-backup-dir-exists! vault-path backup-dir))
+  backup-enabled?)
+
+(defn- create-vault-backup!
+  [vault-path backup-dir]
+  (let [vault-file (io/file vault-path)
+        vault-dir (vault-dir-file vault-path)
+        backup-dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
+        _ (when (and (not (.exists backup-dir-file))
+                     (not (.mkdirs backup-dir-file)))
+            (throw (ex-info (format "failed to create backup directory %s" (.getPath backup-dir-file))
+                            {:reason reasons/reason-vault-failed})))
+        _ (when-not (.isDirectory backup-dir-file)
+            (throw (ex-info (format "backup directory is not a directory: %s" (.getPath backup-dir-file))
+                            {:reason reasons/reason-vault-failed})))
+        suffix (System/nanoTime)
+        backup-path (if (same-directory? backup-dir-file vault-dir)
+                      (format "%s.bak.%d" vault-path suffix)
+                      (.getPath (io/file backup-dir-file (format "%s.bak.%d" (.getName vault-file) suffix))))]
+    (copy-file! vault-path backup-path)
+    backup-path))
+
 (defn- handle-vault-path
   [ctx args]
   (let [[opts parse-error] (parse-vault-auth-opts args)
@@ -4877,6 +5130,66 @@
         (catch Exception e
           (vault-error-result json? e))))))
 
+(defn- handle-vault-rekey
+  [ctx args]
+  (let [[opts parse-error] (parse-vault-rekey-opts args)
+        json? (:json? opts)]
+    (cond
+      parse-error
+      (vault-error-result json? (ex-info parse-error {:reason reasons/reason-vault-failed}))
+
+      (seq (:rest opts))
+      (vault-error-result json? (ex-info "unexpected argument" {:reason reasons/reason-vault-failed}))
+
+      (and (:passphrase-stdin? opts) (:new-passphrase-stdin? opts))
+      (vault-error-result json? (ex-info "cannot use both --passphrase-stdin and --new-passphrase-stdin"
+                                         {:reason reasons/reason-conflicting-passphrase-sources}))
+
+      (and (:no-backup? opts)
+           (some-> (:backup-dir opts) str/trim not-empty))
+      (vault-error-result json? (ex-info "--no-backup cannot be used with --backup-dir"
+                                         {:reason reasons/reason-conflicting-backup-options}))
+
+      :else
+      (try
+        (let [vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
+              old-passphrase (resolve-old-passphrase-for-rekey! ctx opts)
+              new-passphrase (resolve-new-passphrase-for-rekey! ctx opts)
+              _ (when (= old-passphrase new-passphrase)
+                  (throw (ex-info "new passphrase must differ from old passphrase"
+                                  {:reason reasons/reason-new-passphrase-unchanged})))
+              would-backup (vault-rekey-preflight! vault-path
+                                                   old-passphrase
+                                                   (not (:no-backup? opts))
+                                                   (:backup-dir opts)
+                                                   (:dry-run? opts))]
+          (if (:dry-run? opts)
+            (if json?
+              (success-json {:ok true
+                             :action "vault_rekey"
+                             :exit_code 0
+                             :path vault-path
+                             :dry_run true
+                             :would_backup would-backup})
+              (result {:exit-code 0
+                       :stdout (str (format "dry-run ok: vault can be rekeyed at %s\n" vault-path)
+                                    (format "would-backup: %s\n" would-backup))}))
+            (let [backup-path (when would-backup
+                                (create-vault-backup! vault-path (:backup-dir opts)))
+                  _ (vault-v2/rekey-vault! vault-path old-passphrase new-passphrase)]
+              (if json?
+                (success-json (cond-> {:ok true
+                                       :action "vault_rekey"
+                                       :exit_code 0
+                                       :path vault-path}
+                                backup-path (assoc :backup_path backup-path)))
+                (result {:exit-code 0
+                         :stdout (str (format "rekeyed vault at %s\n" vault-path)
+                                      (when backup-path
+                                        (format "backup: %s\n" backup-path)))})))))
+        (catch Exception e
+          (vault-error-result json? e))))))
+
 (defn- handle-vault
   [ctx args]
   (let [args (vec args)]
@@ -4884,6 +5197,7 @@
       (= "init" (first args)) (handle-vault-init ctx (rest args))
       (= "info" (first args)) (handle-vault-info ctx (rest args))
       (= "path" (first args)) (handle-vault-path ctx (rest args))
+      (= "rekey" (first args)) (handle-vault-rekey ctx (rest args))
       :else (error-text 1 "unknown vault command"))))
 
 (defn- secret-vault-path

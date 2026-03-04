@@ -48,9 +48,15 @@
 (def reason-empty-passphrase-command "empty_passphrase_command")
 (def reason-passphrase-command-failed "passphrase_command_failed")
 (def reason-missing-passphrase "missing_passphrase")
+(def reason-conflicting-passphrase-sources "conflicting_passphrase_sources")
+(def reason-missing-new-passphrase "missing_new_passphrase")
+(def reason-empty-new-passphrase "empty_new_passphrase")
+(def reason-new-passphrase-mismatch "new_passphrase_mismatch")
+(def reason-new-passphrase-unchanged "new_passphrase_unchanged")
 
 (def reason-invalid-vault-file "invalid_vault_file")
 (def reason-vault-exists "vault_exists")
+(def reason-conflicting-backup-options "conflicting_backup_options")
 (def reason-vault-failed "vault_failed")
 
 (def reason-unknown-unlock-method "unknown_unlock_method")
@@ -157,8 +163,14 @@
    reason-empty-passphrase-command
    reason-passphrase-command-failed
    reason-missing-passphrase
+   reason-conflicting-passphrase-sources
+   reason-missing-new-passphrase
+   reason-empty-new-passphrase
+   reason-new-passphrase-mismatch
+   reason-new-passphrase-unchanged
    reason-invalid-vault-file
    reason-vault-exists
+   reason-conflicting-backup-options
    reason-vault-failed
    reason-unknown-unlock-method
    reason-missing-unlock-exec-command

@@ -2707,6 +2707,115 @@
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"names\":[]")))))
 
+(deftest vault-rekey-json-and-backup
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        old-pass-file (str (.getPath dir) "/old.pass")
+        new-pass-file (str (.getPath dir) "/new.pass")
+        old-pass-cmd "printf old-pass"
+        new-pass-cmd "printf new-pass"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" old-pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "value" "--vault" vault-path "--passphrase-cmd" old-pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (spit old-pass-file "old-pass\n")
+    (spit new-pass-file "new-pass\n")
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)
+          backup-path (get payload "backup_path")]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "vault_rekey" (get payload "action")))
+      (is (= vault-path (get payload "path")))
+      (is (string? backup-path))
+      (is (.exists (io/file backup-path))))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["secret" "list" "--vault" vault-path "--passphrase-cmd" old-pass-cmd "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-wrong-passphrase exit-code))
+      (is (str/includes? stderr "\"reason\":\"wrong_passphrase\"")))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["secret" "list" "--vault" vault-path "--passphrase-cmd" new-pass-cmd "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"api_key\"")))))
+
+(deftest vault-rekey-dry-run-and-wrong-old-passphrase
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        old-pass-file (str (.getPath dir) "/old.pass")
+        new-pass-file (str (.getPath dir) "/new.pass")
+        wrong-pass-file (str (.getPath dir) "/wrong.pass")
+        old-pass-cmd "printf old-pass"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" old-pass-cmd "--json"] {} {:config-path cfg-path})
+    (spit old-pass-file "old-pass\n")
+    (spit new-pass-file "new-pass\n")
+    (spit wrong-pass-file "wrong-pass\n")
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--dry-run" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "vault_rekey" (get payload "action")))
+      (is (= true (get payload "dry_run")))
+      (is (= true (get payload "would_backup"))))
+
+    (let [backups (->> (or (.listFiles dir) (make-array java.io.File 0))
+                       (map #(.getName ^java.io.File %))
+                       (filter #(str/starts-with? % "vault.db.bak."))
+                       vec)]
+      (is (empty? backups)))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" wrong-pass-file "--new-passphrase-file" new-pass-file "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-wrong-passphrase exit-code))
+      (is (str/includes? stderr "\"reason\":\"wrong_passphrase\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["secret" "list" "--vault" vault-path "--passphrase-cmd" old-pass-cmd "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (nil? stderr)))))
+
+(deftest vault-rekey-typed-errors
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        old-pass-file (str (.getPath dir) "/old.pass")
+        new-pass-file (str (.getPath dir) "/new.pass")
+        pass-cmd "printf old-pass"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (spit old-pass-file "old-pass\n")
+    (spit new-pass-file "old-pass\n")
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--no-backup" "--backup-dir" (.getPath dir) "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-vault-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"conflicting_backup_options\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--new-passphrase-file" new-pass-file "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-vault-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"new_passphrase_unchanged\"")))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["vault" "rekey" "--vault" vault-path "--old-passphrase-file" old-pass-file "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-vault-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"missing_new_passphrase\"")))))
+
 (deftest secret-errors-typed-exit-codes
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
