@@ -1687,6 +1687,41 @@
       (is (= exit-code/code-sync-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"conflicting_check_and_dry_run\"")))))
 
+(deftest sync-auto-status-payload-validation-reasons
+  (let [real-run cli/run
+        doctor-ok {:exit-code 0
+                   :stdout "{\"ok\":true,\"action\":\"doctor\",\"exit_code\":0}\n"}
+        run-sync (fn [status-res]
+                   (with-redefs [cli/run (fn [_ argv]
+                                           (cond
+                                             (= ["doctor" "--json"] argv)
+                                             doctor-ok
+
+                                             (= ["sync" "status" "--json"] argv)
+                                             status-res
+
+                                             :else
+                                             (throw (ex-info "unexpected nested command"
+                                                             {:argv argv}))))]
+                     (real-run {} ["sync" "--json"])))]
+    (testing "empty status payload"
+      (let [{:keys [exit-code stderr]} (run-sync {:exit-code 0
+                                                  :stdout ""})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"sync_status_empty_payload\""))))
+
+    (testing "undecodable status payload"
+      (let [{:keys [exit-code stderr]} (run-sync {:exit-code 0
+                                                  :stdout "{not-json"})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"sync_status_decode_failed\""))))
+
+    (testing "status payload missing action"
+      (let [{:keys [exit-code stderr]} (run-sync {:exit-code 0
+                                                  :stdout "{\"ok\":true,\"remote\":\"origin\"}"})]
+        (is (= exit-code/code-sync-failed exit-code))
+        (is (str/includes? stderr "\"reason\":\"sync_status_missing_action\""))))))
+
 (deftest sync-auto-noop-and-push-flow
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         cfg-path (str (.getPath dir) "/config.json")
