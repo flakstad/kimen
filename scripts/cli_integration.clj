@@ -133,6 +133,10 @@
             sync-bundle-path (get sync-push "bundle_path")
             remote-vault (str (.getPath temp-dir) "/remote-writer.vault.db")]
         (ensure! (string? sync-bundle-path) "missing sync bundle path" {:sync-push sync-push})
+        (let [pull-dry-run (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--dry-run" "--json"]) "sync_pull_dry_run")
+              pull-no-backup (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--no-backup" "--json"]) "sync_pull")]
+          (ensure! (= true (get pull-dry-run "would_backup")) "expected would_backup=true on sync pull dry-run with local vault" {:pull-dry-run pull-dry-run})
+          (ensure! (nil? (get pull-no-backup "backup_path")) "expected nil backup_path for sync pull --no-backup" {:pull-no-backup pull-no-backup}))
         (let [preflight (expect-success-json! (run-kimen repo-root base-env ["sync" "preflight" "--remote" "team" "--json"]) "sync_preflight")
               lock-path (str sync-bundle-path ".lock")]
           (ensure! (= true (get preflight "ok")) "expected sync preflight success after initial push" {:preflight preflight})

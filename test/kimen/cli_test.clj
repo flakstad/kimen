@@ -551,6 +551,26 @@
     (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--json"] {}
              {:config-path cfg-path})
     (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "pull" "--remote" "origin" "--dry-run" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_pull_dry_run" (get payload "action")))
+      (is (= true (get payload "would_backup")))
+      (is (= true (get payload "has_local"))))
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "pull" "--remote" "origin" "--no-backup" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= "sync_pull" (get payload "action")))
+      (is (nil? (get payload "backup_path"))))
+
     (.delete (io/file vault-path))
 
     (let [{:keys [exit-code stdout stderr]}
@@ -560,7 +580,8 @@
       (is (= 0 exit-code))
       (is (nil? stderr))
       (is (= "sync_pull_dry_run" (get payload "action")))
-      (is (= true (get payload "dry_run"))))
+      (is (= true (get payload "dry_run")))
+      (is (= false (get payload "would_backup"))))
 
     (let [{:keys [exit-code stdout stderr]}
           (run-cli ["sync" "pull" "--remote" "origin" "--reconcile" "--passphrase-cmd" pass-cmd "--json"] {}
@@ -1131,6 +1152,11 @@
         cfg-path (str (.getPath dir) "/config.json")]
     (let [{:keys [exit-code stderr]}
           (run-cli ["sync" "push" "--reconcile" "--json"] {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-sync-failed exit-code))
+      (is (str/includes? stderr "\"reason\":\"sync_failed\"")))
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["sync" "push" "--no-backup" "--json"] {}
                    {:config-path cfg-path})]
       (is (= exit-code/code-sync-failed exit-code))
       (is (str/includes? stderr "\"reason\":\"sync_failed\"")))

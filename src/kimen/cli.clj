@@ -59,7 +59,7 @@
     "  kimen sync status [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
     "  kimen sync conflicts [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
     "  kimen sync push [--remote <name>] [--dry-run] [--force] [--lock-wait <dur>] [--break-stale-lock-after <dur>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--no-backup] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
@@ -1129,6 +1129,7 @@
                :dry-run? false
                :force? false
                :reconcile? false
+               :no-backup? false
                :lock-wait nil
                :lock-wait-ms 0
                :break-stale-lock-after nil
@@ -1151,6 +1152,9 @@
 
           (= a "--reconcile")
           (recur (rest args) (assoc opts :reconcile? true))
+
+          (= a "--no-backup")
+          (recur (rest args) (assoc opts :no-backup? true))
 
           (or (= a "--lock-wait") (str/starts-with? a "--lock-wait="))
           (let [[v next-args err] (parse-flag-value args "--lock-wait")]
@@ -3475,6 +3479,11 @@
                          (ex-info "--reconcile is only valid for sync pull"
                                   {:reason reasons/reason-sync-failed}))
 
+      (:no-backup? opts)
+      (sync-error-result json?
+                         (ex-info "--no-backup is only valid for sync pull"
+                                  {:reason reasons/reason-sync-failed}))
+
       (neg? (:lock-wait-ms opts))
       (sync-error-result json?
                          (ex-info "--lock-wait must be >= 0"
@@ -3654,6 +3663,7 @@
                                    (analyze-sync-changes baseline-secret-hashes-in
                                                          (:hashes reconcile-local-snap)
                                                          (:hashes reconcile-remote-snap)))
+              would-backup (boolean (and local-exists? (not (:no-backup? opts))))
               _ (when (and reconcile-passphrase
                            (seq (:conflict-keys reconcile-analysis)))
                   (throw (ex-info "local and remote have overlapping key changes; manual reconciliation required"
@@ -3670,6 +3680,7 @@
                            :vault_path vault-path
                            :remote_rev remote-rev
                            :dry_run true
+                           :would_backup would-backup
                            :reconcile reconcile?
                            :remote_changed remote-changed
                            :local_changed local-changed
@@ -3680,7 +3691,7 @@
                 (success-json payload)
                 (result {:exit-code 0
                          :stdout (format "dry-run: would pull %s -> %s\n" bundle-path vault-path)})))
-            (let [backup-path (when local-exists?
+            (let [backup-path (when (and local-exists? (not (:no-backup? opts)))
                                 (let [p (str vault-path ".bak." (System/currentTimeMillis))]
                                   (copy-file! vault-path p)
                                   p))
@@ -3728,12 +3739,13 @@
           (sync-error-result json? e))))))
 
 (defn- sync-transfer-args
-  [{:keys [remote json? dry-run? force? reconcile? passphrase-cmd passphrase-stdin?]}]
+  [{:keys [remote json? dry-run? force? reconcile? no-backup? passphrase-cmd passphrase-stdin?]}]
   (cond-> []
     (some? remote) (conj "--remote" remote)
     dry-run? (conj "--dry-run")
     force? (conj "--force")
     reconcile? (conj "--reconcile")
+    no-backup? (conj "--no-backup")
     passphrase-stdin? (conj "--passphrase-stdin")
     (some? passphrase-cmd) (conj "--passphrase-cmd" passphrase-cmd)
     json? (conj "--json")))
