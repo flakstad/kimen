@@ -3,6 +3,7 @@
   (:require
    [babashka.process :as p]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [kimen.json :as json])
   (:import
    [java.nio.file Files]
@@ -48,6 +49,17 @@
     (ensure! (= false (get payload "ok")) "expected error payload" {:payload payload :res res})
     (ensure! (= exit-code (get payload "exit_code")) "unexpected payload exit code" {:payload payload :res res})
     (ensure! (= reason (get payload "reason")) "unexpected payload reason" {:expected reason :payload payload :res res})
+    payload))
+
+(defn- expect-sync-report-error!
+  [res exit-code reason]
+  (ensure! (= exit-code (:exit res)) "unexpected sync report exit code" {:expected exit-code :res res})
+  (ensure! (or (nil? (:err res)) (str/blank? (:err res))) "expected sync report errors on stdout only" {:res res})
+  (let [payload (parse-json (:out res))]
+    (ensure! (= "sync" (get payload "action")) "expected sync action in report" {:payload payload :res res})
+    (ensure! (= "blocked" (get payload "decision")) "expected blocked sync report decision" {:payload payload :res res})
+    (ensure! (= exit-code (get payload "exit_code")) "unexpected sync report payload exit code" {:payload payload :res res})
+    (ensure! (= reason (get payload "reason")) "unexpected sync report reason" {:expected reason :payload payload :res res})
     payload))
 
 (defn main!
@@ -154,6 +166,8 @@
         (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "remote-win" "--vault" remote-vault "--passphrase-cmd" pass-cmd "--json"]) "set")
         (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" remote-vault "--out" sync-bundle-path "--recipient" recipient "--json"]) "bundle_seal")
         (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) 31 "overlapping_changes")
+        (let [sync-auto-blocked (expect-sync-report-error! (run-kimen repo-root base-env ["sync" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) 31 "overlapping_changes")]
+          (ensure! (= "manual_reconcile" (get sync-auto-blocked "recommended_action")) "expected manual_reconcile recommendation for blocked sync auto" {:sync-auto-blocked sync-auto-blocked}))
         (let [changes (expect-success-json! (run-kimen repo-root base-env ["sync" "changes" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_changes")
               resolve (expect-success-json! (run-kimen repo-root base-env ["sync" "resolve" "--remote" "team" "--take" "remote" "--key" "api_key" "--passphrase-cmd" pass-cmd "--json"]) "sync_resolve")
               pull (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--reconcile" "--passphrase-cmd" pass-cmd "--json"]) "sync_pull")

@@ -575,6 +575,8 @@
         (is (= true (get conflicts "remote_changed")))
         (is (= true (get conflicts "local_changed")))
         (is (= true (get conflicts "has_conflict")))
+        (is (= "remote_changed" (get conflicts "reason")))
+        (is (= "remote_changed" (first (get conflicts "blockers"))))
         (is (= "sync_pull" (get conflicts "recommended_action")))))))
 
 (deftest sync-push-force-overrides-drift-and-baseline-guards
@@ -758,7 +760,8 @@
           (let [payload (json/read-str stdout)]
             (is (= "sync" (get payload "action")))
             (is (= "blocked" (get payload "decision")))
-            (is (= "overlapping_changes" (get payload "reason")))))
+            (is (= "overlapping_changes" (get payload "reason")))
+            (is (= "manual_reconcile" (get payload "recommended_action")))))
 
         (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "--remote" "origin" "--reconcile" "--passphrase-cmd" pass-cmd "--json"] {}
@@ -768,7 +771,114 @@
           (let [payload (json/read-str stdout)]
             (is (= "sync" (get payload "action")))
             (is (= "blocked" (get payload "decision")))
-            (is (= "overlapping_changes" (get payload "reason")))))))))
+            (is (= "overlapping_changes" (get payload "reason")))
+            (is (= "manual_reconcile" (get payload "recommended_action")))))))))
+
+(deftest sync-auto-pulls-when-remote-changed-local-clean
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-a (str (.getPath dir) "/config-a.json")
+        cfg-b (str (.getPath dir) "/config-b.json")
+        vault-a (str (.getPath dir) "/vault-a.db")
+        vault-b (str (.getPath dir) "/vault-b.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+    (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-a})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-a})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+
+      (run-cli ["vault" "init" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+      (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-b})
+      (run-cli ["sync" "pull" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+      (run-cli ["secret" "set" "api_key" "--value" "remote-v2" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-b})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "--remote" "origin" "--json"] {}
+                     {:config-path cfg-a})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "sync" (get payload "action")))
+        (is (= "pull" (get payload "decision")))
+        (is (some #(= "sync_pull" (get % "name")) (get payload "steps"))))
+
+      (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+                                                {:config-path cfg-a})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (= "cmVtb3RlLXYy" (get payload "value_b64")))))))
+
+(deftest sync-auto-reconciles-disjoint-remote-and-local-changes
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        cfg-a (str (.getPath dir) "/config-a.json")
+        cfg-b (str (.getPath dir) "/config-b.json")
+        vault-a (str (.getPath dir) "/vault-a.db")
+        vault-b (str (.getPath dir) "/vault-b.db")
+        id-path (str (.getPath dir) "/sync.agekey")
+        remote-dir (str (.getPath dir) "/remote")
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+    (run-cli ["secret" "set" "api_key" "--value" "a1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-a})
+    (run-cli ["secret" "set" "db_pw" "--value" "p1" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-a})
+    (let [{:keys [stdout]} (run-cli ["bundle" "keygen" "--out" id-path "--json"] {} {:config-path cfg-a})
+          keygen (json/read-str stdout)
+          recipient (get keygen "recipient")]
+      (run-cli ["config" "vault" "set" vault-a "--json"] {} {:config-path cfg-a})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-a})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-a})
+      (run-cli ["secret" "set" "api_key" "--value" "a2-local" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-a})
+
+      (run-cli ["vault" "init" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+      (run-cli ["config" "vault" "set" vault-b "--json"] {} {:config-path cfg-b})
+      (run-cli ["sync" "init" "--remote" "origin" "--path" remote-dir "--identity" id-path "--recipient" recipient "--json"] {}
+               {:config-path cfg-b})
+      (run-cli ["sync" "pull" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+      (run-cli ["secret" "set" "db_pw" "--value" "p2-remote" "--vault" vault-b "--passphrase-cmd" pass-cmd "--json"] {}
+               {:config-path cfg-b})
+      (run-cli ["sync" "push" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-b})
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "--remote" "origin" "--check" "--json"] {}
+                     {:config-path cfg-a})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "sync" (get payload "action")))
+        (is (= "would_pull_reconcile" (get payload "decision"))))
+
+      (let [{:keys [exit-code stdout stderr]}
+            (run-cli ["sync" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
+                     {:config-path cfg-a})
+            payload (json/read-str stdout)]
+        (is (= 0 exit-code))
+        (is (nil? stderr))
+        (is (= "sync" (get payload "action")))
+        (is (= "pull_reconcile" (get payload "decision")))
+        (is (some #(= "sync_pull_reconcile" (get % "name")) (get payload "steps"))))
+
+      (let [{api-stdout :stdout} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+                                          {:config-path cfg-a})
+            api (json/read-str api-stdout)
+            {db-stdout :stdout} (run-cli ["secret" "get" "db_pw" "--unsafe-stdout" "--vault" vault-a "--passphrase-cmd" pass-cmd "--json"] {}
+                                         {:config-path cfg-a})
+            db (json/read-str db-stdout)]
+        (is (= "YTItbG9jYWw=" (get api "value_b64")))
+        (is (= "cDItcmVtb3Rl" (get db "value_b64")))))))
 
 (deftest sync-transfer-rejects-command-specific-flags
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
