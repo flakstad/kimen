@@ -130,7 +130,7 @@
             (ensure! (= true (get unlock "removed")) "expected sync unlock to remove lock file" {:unlock unlock})
             (ensure! (= false (get unlock-missing "removed")) "expected sync unlock missing lock response" {:unlock-missing unlock-missing})))
         (spit sync-bundle-path "tampered-remote\n")
-        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "remote_changed")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "remote_changed")
         (let [to-remote (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--to-remote" "--yes" "--json"]) "sync_reset_baseline")
               rev-reset (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--rev" (get to-remote "new_rev") "--yes" "--json"]) "sync_reset_baseline")
               reset-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")]
@@ -139,13 +139,13 @@
           (ensure! (= "sync_push" (get reset-push "action")) "expected sync push after reset-baseline --to-remote" {:reset-push reset-push}))
 
         (spit sync-bundle-path "tampered-remote-again\n")
-        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "remote_changed")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "remote_changed")
         (let [force-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--force" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")]
           (ensure! (= true (get force-push "forced")) "expected forced=true for sync push --force" {:force-push force-push}))
         (expect-error-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--clear" "--json"]) 32 "sync_failed")
         (let [clear (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--clear" "--yes" "--json"]) "sync_reset_baseline")]
           (ensure! (= "clear" (get clear "mode")) "expected clear mode for reset-baseline --clear" {:clear clear}))
-        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "no_local_baseline")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 31 "no_local_baseline")
         (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--force" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")
 
         (expect-success-json! (run-kimen repo-root base-env ["sync" "conflicts" "--remote" "team" "--json"]) "sync_conflicts")
@@ -153,25 +153,27 @@
         (expect-success-json! (run-kimen repo-root base-env ["vault" "init" "--vault" remote-vault "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
         (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "remote-win" "--vault" remote-vault "--passphrase-cmd" pass-cmd "--json"]) "set")
         (expect-success-json! (run-kimen repo-root base-env ["bundle" "seal" "--vault" remote-vault "--out" sync-bundle-path "--recipient" recipient "--json"]) "bundle_seal")
-        (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) 32 "overlapping_changes")
+        (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--json"]) 31 "overlapping_changes")
         (let [changes (expect-success-json! (run-kimen repo-root base-env ["sync" "changes" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_changes")
               resolve (expect-success-json! (run-kimen repo-root base-env ["sync" "resolve" "--remote" "team" "--take" "remote" "--key" "api_key" "--passphrase-cmd" pass-cmd "--json"]) "sync_resolve")
               pull (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--reconcile" "--passphrase-cmd" pass-cmd "--json"]) "sync_pull")
               api-key (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")
-              sync-auto-noop (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--json"]) "sync_auto")]
+              sync-auto-noop (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--json"]) "sync")]
           (ensure! (= true (get changes "has_baseline")) "expected has_baseline=true for sync changes" {:changes changes})
           (ensure! (= "remote" (get resolve "take")) "expected remote take for sync resolve" {:resolve resolve})
           (ensure! (= true (get pull "ok")) "expected successful sync pull after resolve" {:pull pull})
           (ensure! (= "cmVtb3RlLXdpbg==" (get api-key "value_b64")) "expected remote value after reconcile pull" {:api-key api-key})
           (ensure! (= "noop" (get sync-auto-noop "decision")) "expected sync auto noop after reconcile pull" {:sync-auto sync-auto-noop}))
         (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "auto-push" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
-        (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_push"))
+        (let [sync-auto-push (expect-success-json! (run-kimen repo-root base-env ["sync" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync")]
+          (ensure! (= "push" (get sync-auto-push "decision")) "expected sync auto push decision" {:sync-auto-push sync-auto-push})))
 
       (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--reconcile" "--json"]) 32 "sync_failed")
       (expect-error-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--force" "--json"]) 32 "sync_failed")
       (.delete (io/file vault-path))
       (let [status (expect-success-json! (run-kimen repo-root base-env ["sync" "status" "--remote" "team" "--json"]) "sync_status")]
-        (ensure! (= true (get status "needs_pull")) "expected needs_pull=true after local vault delete" {:status status}))
+        (ensure! (= false (get status "has_local")) "expected has_local=false after local vault delete" {:status status})
+        (ensure! (= "sync_pull" (get status "recommended_action")) "expected recommended_action=sync_pull after local vault delete" {:status status}))
       (expect-success-json! (run-kimen repo-root base-env ["sync" "pull" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_pull")
       (let [restore-backup (str (.getPath temp-dir) "/manual-restore.backup.db")]
         (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "restore-source" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")

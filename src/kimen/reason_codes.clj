@@ -80,8 +80,11 @@
 (def reason-remote-recipient-missing "remote_recipient_missing")
 (def reason-remote-identity-missing "remote_identity_missing")
 (def reason-remote-lock-present "remote_lock_present")
+(def reason-remote-disappeared "remote_disappeared")
 (def reason-remote-changed "remote_changed")
 (def reason-no-local-baseline "no_local_baseline")
+(def reason-manual-pull-required "manual_pull_required")
+(def reason-push-blocked "push_blocked")
 (def reason-overlapping-changes "overlapping_changes")
 (def reason-invalid-take "invalid_take")
 (def reason-no-overlapping-conflicts "no_overlapping_conflicts")
@@ -171,8 +174,11 @@
    reason-remote-recipient-missing
    reason-remote-identity-missing
    reason-remote-lock-present
+   reason-remote-disappeared
    reason-remote-changed
    reason-no-local-baseline
+   reason-manual-pull-required
+   reason-push-blocked
    reason-overlapping-changes
    reason-invalid-take
    reason-no-overlapping-conflicts

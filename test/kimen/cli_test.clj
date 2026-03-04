@@ -472,7 +472,8 @@
           payload (json/read-str stdout)]
       (is (= 0 exit-code))
       (is (nil? stderr))
-      (is (= true (get payload "needs_pull"))))
+      (is (= false (get payload "has_local")))
+      (is (= "sync_pull" (get payload "recommended_action"))))
 
     (let [{:keys [exit-code stdout stderr]}
           (run-cli ["sync" "pull" "--remote" "origin" "--json"] {}
@@ -541,7 +542,7 @@
       (let [{:keys [exit-code stderr]}
             (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                      {:config-path cfg-path})]
-        (is (= exit-code/code-sync-failed exit-code))
+        (is (= exit-code/code-sync-conflict exit-code))
         (is (str/includes? stderr "\"reason\":\"remote_changed\""))))))
 
 (deftest sync-conflicts-reports-local-and-remote-drift
@@ -574,7 +575,7 @@
         (is (= true (get conflicts "remote_changed")))
         (is (= true (get conflicts "local_changed")))
         (is (= true (get conflicts "has_conflict")))
-        (is (= "sync_pull_reconcile" (get conflicts "recommended_action")))))))
+        (is (= "sync_pull" (get conflicts "recommended_action")))))))
 
 (deftest sync-push-force-overrides-drift-and-baseline-guards
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -601,7 +602,7 @@
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"remote_changed\"")))
 
         (let [{:keys [exit-code stdout stderr]}
@@ -620,7 +621,7 @@
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                        {:config-path fresh-cfg})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))
 
         (let [{:keys [exit-code stdout stderr]}
@@ -664,19 +665,19 @@
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "pull" "--remote" "origin" "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))
 
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "pull" "--remote" "origin" "--dry-run" "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))
 
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "pull" "--remote" "origin" "--reconcile" "--passphrase-cmd" pass-cmd "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))))))
 
 (deftest sync-auto-noop-and-push-flow
@@ -703,8 +704,10 @@
             payload (json/read-str stdout)]
         (is (= 0 exit-code))
         (is (nil? stderr))
-        (is (= "sync_auto" (get payload "action")))
-        (is (= "noop" (get payload "decision"))))
+        (is (= "sync" (get payload "action")))
+        (is (= "noop" (get payload "decision")))
+        (is (= "apply" (get payload "mode")))
+        (is (true? (get payload "ok"))))
 
       (run-cli ["secret" "set" "api_key" "--value" "local-change" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                {:config-path cfg-path})
@@ -714,7 +717,9 @@
             payload (json/read-str stdout)]
         (is (= 0 exit-code))
         (is (nil? stderr))
-        (is (= "sync_push" (get payload "action")))))))
+        (is (= "sync" (get payload "action")))
+        (is (= "push" (get payload "decision")))
+        (is (some #(= "sync_push" (get % "name")) (get payload "steps")))))))
 
 (deftest sync-auto-conflict-requires-reconcile
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -745,17 +750,25 @@
         (run-cli ["bundle" "seal" "--vault" remote-vault-path "--out" bundle-path "--recipient" recipient "--json"] {}
                  {:config-path cfg-path})
 
-        (let [{:keys [exit-code stderr]}
-              (run-cli ["sync" "--remote" "origin" "--json"] {}
+        (let [{:keys [exit-code stdout stderr]}
+              (run-cli ["sync" "--remote" "origin" "--passphrase-cmd" pass-cmd "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (nil? stderr))
+          (let [payload (json/read-str stdout)]
+            (is (= "sync" (get payload "action")))
+            (is (= "blocked" (get payload "decision")))
+            (is (= "overlapping_changes" (get payload "reason")))))
 
-        (let [{:keys [exit-code stderr]}
+        (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "--remote" "origin" "--reconcile" "--passphrase-cmd" pass-cmd "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
-          (is (str/includes? stderr "\"reason\":\"overlapping_changes\"")))))))
+          (is (= exit-code/code-sync-conflict exit-code))
+          (is (nil? stderr))
+          (let [payload (json/read-str stdout)]
+            (is (= "sync" (get payload "action")))
+            (is (= "blocked" (get payload "decision")))
+            (is (= "overlapping_changes" (get payload "reason")))))))))
 
 (deftest sync-transfer-rejects-command-specific-flags
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -794,7 +807,7 @@
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"remote_changed\"")))
 
         (let [{:keys [exit-code stdout stderr]}
@@ -843,7 +856,7 @@
         (let [{:keys [exit-code stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
                        {:config-path cfg-path})]
-          (is (= exit-code/code-sync-failed exit-code))
+          (is (= exit-code/code-sync-conflict exit-code))
           (is (str/includes? stderr "\"reason\":\"no_local_baseline\"")))))))
 
 (deftest sync-restore-restores-vault-from-backup

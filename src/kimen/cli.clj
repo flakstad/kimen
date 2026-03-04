@@ -62,7 +62,7 @@
     "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote|--rev <sha256>) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json]"
     "  kimen sync restore --backup <path> [--no-backup] [--json]"
@@ -195,6 +195,7 @@
 (declare resolve-mappings!)
 (declare resolve-against-mappings!)
 (declare run)
+(declare run-sync-preflight-check)
 
 (defn- parse-map-lint-opts
   [args]
@@ -1140,6 +1141,107 @@
 
           (= a "--dry-run")
           (recur (rest args) (assoc opts :dry-run? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (= a "--reconcile")
+          (recur (rest args) (assoc opts :reconcile? true))
+
+          (= a "--passphrase-stdin")
+          (recur (rest args) (assoc opts :passphrase-stdin? true))
+
+          (or (= a "--passphrase-cmd") (str/starts-with? a "--passphrase-cmd="))
+          (let [[v next-args err] (parse-flag-value args "--passphrase-cmd")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :passphrase-cmd v))))
+
+          (or (= a "--remote") (str/starts-with? a "--remote="))
+          (let [[v next-args err] (parse-flag-value args "--remote")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn- parse-sync-auto-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :terse? false
+               :dry-run? false
+               :check? false
+               :no-doctor? false
+               :strict? false
+               :allow-missing-vault? false
+               :stale-threshold nil
+               :stale-threshold-ms 0
+               :profile nil
+               :bundle-in nil
+               :identity nil
+               :force? false
+               :reconcile? false
+               :passphrase-cmd nil
+               :passphrase-stdin? false
+               :remote nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--terse")
+          (recur (rest args) (assoc opts :terse? true))
+
+          (= a "--dry-run")
+          (recur (rest args) (assoc opts :dry-run? true))
+
+          (= a "--check")
+          (recur (rest args) (assoc opts :check? true))
+
+          (= a "--no-doctor")
+          (recur (rest args) (assoc opts :no-doctor? true))
+
+          (= a "--strict")
+          (recur (rest args) (assoc opts :strict? true))
+
+          (= a "--allow-missing-vault")
+          (recur (rest args) (assoc opts :allow-missing-vault? true))
+
+          (or (= a "--stale-threshold") (str/starts-with? a "--stale-threshold="))
+          (let [[v next-args err] (parse-flag-value args "--stale-threshold")]
+            (if err
+              [opts err]
+              (let [[ms parse-err] (parse-duration-ms v)]
+                (if parse-err
+                  [opts parse-err]
+                  (recur next-args (assoc opts
+                                          :stale-threshold v
+                                          :stale-threshold-ms ms))))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--bundle-in") (str/starts-with? a "--bundle-in="))
+          (let [[v next-args err] (parse-flag-value args "--bundle-in")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :bundle-in v))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity v))))
 
           (= a "--force")
           (recur (rest args) (assoc opts :force? true))
@@ -2319,12 +2421,84 @@
           (= "delete" (first args))) (handle-remote-rm ctx (rest args))
       :else (error-text 1 "unknown remote command"))))
 
+(def sync-conflict-reasons
+  #{reasons/reason-remote-disappeared
+    reasons/reason-no-local-baseline
+    reasons/reason-remote-changed
+    reasons/reason-overlapping-changes})
+
+(defn- sync-conflict-reason?
+  [reason]
+  (contains? sync-conflict-reasons reason))
+
+(defn- sync-exit-code-for-reason
+  [reason]
+  (if (sync-conflict-reason? reason)
+    exit-code/code-sync-conflict
+    exit-code/code-sync-failed))
+
+(defn- recommended-action-for-conflict-reason
+  [reason]
+  (case (some-> reason str/trim)
+    reasons/reason-remote-changed "sync_pull"
+    reasons/reason-no-local-baseline "sync_pull"
+    reasons/reason-remote-disappeared "sync_reset_baseline_or_remote_recreate"
+    reasons/reason-overlapping-changes "manual_reconcile"
+    nil))
+
+(defn- detect-sync-conflict
+  [last-seen remote-rev has-remote]
+  (let [last-seen (some-> last-seen str/trim)
+        last-seen (when-not (str/blank? last-seen) last-seen)
+        remote-rev (some-> remote-rev str/trim)
+        remote-rev (when-not (str/blank? remote-rev) remote-rev)]
+    (cond
+      (and (not has-remote) (nil? last-seen))
+      {:has-conflict false}
+
+      (and (not has-remote) (some? last-seen))
+      {:has-conflict true
+       :reason reasons/reason-remote-disappeared
+       :message (format "remote bundle disappeared since last sync (expected rev %s)" last-seen)
+       :expected-rev last-seen}
+
+      (and has-remote (nil? last-seen))
+      {:has-conflict true
+       :reason reasons/reason-no-local-baseline
+       :message (format "remote has data (rev %s) but no local baseline; run `kimen sync pull` first"
+                        (or remote-rev "unknown"))
+       :actual-rev remote-rev}
+
+      (and has-remote (not= last-seen remote-rev))
+      {:has-conflict true
+       :reason reasons/reason-remote-changed
+       :message (format "remote changed (expected rev %s, found %s); run `kimen sync pull`, re-apply changes, then push"
+                        last-seen
+                        (or remote-rev "unknown"))
+       :expected-rev last-seen
+       :actual-rev remote-rev}
+
+      :else
+      {:has-conflict false})))
+
 (defn- sync-error-result
   [json? e]
-  (let [reason (or (:reason (ex-data e)) reasons/reason-sync-failed)]
+  (let [data (ex-data e)
+        reason (or (:reason data) reasons/reason-sync-failed)
+        code (sync-exit-code-for-reason reason)
+        recommended-action (or (:recommended_action data)
+                               (recommended-action-for-conflict-reason reason))
+        payload (cond-> {:ok false
+                         :error (.getMessage e)
+                         :exit_code code
+                         :reason reason}
+                  (some? (:expected_rev data)) (assoc :expected_rev (:expected_rev data))
+                  (some? (:actual_rev data)) (assoc :actual_rev (:actual_rev data))
+                  (some? recommended-action) (assoc :recommended_action recommended-action))]
     (if json?
-      (error-json exit-code/code-sync-failed reason (.getMessage e))
-      (error-text exit-code/code-sync-failed (.getMessage e)))))
+      (result {:exit-code code
+               :stderr (json-line payload)})
+      (error-text code (.getMessage e)))))
 
 (defn- sync-init-next-command
   [remote-name recommended-action]
@@ -2742,28 +2916,44 @@
          last-seen (some-> sync-entry (get "last_seen_rev") str/trim not-empty)
          local-hash (when has-local (file-sha256-hex vault-path))
          last-local-hash (some-> sync-entry (get "local_hash") str/trim not-empty)
-         remote-changed (boolean (and has-remote last-seen remote-rev (not= last-seen remote-rev)))
          local-changed (boolean (and has-local last-local-hash local-hash (not= last-local-hash local-hash)))
-         has-conflict (boolean (and remote-changed local-changed))
+         missing-recipient? (nil? recipient)
+         missing-identity? (nil? identity)
+         conflict (detect-sync-conflict last-seen remote-rev has-remote)
+         has-conflict (boolean (:has-conflict conflict))
+         conflict-reason (some-> (:reason conflict) str/trim not-empty)
+         remote-changed (= conflict-reason reasons/reason-remote-changed)
+         needs-pull (boolean (and has-remote
+                                  (or (nil? last-seen)
+                                      (not= last-seen remote-rev))))
+         can-push-base (cond
+                         (and (not has-remote) (some? last-seen)) false
+                         (and has-remote (nil? last-seen)) false
+                         (and has-remote (not= last-seen remote-rev)) false
+                         :else true)
+         can-push (boolean (and can-push-base
+                                (not has-lock)
+                                has-local
+                                (not missing-recipient?)))
          blockers (cond-> []
-                    (not has-local) (conj "local_vault_missing")
-                    (and has-local (nil? recipient)) (conj "remote_recipient_missing")
-                    (and has-remote (not has-local) (nil? identity)) (conj "remote_identity_missing")
-                    has-lock (conj "remote_lock_present"))
-         can-push (boolean (and has-local (not has-lock) (some? recipient)))
-         needs-pull (boolean (and has-remote (not has-local)))
-         in-sync (boolean (and has-remote has-local last-seen remote-rev (= last-seen remote-rev) (not local-changed)))
+                    (not has-local) (conj reasons/reason-local-vault-missing)
+                    has-lock (conj reasons/reason-remote-lock-present)
+                    missing-recipient? (conj reasons/reason-remote-recipient-missing)
+                    (and needs-pull missing-identity?) (conj reasons/reason-remote-identity-missing)
+                    has-conflict (conj conflict-reason))
+         in-sync (boolean (and has-remote has-local (not needs-pull) (not local-changed)))
          recommended-action
          (cond
-           has-conflict "sync_pull_reconcile"
+           (and needs-pull missing-identity?) "configure_remote_identity"
+           (and (not has-local) (not has-remote)) "vault_init"
+           (and (not has-local) has-remote) "sync_pull"
+           (and missing-recipient? (not needs-pull)) "configure_remote_recipient"
+           (and has-conflict (= conflict-reason reasons/reason-remote-disappeared)) "sync_reset_baseline_or_remote_recreate"
+           (or needs-pull
+               (and has-conflict (not= conflict-reason reasons/reason-remote-disappeared))) "sync_pull"
            has-lock "wait_or_sync_unlock"
-           remote-changed "sync_pull"
-           local-changed "sync_push"
-           (and has-local (nil? recipient)) "configure_remote_recipient"
-           (and has-remote (not has-local) (nil? identity)) "configure_remote_identity"
-           (and has-remote (not has-local)) "sync_pull"
-           has-local "sync_push"
-           :else "vault_init")]
+           can-push "sync_push"
+           :else "none")]
      {:ok true
       :action "sync_status"
       :exit_code 0
@@ -2795,37 +2985,49 @@
       :lock_blocks_push has-lock
       :likely_stale likely-stale
       :lock_age_seconds lock-age-seconds
+      :reason conflict-reason
+      :expected_rev (:expected-rev conflict)
+      :actual_rev (:actual-rev conflict)
+      :message (:message conflict)
       :blockers blockers
       :recommended_action recommended-action})))
 
 (defn- sync-status-strict-error
   [payload]
-  (let [blockers (vec (:blockers payload))]
+  (let [blockers (vec (:blockers payload))
+        conflict-reason (some-> (:reason payload) str/trim not-empty)
+        conflict-data (cond-> {:reason (or conflict-reason reasons/reason-sync-failed)}
+                        (some? (:expected_rev payload)) (assoc :expected_rev (:expected_rev payload))
+                        (some? (:actual_rev payload)) (assoc :actual_rev (:actual_rev payload))
+                        (some? (:recommended_action payload)) (assoc :recommended_action (:recommended_action payload)))
+        push-reason (or (first blockers) reasons/reason-push-blocked)]
     (cond
       (:has_conflict payload)
-      (ex-info "sync status indicates conflict"
-               {:reason reasons/reason-overlapping-changes})
+      (ex-info (or (:message payload) "sync status indicates conflict")
+               conflict-data)
 
       (:has_lock payload)
       (ex-info "remote lock present"
-               {:reason reasons/reason-remote-lock-present})
+               {:reason reasons/reason-remote-lock-present
+                :recommended_action "wait_or_sync_unlock"})
 
       (not (:has_local payload))
       (ex-info "local vault missing"
                {:reason reasons/reason-local-vault-missing})
 
-      (some #{"remote_recipient_missing"} blockers)
+      (some #{reasons/reason-remote-recipient-missing} blockers)
       (ex-info "remote recipient is not configured (set --recipient on `remote add`)"
                {:reason reasons/reason-remote-recipient-missing})
 
-      (some #{"remote_identity_missing"} blockers)
+      (some #{reasons/reason-remote-identity-missing} blockers)
       (ex-info "remote identity is not configured (set --identity on `remote add`)"
                {:reason reasons/reason-remote-identity-missing})
 
       (not (:can_push payload))
       (ex-info (format "sync status indicates push is blocked (blockers=%s)"
                        (if (seq blockers) (str/join "," blockers) "none"))
-               {:reason reasons/reason-sync-failed})
+               {:reason push-reason
+                :recommended_action (:recommended_action payload)})
 
       :else
       nil)))
@@ -2865,12 +3067,16 @@
   [payload]
   (cond
     (:has_conflict payload)
-    (ex-info "sync conflicts indicates conflict"
-             {:reason reasons/reason-overlapping-changes})
+    (ex-info (or (:message payload) "sync conflicts indicates conflict")
+             (cond-> {:reason (or (:reason payload) reasons/reason-sync-failed)}
+               (some? (:expected_rev payload)) (assoc :expected_rev (:expected_rev payload))
+               (some? (:actual_rev payload)) (assoc :actual_rev (:actual_rev payload))
+               (some? (:recommended_action payload)) (assoc :recommended_action (:recommended_action payload))))
 
     (:has_lock payload)
     (ex-info "remote lock present"
-             {:reason reasons/reason-remote-lock-present})
+             {:reason reasons/reason-remote-lock-present
+              :recommended_action "wait_or_sync_unlock"})
 
     :else
     nil))
@@ -2887,6 +3093,23 @@
                           {:reason reasons/reason-sync-failed})))
         (let [remote (select-sync-remote! ctx (:remote opts))
               status (sync-status-payload ctx remote opts)
+              conflict-reason (some-> (:reason status) str/trim not-empty)
+              blockers (cond-> []
+                         (:has_lock status) (conj reasons/reason-remote-lock-present)
+                         (:has_conflict status) (conj conflict-reason))
+              recommended-action (cond
+                                   (and (:has_conflict status)
+                                        (= conflict-reason reasons/reason-remote-disappeared))
+                                   "sync_reset_baseline_or_remote_recreate"
+
+                                   (:has_conflict status)
+                                   "sync_pull"
+
+                                   (:has_lock status)
+                                   "wait_or_sync_unlock"
+
+                                   :else
+                                   "none")
               payload {:ok true
                        :action "sync_conflicts"
                        :exit_code 0
@@ -2908,14 +3131,18 @@
                        :local_hash (:local_hash status)
                        :last_local_hash (:last_local_hash status)
                        :has_lock (:has_lock status)
+                       :reason conflict-reason
+                       :expected_rev (:expected_rev status)
+                       :actual_rev (:actual_rev status)
+                       :message (:message status)
                        :remote_changed (:remote_changed status)
                        :local_changed (:local_changed status)
                        :has_conflict (:has_conflict status)
                        :lock_blocks_push (:lock_blocks_push status)
                        :likely_stale (:likely_stale status)
                        :lock_age_seconds (:lock_age_seconds status)
-                       :blockers (:blockers status)
-                       :recommended_action (:recommended_action status)}]
+                       :blockers blockers
+                       :recommended_action recommended-action}]
           (when-let [e (when (:strict? opts)
                          (sync-conflicts-strict-error payload))]
             (throw e))
@@ -3082,7 +3309,8 @@
                                    (get-in local-snap [:hashes k])
                                    (get-in remote-snap [:hashes k]))
             (throw (ex-info "local and remote have overlapping changes; manual reconciliation required"
-                            {:reason reasons/reason-overlapping-changes}))
+                            {:reason reasons/reason-overlapping-changes
+                             :recommended_action "manual_reconcile"}))
 
             :else
             nil))))))
@@ -3216,12 +3444,22 @@
               _ (when (nil? recipient)
                   (throw (ex-info "remote recipient is not configured (set --recipient on `remote add`)"
                                   {:reason reasons/reason-remote-recipient-missing})))
+              _ (when (and (not force?) (not remote-exists?) (some? last-seen))
+                  (throw (ex-info (format "remote bundle disappeared since last sync (expected rev %s)" last-seen)
+                                  {:reason reasons/reason-remote-disappeared
+                                   :expected_rev last-seen
+                                   :recommended_action "sync_reset_baseline_or_remote_recreate"})))
               _ (when (and (not force?) remote-exists? (nil? last-seen))
                   (throw (ex-info "remote has data but no local baseline; run sync pull first"
-                                  {:reason reasons/reason-no-local-baseline})))
+                                  {:reason reasons/reason-no-local-baseline
+                                   :actual_rev remote-rev-before
+                                   :recommended_action "sync_pull"})))
               _ (when (and (not force?) remote-exists? last-seen remote-rev-before (not= last-seen remote-rev-before))
                   (throw (ex-info "remote changed since last baseline; run sync pull"
-                                  {:reason reasons/reason-remote-changed})))]
+                                  {:reason reasons/reason-remote-changed
+                                   :expected_rev last-seen
+                                   :actual_rev remote-rev-before
+                                   :recommended_action "sync_pull"})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
                            :action "sync_push"
@@ -3314,10 +3552,12 @@
               reconcile? (boolean (:reconcile? opts))
               _ (when (and has-conflict (not reconcile?))
                   (throw (ex-info "local and remote have overlapping changes; rerun with --reconcile"
-                                  {:reason reasons/reason-overlapping-changes})))
+                                  {:reason reasons/reason-overlapping-changes
+                                   :recommended_action "manual_reconcile"})))
               _ (when (and reconcile? has-conflict (nil? baseline-secret-hashes-in))
                   (throw (ex-info "cannot reconcile without baseline key hashes; run sync changes after a clean sync"
-                                  {:reason reasons/reason-no-local-baseline})))
+                                  {:reason reasons/reason-no-local-baseline
+                                   :recommended_action "sync_pull"})))
               reconcile-passphrase (when (and reconcile? has-conflict)
                                      (resolve-passphrase! ctx opts))
               reconcile-local-snap (when reconcile-passphrase
@@ -3331,7 +3571,8 @@
               _ (when (and reconcile-passphrase
                            (seq (:conflict-keys reconcile-analysis)))
                   (throw (ex-info "local and remote have overlapping key changes; manual reconciliation required"
-                                  {:reason reasons/reason-overlapping-changes})))]
+                                  {:reason reasons/reason-overlapping-changes
+                                   :recommended_action "manual_reconcile"})))]
           (if (:dry-run? opts)
             (let [payload {:ok true
                            :action "sync_pull"
@@ -3405,53 +3646,271 @@
     (some? passphrase-cmd) (conj "--passphrase-cmd" passphrase-cmd)
     json? (conj "--json")))
 
+(defn- sync-auto-passphrase-args
+  [opts]
+  (cond-> []
+    (:passphrase-stdin? opts) (conj "--passphrase-stdin")
+    (some? (:passphrase-cmd opts)) (into ["--passphrase-cmd" (:passphrase-cmd opts)])))
+
+(defn- sync-auto-output
+  [payload json? terse?]
+  (if json?
+    (result {:exit-code (:exit_code payload)
+             :stdout (json-line payload)})
+    (let [lines (if terse?
+                  [(format "remote=%s decision=%s ok=%s exit_code=%d reason=%s recommended_action=%s"
+                           (or (:remote payload) "-")
+                           (:decision payload)
+                           (:ok payload)
+                           (:exit_code payload)
+                           (or (:reason payload) "none")
+                           (or (:recommended_action payload) "none"))
+                   ""]
+                  [(format "sync (mode=%s strict=%s)" (:mode payload) (:strict payload))
+                   (when-let [remote (:remote payload)] (str "remote: " remote))
+                   (str "decision: " (:decision payload))
+                   (str "local-changed: " (:local_changed payload))
+                   (when (:local_change_uncertain payload)
+                     "local-change-uncertain: true")
+                   (mapcat (fn [step]
+                             (if (:ok step)
+                               [(format "[ok] %s" (:name step))]
+                               [(format "[fail] %s (exit=%d)" (:name step) (:exit_code step))
+                                (when-let [m (:error step)] (str "  error: " m))
+                                (when-let [a (:recommended_action step)] (str "  recommended-action: " a))]))
+                           (:steps payload))
+                   (when-let [a (:recommended_action payload)]
+                     (str "recommended-action: " a))
+                   (if (:ok payload)
+                     "sync: ok"
+                     (format "sync: failed (exit=%d)" (:exit_code payload)))
+                   ""])]
+      (result {:exit-code (:exit_code payload)
+               :stdout (str/join "\n" (remove nil? (flatten lines)))}))))
+
+(defn- detect-local-changes-since-baseline
+  [status]
+  (let [has-local (boolean (get status "has_local"))
+        local-hash (some-> (get status "local_hash") str/trim not-empty)
+        last-local-hash (some-> (get status "last_local_hash") str/trim not-empty)]
+    (cond
+      (not has-local)
+      [false false]
+
+      (and local-hash last-local-hash)
+      [(not= local-hash last-local-hash) false]
+
+      :else
+      [true true])))
+
+(defn- choose-sync-auto-decision
+  [status local-changed local-change-uncertain]
+  (let [needs-pull (boolean (get status "needs_pull"))
+        has-local (boolean (get status "has_local"))
+        can-push (boolean (get status "can_push"))
+        lock-blocks-push (boolean (get status "lock_blocks_push"))
+        blockers (->> (get status "blockers")
+                      (filter string?)
+                      vec)
+        recommended (some-> (get status "recommended_action") str/trim not-empty)
+        conflict (detect-sync-conflict (get status "last_seen_rev")
+                                       (get status "remote_rev")
+                                       (boolean (get status "has_remote")))
+        conflict-reason (some-> (:reason conflict) str/trim not-empty)
+        conflict-message (some-> (:message conflict) str/trim not-empty)]
+    (cond
+      needs-pull
+      (cond
+        (not has-local)
+        ["pull" nil]
+
+        (or local-changed local-change-uncertain)
+        (cond
+          local-change-uncertain
+          (if (:has-conflict conflict)
+            ["blocked" {:reason conflict-reason
+                        :message (or conflict-message "sync is blocked by remote conflict")
+                        :recommended_action (or (recommended-action-for-conflict-reason conflict-reason)
+                                                recommended
+                                                "manual_review")
+                        :expected_rev (:expected-rev conflict)
+                        :actual_rev (:actual-rev conflict)}]
+            ["blocked" {:reason reasons/reason-manual-pull-required
+                        :message "remote pull required but local vault has unpushed changes; run `kimen sync pull` manually and re-apply local changes"
+                        :recommended_action "sync_pull"}])
+
+          (and (:has-conflict conflict)
+               (not= conflict-reason reasons/reason-remote-changed))
+          ["blocked" {:reason conflict-reason
+                      :message (or conflict-message "sync is blocked by remote conflict")
+                      :recommended_action (or (recommended-action-for-conflict-reason conflict-reason)
+                                              recommended
+                                              "manual_review")
+                      :expected_rev (:expected-rev conflict)
+                      :actual_rev (:actual-rev conflict)}]
+
+          :else
+          ["pull_reconcile" nil])
+
+        :else
+        ["pull" nil])
+
+      can-push
+      [(if local-changed "push" "noop") nil]
+
+      lock-blocks-push
+      ["blocked" {:reason reasons/reason-remote-lock-present
+                  :message "remote push lock exists; wait or remove lock with `kimen sync unlock`"
+                  :recommended_action "wait_or_sync_unlock"}]
+
+      (seq blockers)
+      ["blocked" {:reason (first blockers)
+                  :message (format "sync is blocked (blockers=%s)" (str/join "," blockers))
+                  :recommended_action (or recommended "manual_review")}]
+
+      :else
+      ["noop" nil])))
+
 (defn- handle-sync-auto
   [ctx args]
-  (let [[opts parse-error] (parse-sync-transfer-opts args)
+  (let [[opts parse-error] (parse-sync-auto-opts args)
         json? (:json? opts)]
-    (if parse-error
+    (cond
+      parse-error
       (sync-error-result json? (ex-info parse-error {:reason reasons/reason-sync-failed}))
+
+      (neg? (:stale-threshold-ms opts))
+      (sync-error-result json? (ex-info "--stale-threshold must be >= 0" {:reason reasons/reason-sync-failed}))
+
+      (and (:check? opts) (:dry-run? opts))
+      (sync-error-result json? (ex-info "--check and --dry-run cannot be used together" {:reason reasons/reason-sync-failed}))
+
+      :else
       (try
-        (let [remote (select-sync-remote! ctx (:remote opts))
-              status (sync-status-payload ctx remote)
-              remote-name (:remote status)
-              push-args (sync-transfer-args {:remote remote-name
-                                             :json? json?
-                                             :dry-run? (:dry-run? opts)
-                                             :force? (:force? opts)
-                                             :passphrase-cmd (:passphrase-cmd opts)
-                                             :passphrase-stdin? (:passphrase-stdin? opts)})
-              pull-args (sync-transfer-args {:remote remote-name
-                                             :json? json?
-                                             :dry-run? (:dry-run? opts)
-                                             :reconcile? (:reconcile? opts)
-                                             :passphrase-cmd (:passphrase-cmd opts)
-                                             :passphrase-stdin? (:passphrase-stdin? opts)})
-              decision (cond
-                         (:has_lock status) :blocked-lock
-                         (:has_conflict status) (if (:reconcile? opts) :pull :blocked-overlap)
-                         (:remote_changed status) :pull
-                         (:needs_pull status) :pull
-                         (:local_changed status) :push
-                         (and (:has_local status) (:can_push status) (not (:has_remote status))) :push
-                         :else :noop)]
-          (case decision
-            :push (handle-sync-push ctx push-args)
-            :pull (handle-sync-pull ctx pull-args)
-            :blocked-lock (sync-error-result json? (ex-info "remote lock present"
-                                                            {:reason reasons/reason-remote-lock-present}))
-            :blocked-overlap (sync-error-result json? (ex-info "local and remote have overlapping changes; rerun with --reconcile"
-                                                               {:reason reasons/reason-overlapping-changes}))
-            :noop (if json?
-                    (success-json {:ok true
-                                   :action "sync_auto"
-                                   :exit_code 0
-                                   :remote remote-name
-                                   :decision "noop"
-                                   :recommended_action (:recommended_action status)
-                                   :in_sync (:in_sync status)})
-                    (result {:exit-code 0
-                             :stdout (format "ok (sync noop %s)\n" remote-name)}))))
+        (let [result0 {:ok true
+                       :action "sync"
+                       :remote nil
+                       :mode (cond
+                               (:check? opts) "check"
+                               (:dry-run? opts) "dry_run"
+                               :else "apply")
+                       :strict (boolean (:strict? opts))
+                       :dry_run (boolean (:dry-run? opts))
+                       :check (boolean (:check? opts))
+                       :no_doctor (boolean (:no-doctor? opts))
+                       :decision "noop"
+                       :exit_code 0
+                       :local_changed false
+                       :steps []}
+              run-check (fn [check-name argv]
+                          (run-sync-preflight-check ctx check-name argv))
+              fail-with-step (fn [res step]
+                               (let [res (update res :steps conj step)
+                                     code (if (zero? (:exit_code step))
+                                            exit-code/code-sync-failed
+                                            (:exit_code step))
+                                     reason (or (some-> step :payload (get "reason") str/trim not-empty)
+                                                reasons/reason-sync-failed)
+                                     recommended (or (:recommended_action step)
+                                                     (some-> step :payload (get "recommended_action") str/trim not-empty)
+                                                     "manual_review")]
+                                 (assoc res
+                                        :ok false
+                                        :decision "blocked"
+                                        :exit_code code
+                                        :reason reason
+                                        :recommended_action recommended)))
+              doctor-step (when-not (:no-doctor? opts)
+                            (run-check sync-preflight-check-doctor
+                                       (build-sync-preflight-check-args sync-preflight-check-doctor opts)))
+              result1 (if doctor-step
+                        (update result0 :steps conj doctor-step)
+                        result0)]
+          (if (and doctor-step (not (:ok doctor-step)))
+            (sync-auto-output (fail-with-step result0 doctor-step) json? (:terse? opts))
+            (let [status-step (run-check sync-preflight-check-status
+                                         (build-sync-preflight-check-args sync-preflight-check-status opts))
+                  result2 (update result1 :steps conj status-step)]
+              (if-not (:ok status-step)
+                (sync-auto-output (fail-with-step result1 status-step) json? (:terse? opts))
+                (let [status (:payload status-step)
+                      _ (when-not (map? status)
+                          (throw (ex-info "sync status returned empty payload"
+                                          {:reason reasons/reason-sync-failed})))
+                      remote-name (some-> (get status "remote") str/trim not-empty)
+                      [local-changed local-change-uncertain] (detect-local-changes-since-baseline status)
+                      [decision-base decision-error] (choose-sync-auto-decision status local-changed local-change-uncertain)
+                      result3 (assoc result2
+                                     :remote remote-name
+                                     :status status
+                                     :local_changed local-changed
+                                     :local_change_uncertain local-change-uncertain
+                                     :recommended_action (some-> (get status "recommended_action") str/trim not-empty)
+                                     :decision decision-base)]
+                  (cond
+                    (some? decision-error)
+                    (let [reason (or (:reason decision-error) reasons/reason-sync-failed)
+                          message (or (:message decision-error) "sync is blocked")
+                          code (sync-exit-code-for-reason reason)]
+                      (sync-auto-output (assoc result3
+                                               :ok false
+                                               :decision "blocked"
+                                               :exit_code code
+                                               :reason reason
+                                               :error message
+                                               :recommended_action (or (:recommended_action decision-error)
+                                                                       (:recommended_action result3)
+                                                                       "manual_review")
+                                               :expected_rev (:expected_rev decision-error)
+                                               :actual_rev (:actual_rev decision-error))
+                                        json?
+                                        (:terse? opts)))
+
+                    (:check? opts)
+                    (let [decision (case decision-base
+                                     "push" "would_push"
+                                     "pull" "would_pull"
+                                     "pull_reconcile" "would_pull_reconcile"
+                                     decision-base)]
+                      (sync-auto-output (assoc result3 :decision decision) json? (:terse? opts)))
+
+                    (= "noop" decision-base)
+                    (sync-auto-output result3 json? (:terse? opts))
+
+                    :else
+                    (let [passphrase-args (sync-auto-passphrase-args opts)
+                          base-sync-args (cond-> ["--remote" remote-name]
+                                           (:force? opts) (conj "--force")
+                                           (:reconcile? opts) (conj "--reconcile"))
+                          [step-name argv decision]
+                          (if (:dry-run? opts)
+                            (case decision-base
+                              "push" [sync-preflight-check-push-dry-run
+                                      (vec (concat ["sync" "push"] base-sync-args ["--dry-run"] passphrase-args ["--json"]))
+                                      "would_push"]
+                              "pull" [sync-preflight-check-pull-dry-run
+                                      (vec (concat ["sync" "pull"] base-sync-args ["--dry-run"] passphrase-args ["--json"]))
+                                      "would_pull"]
+                              "pull_reconcile" [sync-preflight-check-pull-dry-run
+                                                (vec (concat ["sync" "pull"] base-sync-args ["--reconcile" "--dry-run"] passphrase-args ["--json"]))
+                                                "would_pull_reconcile"])
+                            (case decision-base
+                              "push" ["sync_push"
+                                      (vec (concat ["sync" "push"] base-sync-args passphrase-args ["--json"]))
+                                      "push"]
+                              "pull" ["sync_pull"
+                                      (vec (concat ["sync" "pull"] base-sync-args passphrase-args ["--json"]))
+                                      "pull"]
+                              "pull_reconcile" ["sync_pull_reconcile"
+                                                (vec (concat ["sync" "pull"] base-sync-args ["--reconcile"] passphrase-args ["--json"]))
+                                                "pull_reconcile"]))
+                          step (run-check step-name argv)
+                          result4 (-> result3
+                                      (assoc :decision decision)
+                                      (update :steps conj step))]
+                      (if (:ok step)
+                        (sync-auto-output result4 json? (:terse? opts))
+                        (sync-auto-output (fail-with-step result3 step) json? (:terse? opts))))))))))
         (catch Exception e
           (sync-error-result json? e))))))
 
