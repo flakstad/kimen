@@ -132,8 +132,10 @@
         (spit sync-bundle-path "tampered-remote\n")
         (expect-error-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--json"]) 32 "remote_changed")
         (let [to-remote (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--to-remote" "--yes" "--json"]) "sync_reset_baseline")
+              rev-reset (expect-success-json! (run-kimen repo-root base-env ["sync" "reset-baseline" "--remote" "team" "--rev" (get to-remote "new_rev") "--yes" "--json"]) "sync_reset_baseline")
               reset-push (expect-success-json! (run-kimen repo-root base-env ["sync" "push" "--remote" "team" "--passphrase-cmd" pass-cmd "--json"]) "sync_push")]
           (ensure! (= "to_remote" (get to-remote "mode")) "expected to_remote mode for reset-baseline --to-remote" {:to-remote to-remote})
+          (ensure! (= "rev" (get rev-reset "mode")) "expected rev mode for reset-baseline --rev" {:rev-reset rev-reset})
           (ensure! (= "sync_push" (get reset-push "action")) "expected sync push after reset-baseline --to-remote" {:reset-push reset-push}))
 
         (spit sync-bundle-path "tampered-remote-again\n")
@@ -176,6 +178,7 @@
         (spit restore-backup (slurp vault-path))
         (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "restore-mutated" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
         (expect-success-json! (run-kimen repo-root base-env ["sync" "restore" "--backup" restore-backup "--json"]) "sync_restore")
+        (expect-success-json! (run-kimen repo-root base-env ["sync" "restore" "--backup" restore-backup "--no-backup" "--json"]) "sync_restore")
         (let [restored (expect-success-json! (run-kimen repo-root base-env ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "get")]
           (ensure! (= "cmVzdG9yZS1zb3VyY2U=" (get restored "value_b64")) "expected source value after sync restore" {:restored restored}))))
 

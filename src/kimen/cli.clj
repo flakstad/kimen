@@ -63,9 +63,9 @@
     "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync [--remote <name>] [--dry-run] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote|--rev <sha256>) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json]"
-    "  kimen sync restore --backup <path> [--json]"
+    "  kimen sync restore --backup <path> [--no-backup] [--json]"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] --dir <path> [--json]"
     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
@@ -1175,6 +1175,7 @@
                :remote nil
                :clear? false
                :to-remote? false
+               :rev nil
                :passphrase-cmd nil
                :passphrase-stdin? false
                :yes? false}]
@@ -1190,6 +1191,12 @@
 
           (= a "--to-remote")
           (recur (rest args) (assoc opts :to-remote? true))
+
+          (or (= a "--rev") (str/starts-with? a "--rev="))
+          (let [[v next-args err] (parse-flag-value args "--rev")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :rev v))))
 
           (= a "--yes")
           (recur (rest args) (assoc opts :yes? true))
@@ -1219,6 +1226,7 @@
   [args]
   (loop [args args
          opts {:json? false
+               :no-backup? false
                :backup nil}]
     (if (empty? args)
       [opts nil]
@@ -1226,6 +1234,9 @@
         (cond
           (= a "--json")
           (recur (rest args) (assoc opts :json? true))
+
+          (= a "--no-backup")
+          (recur (rest args) (assoc opts :no-backup? true))
 
           (or (= a "--backup") (str/starts-with? a "--backup="))
           (let [[v next-args err] (parse-flag-value args "--backup")]
@@ -3640,12 +3651,16 @@
                          ensure-fs-remote!)
               remote-name (get remote "name")
               clear? (:clear? opts)
-              to-remote? (:to-remote? opts)]
+              to-remote? (:to-remote? opts)
+              rev (some-> (:rev opts) str/trim not-empty)
+              selected-modes (count (filter identity [clear? to-remote? (some? rev)]))
+              existing-entry (config/config-sync-entry (:config-path ctx) remote-name)
+              previous-rev (some-> existing-entry (get "last_seen_rev") str/trim not-empty)]
           (when-not (:yes? opts)
             (throw (ex-info "sync reset-baseline requires --yes"
                             {:reason reasons/reason-sync-failed})))
-          (when (= clear? to-remote?)
-            (throw (ex-info "choose exactly one of --clear or --to-remote"
+          (when (not= selected-modes 1)
+            (throw (ex-info "choose exactly one mode: --to-remote, --clear, or --rev <sha256>"
                             {:reason reasons/reason-sync-failed})))
           (if clear?
             (do
@@ -3655,34 +3670,43 @@
                                :action "sync_reset_baseline"
                                :exit_code 0
                                :remote remote-name
-                               :mode "clear"})
+                               :mode "clear"
+                               :previous_rev previous-rev
+                               :new_rev nil})
                 (result {:exit-code 0
                          :stdout (format "ok (sync baseline cleared for %s)\n" remote-name)})))
-            (let [bundle-path (fs-remote-bundle-path remote)
-                  _ (when (str/blank? bundle-path)
-                      (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
-                  _ (when-not (.exists (io/file bundle-path))
-                      (throw (ex-info (format "remote bundle missing: %s" bundle-path)
-                                      {:reason reasons/reason-remote-bundle-missing})))
-                  remote-rev (file-sha256-hex bundle-path)
+            (let [new-rev (if (some? rev)
+                            rev
+                            (let [bundle-path (fs-remote-bundle-path remote)
+                                  _ (when (str/blank? bundle-path)
+                                      (throw (ex-info "remote bundle path is empty" {:reason reasons/reason-missing-path})))
+                                  _ (when-not (.exists (io/file bundle-path))
+                                      (throw (ex-info (format "remote bundle missing: %s" bundle-path)
+                                                      {:reason reasons/reason-remote-bundle-missing})))]
+                              (file-sha256-hex bundle-path)))
                   vault-path (vault-path/resolve-vault-path ctx nil)
                   local-hash (when (.exists (io/file vault-path))
                                (file-sha256-hex vault-path))
-                  sync-passphrase (maybe-sync-passphrase ctx opts)
+                  sync-passphrase (when to-remote?
+                                    (maybe-sync-passphrase ctx opts))
                   baseline-secret-hashes (when sync-passphrase
                                            (:hashes (load-remote-vault-snapshot remote sync-passphrase false)))
-                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name remote-rev local-hash baseline-secret-hashes)]
+                  _ (config/config-sync-mark-seen! (:config-path ctx) remote-name new-rev local-hash baseline-secret-hashes)]
               (if json?
                 (success-json {:ok true
                                :action "sync_reset_baseline"
                                :exit_code 0
                                :remote remote-name
-                               :mode "to_remote"
-                               :remote_rev remote-rev
+                               :mode (if to-remote? "to_remote" "rev")
+                               :previous_rev previous-rev
+                               :new_rev new-rev
+                               :remote_rev (when to-remote? new-rev)
                                :local_hash local-hash
                                :has_baseline_hashes (boolean baseline-secret-hashes)})
                 (result {:exit-code 0
-                         :stdout (format "ok (sync baseline set to remote for %s)\n" remote-name)})))))
+                         :stdout (if to-remote?
+                                   (format "ok (sync baseline set to remote for %s)\n" remote-name)
+                                   (format "ok (sync baseline set to explicit rev for %s)\n" remote-name))})))))
         (catch Exception e
           (sync-error-result json? e))))))
 
@@ -3702,11 +3726,18 @@
                   (throw (ex-info (format "backup file missing: %s" backup-path)
                                   {:reason reasons/reason-input-missing})))
               vault-path (vault-path/resolve-vault-path ctx nil)
+              current-backup-path (when (and (not (:no-backup? opts))
+                                             (.exists (io/file vault-path)))
+                                    (let [p (str vault-path ".bak." (System/currentTimeMillis))]
+                                      (copy-file! vault-path p)
+                                      p))
               _ (copy-file! backup-path vault-path)]
           (if json?
             (success-json {:ok true
                            :action "sync_restore"
                            :exit_code 0
+                           :source_backup_path backup-path
+                           :current_backup_path current-backup-path
                            :backup_path backup-path
                            :vault_path vault-path
                            :restored true})

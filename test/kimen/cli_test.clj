@@ -804,7 +804,18 @@
           (is (= 0 exit-code))
           (is (nil? stderr))
           (is (= "sync_reset_baseline" (get reset-payload "action")))
-          (is (= "to_remote" (get reset-payload "mode"))))
+          (is (= "to_remote" (get reset-payload "mode")))
+
+          (let [remote-rev (get reset-payload "new_rev")
+                {:keys [exit-code stdout stderr]}
+                (run-cli ["sync" "reset-baseline" "--remote" "origin" "--rev" remote-rev "--yes" "--json"] {}
+                         {:config-path cfg-path})
+                reset-payload (json/read-str stdout)]
+            (is (= 0 exit-code))
+            (is (nil? stderr))
+            (is (= "sync_reset_baseline" (get reset-payload "action")))
+            (is (= "rev" (get reset-payload "mode")))
+            (is (= remote-rev (get reset-payload "new_rev")))))
 
         (let [{:keys [exit-code stdout stderr]}
               (run-cli ["sync" "push" "--remote" "origin" "--json"] {}
@@ -856,13 +867,27 @@
       (is (= 0 exit-code))
       (is (nil? stderr))
       (is (= "sync_restore" (get payload "action")))
-      (is (= true (get payload "restored"))))
+      (is (= true (get payload "restored")))
+      (is (= backup-path (get payload "source_backup_path")))
+      (is (string? (get payload "current_backup_path")))
+      (is (.exists (io/file (get payload "current_backup_path")))))
 
     (let [{:keys [exit-code stdout]}
           (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                    {:config-path cfg-path})]
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"value_b64\":\"cmVzdG9yZS1zb3VyY2U=\"")))
+
+    (run-cli ["secret" "set" "api_key" "--value" "restore-mutated-2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["sync" "restore" "--backup" backup-path "--no-backup" "--json"] {}
+                   {:config-path cfg-path})
+          payload (json/read-str stdout)]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (= true (get payload "restored")))
+      (is (nil? (get payload "current_backup_path"))))
 
     (let [{:keys [exit-code stderr]}
           (run-cli ["sync" "restore" "--backup" (str (.getPath dir) "/missing.backup") "--json"] {}
