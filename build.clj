@@ -36,11 +36,10 @@
   [_]
   (b/delete {:path "target"}))
 
-(defn uber
-  [_]
+(defn- uber-with-basis
+  [basis]
   (clean nil)
-  (let [basis (b/create-basis {:project "deps.edn"})
-        nses (src-namespaces)]
+  (let [nses (src-namespaces)]
     (b/copy-dir {:src-dirs ["resources"] :target-dir class-dir})
     (b/compile-clj {:basis basis
                     :class-dir class-dir
@@ -50,6 +49,10 @@
              :uber-file uber-file
              :basis basis
              :main 'kimen.native-main})))
+
+(defn uber
+  [_]
+  (uber-with-basis (b/create-basis {:project "deps.edn"})))
 
 (defn- native-image-at-home
   [home]
@@ -114,7 +117,8 @@
 
 (defn native
   [_]
-  (uber nil)
+  (uber-with-basis (b/create-basis {:project "deps.edn"
+                                    :aliases [:native-image]}))
   (let [native-image (resolve-native-image)
         native-image-major (native-image-major-version native-image)
         unlock-experimental? (and native-image-major (>= native-image-major 25))

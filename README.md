@@ -1,113 +1,95 @@
 # Kimen
 
-Kimen is a local-first secret projection tool written in Clojure.
+Kimen is a local-first secrets tool.
 
-Kimen keeps secrets encrypted at rest in a local vault and only materializes them when you explicitly ask, for example as environment variables, files, or stdin for a command.
+It gives you one thing: an encrypted local vault, plus reliable ways to project secrets into runtime only when needed (env vars, files, stdin, and scoped command execution).
 
-## Why Use Kimen
+If you are currently juggling `.env` files, copied tokens, or long-lived shell exports, Kimen is meant to replace that with a safer, explicit workflow.
 
-- No server required for runtime use.
-- Explicit projection at command time.
-- Script-friendly JSON/EDN output and typed exit codes.
-- Team sync with encrypted bundle transport (`fs` and `git` remotes).
+## Start Here (Native Binary)
 
-## Choose How You Run Kimen
+Kimen is primarily used as a native binary named `kimen`.
 
-### 1) Babashka CLI (default source workflow)
-
-Prerequisites:
-
-- Babashka (`bb`)
-- Java + Clojure CLI (needed for JAR/native builds)
-
-Install launcher on your path:
+Check installation:
 
 ```bash
-bb install
-kimen version --json
-kimen version --edn
+kimen version
 ```
 
-The launcher (`bin/kimen` and installed `kimen`) runs Kimen through Babashka.
+## 5-Minute Tutorial
 
-### 2) Native Binary
+### 1) Initialize your vault
 
-Prerequisite:
-
-- GraalVM with `native-image`
-
-Build and run:
+This creates the encrypted local vault file and asks you to choose a passphrase.
+That passphrase protects the vault contents at rest.
 
 ```bash
-bb build-native
-./target/kimen version --json
-```
-
-### 3) JVM JAR
-
-Build and run:
-
-```bash
-bb build-jar
-java -jar target/kimen.jar version --json
-```
-
-### 4) Library API in Another Clojure Program
-
-Use `kimen.api` for in-process embedding while keeping CLI behavior:
-
-```clj
-(require '[kimen.api :as kimen])
-
-(kimen/run ["version" "--json"])
-;; => {:exit-code 0 :stdout "...json...\n" :stderr nil}
-
-(kimen/run! ["secret" "list" "--json"])
-;; prints stdout/stderr, returns exit code
-```
-
-`kimen.api` exposes:
-
-- `run`: returns `{:exit-code :stdout :stderr}`
-- `run!`: emits stdout/stderr and returns exit code
-- `main!`: CLI-style entrypoint returning exit code
-
-## Quickstart
-
-Initialize vault and set a secret:
-
-```bash
-# optional:
-export KIMEN_VAULT="$HOME/.config/kimen/vault.db"
-
 kimen vault init
-echo -n 'shh' | kimen secret set api_key --stdin
 ```
 
-Project into environment for one command:
+### 2) Store a secret
+
+This command reads the secret value from stdin.
+Type your secret value, press Enter, then press Ctrl-D to finish stdin.
+
+```bash
+kimen secret set api_key --stdin
+```
+
+### 3) Use it for one command only
+
+This maps the stored secret (`api_key`) into an env var (`API_KEY`) for exactly one child process.
 
 ```bash
 kimen run --env API_KEY=api_key -- sh -lc 'echo "$API_KEY"'
 ```
 
-Project into file(s):
+The secret exists only in that command process, not as a persistent shell export.
+
+### 4) Render a secret to a file when a tool requires a file
+
+Some tools only accept config files.
+This writes `config.txt` from secret `api_key` with strict file permissions.
 
 ```bash
 OUTDIR="$(mktemp -d -t kimen-render.XXXXXX)"
 kimen render --dir "$OUTDIR" --file config.txt=api_key
 ```
 
-Write an envfile:
+### 5) Generate an envfile for process supervisors
+
+If your process manager expects an env file, generate one without printing secret values to terminal output.
 
 ```bash
 kimen envfile --env API_KEY=api_key --out .env.runtime
+```
+
+## Why Consider Kimen
+
+- Local-first: no server required for core runtime use.
+- Explicit secret projection: values are materialized only when requested.
+- Good automation contract: typed exit codes plus `--json` or `--edn`.
+- Team sync support (`fs` / `git`) without changing local runtime guarantees.
+
+## Automation Output (`--json` and `--edn`)
+
+Machine-readable modes are mutually exclusive:
+
+- `--json`: JSON objects.
+- `--edn`: idiomatic EDN maps with keyword keys.
+
+Examples:
+
+```bash
+kimen doctor --json
+kimen doctor --edn
 ```
 
 ## Value Sources
 
 Projection values can come from:
 
-- `secret:<name>` or bare name (secret lookup)
+- `secret:<name>` (or just bare name)
 - `const:<literal>`
 - `exec:<command...>`
 
@@ -123,7 +105,7 @@ kimen run \
 
 ## Maps and Profiles
 
-Use `.kmap` files to avoid repeating long flag lists:
+Use `.kmap` files for repeatable intent:
 
 ```bash
 mkdir -p .kimen/profiles
@@ -132,115 +114,70 @@ env API_KEY=api_key
 file config.txt=api_key
 EOF
 
+kimen map lint --profile dev --strict
+kimen plan --profile dev
 kimen run --profile dev -- sh -lc 'echo "$API_KEY"'
 ```
 
-Useful commands:
-
-- `kimen map lint --profile <name> --strict --json`
-- `kimen plan --profile <name> --json`
-- `kimen project run|render|plan ...` (explicit aliases)
-
 ## Team Sync (Current)
 
-Kimen supports local-first team sync using encrypted bundles and remotes.
+Kimen supports encrypted bundle sync via `fs` and `git` remotes.
 
-Core commands:
+Main surfaces:
 
 - `kimen remote add|get|set|list|rm`
 - `kimen sync`
 - `kimen sync init|preflight|status|conflicts|changes|push|pull|resolve|reset-baseline|unlock|restore`
 
-See:
+For runbooks and contract details:
 
 - `docs/team-sync.md`
 - `docs/team-sync-v1.md`
 - `docs/team-sync-v2-plan.md`
 - `docs/automation-contract.md`
 
-## One-Time Migration from Go-Era Vault
+## Clojure Library Embedding
 
-If you still have a Go-era Kimen vault, migrate once into the Clojure vault:
+You can embed Kimen in another Clojure program through `kimen.api` (`run`, `run!`, `main!`) when you want in-process orchestration without spawning subprocesses.
 
-```bash
-bb migrate-go-vault -- \
-  --source-bin /path/to/go-era-kimen \
-  --source-vault /path/to/old-vault.db \
-  --source-passphrase-cmd "printf old-passphrase" \
-  --target-vault /path/to/new-vault.db \
-  --target-passphrase-cmd "printf new-passphrase" \
-  --init-target \
-  --json
-```
+The CLI remains the primary API surface; library embedding is for orchestration/tooling use-cases.
 
-Guided helper:
+## Dependency Footprint
 
-```bash
-scripts/migrate_current_vault.sh --yes
-```
+Runtime is intentionally minimal:
 
-## Development and Validation
+- Clojure + JDK
+- One library dependency: `org.clojure/data.json`
 
-Run tests:
+There are no transitive runtime dependencies introduced by `clojure.data.json`.
 
-```bash
-bb test
-bb itest
-bb e2e-sync-all
-```
+Native-image helper dependencies are build-time only (`:native-image` alias), not part of normal runtime usage.
 
-Validate all runtime modes (bb, JVM, jar, native, library):
+## Babashka Note
+
+Babashka support exists as a convenience for Clojure users already in that ecosystem, but it is not the primary way this README presents Kimen usage.
+
+## Machine Output (`--json` and `--edn`)
+
+`--json` and `--edn` are both machine-output modes.
+Use one or the other (they are mutually exclusive).
+
+- `--json`: JSON objects
+- `--edn`: idiomatic EDN maps with keyword keys
+
+Examples:
 
 ```bash
-bb smoke-modes
+kimen doctor --json
+kimen doctor --edn
 ```
 
-Build artifacts:
+## More Docs
 
-```bash
-bb build-jar
-bb build-native
-```
-
-Pre-commit hook (fast/no-op by default):
-
-```bash
-git config core.hooksPath .githooks
-chmod +x .githooks/pre-commit
-```
-
-Opt-in checks on commit:
-
-```bash
-KIMEN_PRECOMMIT_TEST=1 git commit ...
-KIMEN_PRECOMMIT_BUILD=1 git commit ...
-```
-
-## Release
-
-Kimen uses CalVer tags: `vYYYY.M.PATCH` (example `v2026.3.0`).
-
-Recommended flow:
-
-```bash
-bb test-all
-bb e2e-sync-all
-bb smoke-modes
-
-git tag -a v2026.3.0 -m "Release v2026.3.0"
-git push origin v2026.3.0
-```
-
-Tag push triggers `.github/workflows/release.yml`.
-
-## Key Docs
-
-- `docs/cli.md`: full CLI reference
-- `docs/projections.md`: projection model and patterns
+- `docs/cli.md`: full command reference
+- `docs/projections.md`: projection model and security shape
 - `docs/maps.md`: `.kmap` and profile format
-- `docs/automation-contract.md`: JSON envelopes and exit-code contract
+- `docs/automation-contract.md`: machine contract and exit codes
 - `docs/ci-github-actions.md`: CI integration patterns
-- `docs/ci-workflow-templates.md`: workflow template usage
-- `docs/recommended-paths.md`: recommended filesystem paths
-- `docs/threat-model.md`: security model and boundaries
-- `docs/stability.md`: compatibility and upgrade expectations
+- `docs/recommended-paths.md`: practical path conventions
+- `docs/threat-model.md`: what Kimen protects and does not protect
