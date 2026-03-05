@@ -2,11 +2,18 @@
 
 Kimen is a local-first secrets tool.
 
-It gives you one thing: an encrypted local vault, plus reliable ways to project secrets into runtime only when needed (env vars, files, stdin, and scoped command execution).
+Kimen stores secrets in an encrypted local vault and lets you project them into runtime only when you explicitly ask.
 
 If you are currently juggling `.env` files, copied tokens, or long-lived shell exports, Kimen is meant to replace that with a safer, explicit workflow.
 
-## Start Here (Native Binary)
+## Why Consider Kimen
+
+- Local-first: no server required for core runtime use.
+- Explicit secret projection: values are materialized only when requested.
+- Good automation contract: typed exit codes and structured machine output.
+- Team sync support (`fs` / `git`) without changing local runtime guarantees.
+
+## Start Here
 
 Kimen is primarily used as a native binary named `kimen`.
 
@@ -29,19 +36,28 @@ kimen vault init
 
 ### 2) Store a secret
 
-This command reads the secret value from stdin.
-Type your secret value, press Enter, then press Ctrl-D to finish stdin.
+This command creates a secret entry named `demo_service_api_token` in your vault.
+That name is just a label you choose; it is not a built-in command and not the secret value itself.
+
+The command reads the secret value from stdin.
+Type or paste the actual token, press Enter, then press Ctrl-D to finish stdin.
 
 ```bash
-kimen secret set api_key --stdin
+kimen secret set demo_service_api_token --stdin
 ```
 
 ### 3) Use it for one command only
 
-This maps the stored secret (`api_key`) into an env var (`API_KEY`) for exactly one child process.
+This maps the vault secret name to an environment variable for one child process:
+
+- `SERVICE_API_TOKEN` (left side) is the env var name seen by the child command.
+- `demo_service_api_token` (right side) is the secret name in your vault.
+- Everything after `--` is the real command that gets executed.
+
+Why this is useful: the secret is available only for that one command, instead of being exported globally in your shell.
 
 ```bash
-kimen run --env API_KEY=api_key -- sh -lc 'echo "$API_KEY"'
+kimen run --env SERVICE_API_TOKEN=demo_service_api_token -- sh -lc 'echo "Token length: ${#SERVICE_API_TOKEN}"'
 ```
 
 The secret exists only in that command process, not as a persistent shell export.
@@ -49,11 +65,11 @@ The secret exists only in that command process, not as a persistent shell export
 ### 4) Render a secret to a file when a tool requires a file
 
 Some tools only accept config files.
-This writes `config.txt` from secret `api_key` with strict file permissions.
+This writes `service-api-token.txt` from your vault secret with strict file permissions.
 
 ```bash
 OUTDIR="$(mktemp -d -t kimen-render.XXXXXX)"
-kimen render --dir "$OUTDIR" --file config.txt=api_key
+kimen render --dir "$OUTDIR" --file service-api-token.txt=demo_service_api_token
 ```
 
 ### 5) Generate an envfile for process supervisors
@@ -61,28 +77,7 @@ kimen render --dir "$OUTDIR" --file config.txt=api_key
 If your process manager expects an env file, generate one without printing secret values to terminal output.
 
 ```bash
-kimen envfile --env API_KEY=api_key --out .env.runtime
-```
-
-## Why Consider Kimen
-
-- Local-first: no server required for core runtime use.
-- Explicit secret projection: values are materialized only when requested.
-- Good automation contract: typed exit codes plus `--json` or `--edn`.
-- Team sync support (`fs` / `git`) without changing local runtime guarantees.
-
-## Automation Output (`--json` and `--edn`)
-
-Machine-readable modes are mutually exclusive:
-
-- `--json`: JSON objects.
-- `--edn`: idiomatic EDN maps with keyword keys.
-
-Examples:
-
-```bash
-kimen doctor --json
-kimen doctor --edn
+kimen envfile --env SERVICE_API_TOKEN=demo_service_api_token --out .env.runtime
 ```
 
 ## Value Sources
@@ -97,7 +92,7 @@ Example:
 
 ```bash
 kimen run \
-  --env API_KEY=secret:api_key \
+  --env SERVICE_API_TOKEN=secret:demo_service_api_token \
   --env REGION=const:eu-north-1 \
   --env TOKEN=exec:./scripts/derive_token.sh \
   -- your-command
@@ -110,13 +105,13 @@ Use `.kmap` files for repeatable intent:
 ```bash
 mkdir -p .kimen/profiles
 cat > .kimen/profiles/dev.kmap <<'EOF'
-env API_KEY=api_key
-file config.txt=api_key
+env SERVICE_API_TOKEN=demo_service_api_token
+file service-api-token.txt=demo_service_api_token
 EOF
 
 kimen map lint --profile dev --strict
 kimen plan --profile dev
-kimen run --profile dev -- sh -lc 'echo "$API_KEY"'
+kimen run --profile dev -- sh -lc 'echo "Token length: ${#SERVICE_API_TOKEN}"'
 ```
 
 ## Team Sync (Current)
