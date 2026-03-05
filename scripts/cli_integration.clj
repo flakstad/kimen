@@ -143,6 +143,21 @@
         _ (spit map-path "env API_KEY=api_key\nfile conf/api.txt=api_key\nenvpath API_KEY_PATH=conf/api.txt\n")]
     (expect-success-json! (run-kimen repo-root base-env ["version" "--json"]) "version")
     (expect-success-json! (run-kimen repo-root base-env ["config" "path" "--json"]) "config_path")
+    (let [completion-bash (run-kimen repo-root base-env ["completion" "bash"])
+          completion-zsh (run-kimen repo-root base-env ["completion" "zsh"])
+          completion-unknown (run-kimen repo-root base-env ["completion" "unknown-shell"])]
+      (ensure! (zero? (:exit completion-bash)) "completion bash failed" {:res completion-bash})
+      (ensure! (str/includes? (:out completion-bash) "complete -F _kimen_completion kimen")
+               "unexpected bash completion script"
+               {:res completion-bash})
+      (ensure! (zero? (:exit completion-zsh)) "completion zsh failed" {:res completion-zsh})
+      (ensure! (str/includes? (:out completion-zsh) "#compdef kimen")
+               "unexpected zsh completion script"
+               {:res completion-zsh})
+      (ensure! (= 1 (:exit completion-unknown)) "completion unknown shell should fail" {:res completion-unknown})
+      (ensure! (str/includes? (:err completion-unknown) "unsupported shell")
+               "completion unknown shell error missing guidance"
+               {:res completion-unknown}))
 
     (expect-success-json! (run-kimen repo-root base-env ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "vault_init")
     (expect-success-json! (run-kimen repo-root base-env ["vault" "info" "--vault" vault-path "--json"]) "vault_info")

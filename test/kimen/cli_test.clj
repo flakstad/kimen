@@ -273,6 +273,39 @@
       (is (str/includes? stderr "expected exactly one secret name"))
       (is (str/includes? stderr "Usage: kimen secret get <name> --unsafe-stdout")))))
 
+(deftest completion-command-help-and-shell-output
+  (testing "missing required shell argument is actionable"
+    (let [{:keys [exit-code stderr]} (run-cli ["completion"] {})]
+      (is (= 1 exit-code))
+      (is (str/includes? stderr "missing required argument <shell>"))
+      (is (str/includes? stderr "Usage:"))
+      (is (str/includes? stderr "kimen completion <bash|zsh|fish|powershell>"))))
+
+  (testing "completion help topic is discoverable"
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["help" "completion"] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "kimen completion <bash|zsh|fish|powershell>"))))
+
+  (testing "bash and zsh completion scripts are generated"
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["completion" "bash"] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "complete -F _kimen_completion kimen"))
+      (is (str/includes? stdout "secret"))
+      (is (str/includes? stdout "sync")))
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["completion" "zsh"] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "#compdef kimen"))
+      (is (str/includes? stdout "bashcompinit"))))
+
+  (testing "unsupported shells show guided error"
+    (let [{:keys [exit-code stderr]} (run-cli ["completion" "elvish"] {})]
+      (is (= 1 exit-code))
+      (is (str/includes? stderr "unsupported shell"))
+      (is (str/includes? stderr "bash, zsh, fish, powershell")))))
+
 (deftest config-path-and-vault-set-show-clear
   (let [cfg-path (.getPath (java.io.File/createTempFile "kimen-config" ".json"))]
     (.delete (java.io.File. cfg-path))

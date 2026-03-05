@@ -64,10 +64,15 @@
   [^bytes secret]
   (str recipient-prefix (subs (hex (sha256 secret)) 0 40)))
 
+(defn- identity-line?
+  [line]
+  (let [line (some-> line str/trim)]
+    (boolean (and line (str/starts-with? line identity-prefix)))))
+
 (defn- parse-identity-line
   [line]
   (let [line (some-> line str/trim)]
-    (when-not (and line (str/starts-with? line identity-prefix))
+    (when-not (identity-line? line)
       (fail! reasons/reason-no-identity-found "no identities found"))
     (let [token (subs line (count identity-prefix))
           secret (id-b64-decode token)]
@@ -81,7 +86,7 @@
        (map str/trim)
        (remove str/blank?)
        (remove #(str/starts-with? % "#"))
-       (filter #(str/starts-with? % identity-prefix))
+       (filter identity-line?)
        vec))
 
 (defn load-identity
