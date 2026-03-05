@@ -42,11 +42,14 @@ kimen vault init
 This command creates a secret entry named `demo_service_api_token` in your vault.
 That name is just a label you choose; it is not a built-in command and not the secret value itself.
 
-The command reads the secret value from stdin.
-Type or paste the actual token, press Enter, then press Ctrl-D to finish stdin.
+Run the command, then follow prompts:
+
+- First enter your vault passphrase.
+- Then enter the secret value.
+- Kimen stores it and prints `ok`.
 
 ```bash
-kimen secret set demo_service_api_token --stdin
+kimen secret set demo_service_api_token
 ```
 
 ### 3) Use it for one command only
