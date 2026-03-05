@@ -158,13 +158,21 @@ Run `scripts/migrate_current_vault.sh --help` for non-interactive/passphrase fil
 
 ## Development
 
-### Pre-commit hook (tests + build)
+### Pre-commit hook
 
 Hooks are stored in `.githooks/` and can be enabled via:
 
 ```bash
 git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
+```
+
+By default the hook is fast/no-op.
+Opt in when needed:
+
+```bash
+KIMEN_PRECOMMIT_TEST=1 git commit ...
+KIMEN_PRECOMMIT_BUILD=1 git commit ...
 ```
 
 ### Sync E2E Smoke Test
