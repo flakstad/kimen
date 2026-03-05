@@ -73,6 +73,13 @@ json_count_names() {
   bb -e '(require (quote [kimen.json :as json])) (println (count (or (get (json/read-str (slurp *in*)) "names") [])))'
 }
 
+is_clj_v2_vault() {
+  local path="$1"
+  local probe
+  probe="$(head -c 4096 "$path" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$probe" == *'"format_version":"kimen-v2"'* ]]
+}
+
 derive_default_target_vault() {
   local src="$1"
   if [[ "$src" == *.db ]]; then
@@ -193,6 +200,9 @@ fi
 [[ "$SOURCE_VAULT" != "$TARGET_VAULT" ]] || die "source and target vault paths must differ"
 [[ -f "$SOURCE_VAULT" ]] || die "source vault not found: $SOURCE_VAULT"
 [[ ! -e "$TARGET_VAULT" ]] || die "target vault already exists: $TARGET_VAULT"
+if is_clj_v2_vault "$SOURCE_VAULT"; then
+  die "source vault already appears to be Clojure format (kimen-v2): $SOURCE_VAULT; this script only migrates Go-era vaults"
+fi
 
 if (( BUILD_GO )); then
   need_cmd go
