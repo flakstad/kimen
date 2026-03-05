@@ -42,6 +42,45 @@
   (is (= [["sync" "push"] []]
          (mapv vec (parse/split-before-double-dash ["sync" "push"])))))
 
+(deftest parse-plan-and-map-lint-opts-cases
+  (let [[map-lint-opts map-lint-err]
+        (parse/parse-map-lint-opts ["--json" "--mode" "run" "--map" "demo.kmap" "--strict"])
+        [plan-opts plan-err]
+        (parse/parse-plan-opts ["--json" "--profile" "prod" "--env" "A=secret.a" "--" "echo" "ok"])]
+    (is (nil? map-lint-err))
+    (is (= {:json? true
+            :mode "run"
+            :strict? true
+            :map-path "demo.kmap"
+            :profile nil}
+           map-lint-opts))
+    (is (nil? plan-err))
+    (is (= true (:json? plan-opts)))
+    (is (= "prod" (:profile plan-opts)))
+    (is (= ["A=secret.a"] (:env-mappings plan-opts)))
+    (is (= ["echo" "ok"] (:command plan-opts)))))
+
+(deftest parse-vault-opts-cases
+  (let [[auth-opts auth-err]
+        (parse/parse-vault-auth-opts ["--json" "--vault" "/tmp/v.db" "--passphrase-cmd" "print pass" "tail"])
+        [rekey-opts rekey-err]
+        (parse/parse-vault-rekey-opts ["--json"
+                                       "--vault=/tmp/v.db"
+                                       "--old-passphrase-file" "old.pass"
+                                       "--new-passphrase-file" "new.pass"
+                                       "--dry-run"
+                                       "--no-backup"])]
+    (is (nil? auth-err))
+    (is (= true (:json? auth-opts)))
+    (is (= "/tmp/v.db" (:vault-path auth-opts)))
+    (is (= "print pass" (:passphrase-cmd auth-opts)))
+    (is (= ["tail"] (:rest auth-opts)))
+    (is (nil? rekey-err))
+    (is (= true (:dry-run? rekey-opts)))
+    (is (= true (:no-backup? rekey-opts)))
+    (is (= "old.pass" (:old-passphrase-file rekey-opts)))
+    (is (= "new.pass" (:new-passphrase-file rekey-opts)))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
