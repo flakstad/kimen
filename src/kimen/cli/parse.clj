@@ -1,6 +1,7 @@
 (ns kimen.cli.parse
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [kimen.commands.init :as init]))
 
 (def ^:private duration-unit-ms
   {"ms" 1
@@ -1558,6 +1559,236 @@
 
           (str/starts-with? a "-")
           [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-init-ci-pr-safety-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-pr-safety-workflow-path}
+                     (init/default-ci-pr-safety-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--command") (str/starts-with? a "--command="))
+          (let [[v next-args err] (parse-flag-value args "--command")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :command v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-init-ci-deploy-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-deploy-workflow-path}
+                     (init/default-ci-deploy-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--deploy-command") (str/starts-with? a "--deploy-command="))
+          (let [[v next-args err] (parse-flag-value args "--deploy-command")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :deploy-command v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-init-ci-sync-gate-opts
+  [args]
+  (loop [args args
+         opts (merge {:json? false
+                      :force? false
+                      :out init/default-ci-sync-gate-workflow-path}
+                     (init/default-ci-sync-gate-options))]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--force")
+          (recur (rest args) (assoc opts :force? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out v))))
+
+          (or (= a "--remote-name") (str/starts-with? a "--remote-name="))
+          (let [[v next-args err] (parse-flag-value args "--remote-name")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-name v))))
+
+          (or (= a "--remote-type") (str/starts-with? a "--remote-type="))
+          (let [[v next-args err] (parse-flag-value args "--remote-type")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-type v))))
+
+          (or (= a "--remote-path") (str/starts-with? a "--remote-path="))
+          (let [[v next-args err] (parse-flag-value args "--remote-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-path v))))
+
+          (or (= a "--remote-branch") (str/starts-with? a "--remote-branch="))
+          (let [[v next-args err] (parse-flag-value args "--remote-branch")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-branch v))))
+
+          (or (= a "--remote-bundle-path") (str/starts-with? a "--remote-bundle-path="))
+          (let [[v next-args err] (parse-flag-value args "--remote-bundle-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :remote-bundle-path v))))
+
+          (or (= a "--local-bundle") (str/starts-with? a "--local-bundle="))
+          (let [[v next-args err] (parse-flag-value args "--local-bundle")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :local-bundle v))))
+
+          (or (= a "--profile") (str/starts-with? a "--profile="))
+          (let [[v next-args err] (parse-flag-value args "--profile")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :profile v))))
+
+          (or (= a "--stale-threshold") (str/starts-with? a "--stale-threshold="))
+          (let [[v next-args err] (parse-flag-value args "--stale-threshold")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :stale-threshold v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-config-show-opts
+  [args]
+  (loop [args args
+         opts {:pretty true}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--pretty=true")
+          (recur (rest args) (assoc opts :pretty true))
+
+          (= a "--pretty=false")
+          (recur (rest args) (assoc opts :pretty false))
+
+          (str/starts-with? a "--pretty=")
+          (let [v (subs a (count "--pretty="))]
+            (cond
+              (= v "true") (recur (rest args) (assoc opts :pretty true))
+              (= v "false") (recur (rest args) (assoc opts :pretty false))
+              :else [opts "invalid value for --pretty (expected true|false)"]))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-config-unlock-set-opts
+  [args]
+  (let [[opt-args cmd] (split-before-double-dash args)]
+    (loop [args opt-args
+           opts {:json? false
+                 :method nil
+                 :command (vec cmd)}]
+      (if (empty? args)
+        [opts nil]
+        (let [a (first args)]
+          (cond
+            (= a "--json")
+            (recur (rest args) (assoc opts :json? true))
+
+            (str/starts-with? a "-")
+            [opts (str "unknown flag " a)]
+
+            (nil? (:method opts))
+            (recur (rest args) (assoc opts :method a))
+
+            :else
+            [opts (str "unexpected argument " (pr-str a))]))))))
+
+(defn parse-config-vault-set-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :vault-path nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:vault-path opts))
+          (recur (rest args) (assoc opts :vault-path a))
 
           :else
           [opts (str "unexpected argument " (pr-str a))])))))

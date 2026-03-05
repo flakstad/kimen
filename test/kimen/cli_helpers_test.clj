@@ -168,6 +168,35 @@
     (is (= true (:yes? unlock-opts)))
     (is (= 90000 (:if-older-than-ms unlock-opts)))))
 
+(deftest parse-init-and-config-cases
+  (let [[init-pr-opts init-pr-err]
+        (parse/parse-init-ci-pr-safety-opts ["--json" "--force" "--profile" "prod" "--command" "echo ok"])
+        [init-deploy-opts init-deploy-err]
+        (parse/parse-init-ci-deploy-opts ["--json" "--profile" "prod" "--deploy-command" "./deploy.sh"])
+        [init-sync-opts init-sync-err]
+        (parse/parse-init-ci-sync-gate-opts ["--json" "--remote-name" "team" "--stale-threshold" "30m"])
+        [cfg-show-opts cfg-show-err]
+        (parse/parse-config-show-opts ["--pretty=false"])
+        [cfg-unlock-opts cfg-unlock-err]
+        (parse/parse-config-unlock-set-opts ["--json" "exec" "--" "security" "find-generic-password"])
+        [cfg-vault-opts cfg-vault-err]
+        (parse/parse-config-vault-set-opts ["--json" "/tmp/vault.db"])]
+    (is (nil? init-pr-err))
+    (is (= true (:force? init-pr-opts)))
+    (is (= "prod" (:profile init-pr-opts)))
+    (is (nil? init-deploy-err))
+    (is (= "./deploy.sh" (:deploy-command init-deploy-opts)))
+    (is (nil? init-sync-err))
+    (is (= "team" (:remote-name init-sync-opts)))
+    (is (= "30m" (:stale-threshold init-sync-opts)))
+    (is (nil? cfg-show-err))
+    (is (= false (:pretty cfg-show-opts)))
+    (is (nil? cfg-unlock-err))
+    (is (= "exec" (:method cfg-unlock-opts)))
+    (is (= ["security" "find-generic-password"] (:command cfg-unlock-opts)))
+    (is (nil? cfg-vault-err))
+    (is (= "/tmp/vault.db" (:vault-path cfg-vault-opts)))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
