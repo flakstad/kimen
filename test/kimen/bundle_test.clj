@@ -62,3 +62,15 @@
                     e))]
         (is (some? err))
         (is (= reasons/reason-bundle-failed (-> err ex-data :reason)))))))
+
+(deftest load-identity-rejects-standard-age-secret-keys
+  (let [standard-key "AGE-SECRET-KEY-1JD0YW2RCWGT0WFSVD6C4XS5HNAE50DMNV3P3F0508ZM6ZN55HTFSMS3QHC"
+        err (try
+              (bundle/load-identity {:identity-file nil
+                                     :from-stdin? true
+                                     :stdin (java.io.StringReader. (str standard-key "\n"))})
+              nil
+              (catch Exception e
+                e))]
+    (is (some? err))
+    (is (= reasons/reason-no-identity-found (-> err ex-data :reason)))))

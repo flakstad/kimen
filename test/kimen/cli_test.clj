@@ -3237,6 +3237,15 @@
       (is (= "bundle_recipient" (get payload "action")))
       (is (str/starts-with? (get payload "recipient") "age1")))))
 
+(deftest bundle-recipient-rejects-standard-age-identity
+  (let [standard-id "AGE-SECRET-KEY-1JD0YW2RCWGT0WFSVD6C4XS5HNAE50DMNV3P3F0508ZM6ZN55HTFSMS3QHC"
+        {:keys [exit-code stderr]}
+        (run-cli ["bundle" "recipient" "--identity-stdin" "--json"]
+                 {}
+                 {:stdin (java.io.StringReader. (str standard-id "\n"))})]
+    (is (= exit-code/code-bundle-failed exit-code))
+    (is (str/includes? stderr "\"reason\":\"no_identity_found\""))))
+
 (deftest run-render-envfile-happy-path
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
