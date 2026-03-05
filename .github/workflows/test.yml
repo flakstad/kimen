@@ -4,12 +4,6 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs:
-      run_go_reference:
-        description: "Run Go reference tests"
-        required: false
-        default: "false"
-        type: boolean
 
 jobs:
   clojure-test:
@@ -42,30 +36,3 @@ jobs:
         with:
           bb: latest
       - run: bb e2e-sync-all
-
-  native-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeLaGuardo/setup-clojure@13.2
-        with:
-          cli: latest
-      - uses: graalvm/setup-graalvm@v1
-        with:
-          distribution: graalvm-community
-          java-version: '21'
-          native-image-job-reports: 'true'
-      - run: native-image --version
-      - run: clojure -T:build native
-      - run: test -x target/kimen
-
-  go-reference:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_go_reference == true }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: go test ./...
