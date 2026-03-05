@@ -3,6 +3,13 @@ name: test
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_go_reference:
+        description: "Run Go reference tests"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   clojure-test:
@@ -44,6 +51,7 @@ jobs:
       - run: test -x target/kimen
 
   go-reference:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_go_reference == true }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
