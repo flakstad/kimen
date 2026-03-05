@@ -5744,7 +5744,16 @@
 (defn- make-secret-lookup
   [vault-path passphrase]
   (fn [secret-name]
-    (:value (vault-v2/get-secret vault-path passphrase secret-name))))
+    (try
+      (:value (vault-v2/get-secret vault-path passphrase secret-name))
+      (catch clojure.lang.ExceptionInfo e
+        (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
+          (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
+                          (assoc (or (ex-data e) {})
+                                 :reason reasons/reason-secret-not-found
+                                 :secret_name secret-name)
+                          e))
+          (throw e))))))
 
 (defn- validate-envpaths!
   [request env-paths files-dir reason-on-missing-files-dir]

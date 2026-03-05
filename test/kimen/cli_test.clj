@@ -3526,6 +3526,40 @@
       (is (str/includes? stdout "\"action\":\"envfile\""))
       (is (str/includes? (slurp envfile-path) "API_KEY=shh")))))
 
+(deftest projection-errors-include-missing-secret-name
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        out-dir (str (.getPath dir) "/render")
+        out-path (str (.getPath dir) "/app.env")
+        missing "kari.prod.missing_secret"
+        pass-cmd "printf test-passphrase"]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["run" "--env" (str "API_KEY=" missing) "--vault" vault-path "--passphrase-cmd" pass-cmd "--json" "--" "echo" "ok"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-secret-not-found exit-code))
+      (is (str/includes? stderr "\"reason\":\"secret_not_found\""))
+      (is (str/includes? stderr missing)))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["render" "--file" (str "cfg.txt=" missing) "--dir" out-dir "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-secret-not-found exit-code))
+      (is (str/includes? stderr "\"reason\":\"secret_not_found\""))
+      (is (str/includes? stderr missing)))
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["envfile" "--env" (str "API_KEY=" missing) "--out" out-path "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                   {}
+                   {:config-path cfg-path})]
+      (is (= exit-code/code-secret-not-found exit-code))
+      (is (str/includes? stderr "\"reason\":\"secret_not_found\""))
+      (is (str/includes? stderr missing)))))
+
 (deftest stdin-mapping-is-rejected-for-render-and-envfile
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         vault-path (str (.getPath dir) "/vault.db")
