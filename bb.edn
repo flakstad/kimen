@@ -1,10 +1,41 @@
-{:paths ["src" "test" "resources"]
+ {:paths ["src" "test" "resources"]
  :deps {org.clojure/data.json {:mvn/version "2.5.1"}}
  :tasks
  {run {:doc "Run kimen CLI"
        :override-builtin true
        :requires ([kimen.main :as main])
        :task (System/exit (int (main/main! *command-line-args*)))}
+  build-jar {:doc "Build JVM uberjar and dist launcher artifacts"
+             :task (let [res (shell {:continue true} "clojure" "-T:build" "uber")
+                         cp-jar (if (zero? (:exit res))
+                                  (shell {:continue true} "mkdir" "-p" "dist")
+                                  {:exit (:exit res)})
+                         cp-jar (if (zero? (:exit cp-jar))
+                                  (shell {:continue true} "cp" "target/kimen.jar" "dist/kimen.jar")
+                                  cp-jar)
+                         cp-bin (if (zero? (:exit cp-jar))
+                                  (shell {:continue true} "cp" "bin/kimen" "dist/kimen")
+                                  {:exit (:exit cp-jar)})
+                         chmod-bin (if (zero? (:exit cp-bin))
+                                     (shell {:continue true} "chmod" "+x" "dist/kimen")
+                                     {:exit (:exit cp-bin)})]
+                     (System/exit (int (:exit chmod-bin))))}
+  build-native {:doc "Build native binary via GraalVM native-image"
+                :task (System/exit (int (:exit (shell {:continue true} "clojure" "-T:build" "native"))))}
+  install {:doc "Install launcher to ~/.local/bin (or $INSTALL_BIN_DIR)"
+           :task (let [build-exit (int (:exit (shell {:continue true} "bb" "build-jar")))
+                       target-dir (or (System/getenv "INSTALL_BIN_DIR")
+                                      (str (System/getProperty "user.home") "/.local/bin"))
+                       mk-exit (if (zero? build-exit)
+                                 (int (:exit (shell {:continue true} "mkdir" "-p" target-dir)))
+                                 build-exit)
+                       cp-exit (if (zero? mk-exit)
+                                 (int (:exit (shell {:continue true} "cp" "bin/kimen" (str target-dir "/kimen"))))
+                                 mk-exit)
+                       chmod-exit (if (zero? cp-exit)
+                                    (int (:exit (shell {:continue true} "chmod" "+x" (str target-dir "/kimen"))))
+                                    cp-exit)]
+                   (System/exit chmod-exit))}
  test {:doc "Run tests"
         :requires ([kimen.test-runner :as test-runner])
         :task (System/exit (int (test-runner/main!)))}

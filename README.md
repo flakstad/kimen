@@ -114,13 +114,19 @@ Prerequisites:
 Build and install the Clojure launcher from source:
 
 ```bash
-make install
+bb install
 ```
 
 Build a JAR artifact:
 
 ```bash
-make build
+bb build-jar
+```
+
+Build a native binary (requires GraalVM + `native-image`):
+
+```bash
+bb build-native
 ```
 
 Legacy Go build/test targets remain available as `go-*` targets during transition (for example `make go-test`).
