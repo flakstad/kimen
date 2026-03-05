@@ -84,6 +84,7 @@ derive_default_target_vault() {
 
 make_tmp_secret_file_from_prompt() {
   local prompt="$1"
+  local out_var="$2"
   local tmp
   tmp="$(mktemp /tmp/kimen-pass.XXXXXX)"
   chmod 600 "$tmp"
@@ -94,11 +95,12 @@ make_tmp_secret_file_from_prompt() {
   printf '%s' "$pass" > "$tmp"
   unset pass
   TMP_FILES+=("$tmp")
-  printf '%s' "$tmp"
+  printf -v "$out_var" '%s' "$tmp"
 }
 
 make_passphrase_cmd_from_file() {
   local pass_file="$1"
+  local out_var="$2"
   [[ -f "$pass_file" ]] || die "passphrase file not found: $pass_file"
   local wrapper
   wrapper="$(mktemp /tmp/kimen-passcmd.XXXXXX)"
@@ -111,7 +113,7 @@ set -euo pipefail
 cat $escaped
 CMD
   TMP_FILES+=("$wrapper")
-  printf '%s' "$wrapper"
+  printf -v "$out_var" '%s' "$wrapper"
 }
 
 while (($#)); do
@@ -211,9 +213,9 @@ if [[ -n "$SOURCE_PASS_CMD" && -n "$SOURCE_PASS_FILE" ]]; then
 fi
 if [[ -z "$SOURCE_PASS_CMD" ]]; then
   if [[ -z "$SOURCE_PASS_FILE" ]]; then
-    SOURCE_PASS_FILE="$(make_tmp_secret_file_from_prompt "Source vault passphrase: ")"
+    make_tmp_secret_file_from_prompt "Source vault passphrase: " SOURCE_PASS_FILE
   fi
-  SOURCE_PASS_CMD="$(make_passphrase_cmd_from_file "$SOURCE_PASS_FILE")"
+  make_passphrase_cmd_from_file "$SOURCE_PASS_FILE" SOURCE_PASS_CMD
 fi
 
 if [[ -n "$TARGET_PASS_CMD" && -n "$TARGET_PASS_FILE" ]]; then
@@ -221,9 +223,9 @@ if [[ -n "$TARGET_PASS_CMD" && -n "$TARGET_PASS_FILE" ]]; then
 fi
 if [[ -z "$TARGET_PASS_CMD" ]]; then
   if [[ -z "$TARGET_PASS_FILE" ]]; then
-    TARGET_PASS_FILE="$(make_tmp_secret_file_from_prompt "Target vault passphrase: ")"
+    make_tmp_secret_file_from_prompt "Target vault passphrase: " TARGET_PASS_FILE
   fi
-  TARGET_PASS_CMD="$(make_passphrase_cmd_from_file "$TARGET_PASS_FILE")"
+  make_passphrase_cmd_from_file "$TARGET_PASS_FILE" TARGET_PASS_CMD
 fi
 
 MIGRATE_BASE_ARGS=(
