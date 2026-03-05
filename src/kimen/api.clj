@@ -1,6 +1,7 @@
 (ns kimen.api
   (:refer-clojure :exclude [run!])
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [kimen.cli :as cli]
             [kimen.json :as json]))
 
@@ -54,7 +55,17 @@
       (if (str/blank? trimmed)
         s
         (try
-          (str (pr-str (json/read-str trimmed)) "\n")
+          (let [data (json/read-str trimmed)
+                keywordized (walk/postwalk
+                              (fn [x]
+                                (if (map? x)
+                                  (into {}
+                                        (map (fn [[k v]]
+                                               [(if (string? k) (keyword k) k) v]))
+                                        x)
+                                  x))
+                              data)]
+            (str (pr-str keywordized) "\n"))
           (catch Exception _
             s))))))
 

@@ -36,17 +36,17 @@
         payload (edn/read-string stdout)]
     (is (= 0 exit-code))
     (is (nil? stderr))
-    (is (= true (get payload "ok")))
-    (is (= "version" (get payload "action")))))
+    (is (= true (:ok payload)))
+    (is (= "version" (:action payload)))))
 
 (deftest edn-output-flag-converts-error-payload
   (let [{:keys [exit-code stdout stderr]} (api/run ["map" "lint" "--edn"])
         payload (edn/read-string stdout)]
     (is (= exit-code/code-map-lint-failed exit-code))
     (is (nil? stderr))
-    (is (= false (get payload "ok")))
-    (is (= "map_lint" (get payload "action")))
-    (is (= "invalid_input" (get (first (get payload "issues")) "code")))))
+    (is (= false (:ok payload)))
+    (is (= "map_lint" (:action payload)))
+    (is (= "invalid_input" (:code (first (:issues payload)))))))
 
 (deftest edn-output-flag-does-not-consume-child-args
   (let [{:keys [exit-code stdout stderr]}
@@ -54,8 +54,8 @@
         payload (edn/read-string stdout)]
     (is (= 0 exit-code))
     (is (nil? stderr))
-    (is (= "plan" (get payload "action")))
-    (is (= ["echo" "--edn"] (vec (get payload "command"))))))
+    (is (= "plan" (:action payload)))
+    (is (= ["echo" "--edn"] (vec (:command payload))))))
 
 (deftest json-and-edn-flags-conflict
   (let [{:keys [exit-code stdout stderr]} (api/run ["version" "--json" "--edn"])]
@@ -68,4 +68,4 @@
         payload (edn/read-string stdout)]
     (is (= 0 exit-code))
     (is (nil? stderr))
-    (is (= "version" (get payload "action")))))
+    (is (= "version" (:action payload)))))

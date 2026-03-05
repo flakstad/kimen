@@ -16,6 +16,8 @@ This document describes what each command does, how it works, and the typical us
 - Many commands accept `--map` / `--profile` to avoid repeating long mapping lists (see `docs/maps.md`).
 - For machine integrations, see the canonical contract in `docs/automation-contract.md`.
 - Machine-readable output supports `--json` and `--edn` (mutually exclusive).
+  - `--json` uses JSON object keys.
+  - `--edn` emits idiomatic EDN with keyword keys.
 - With `--json`/`--edn`, error envelopes include `exit_code` and usually a command-specific `reason` for machine branching.
 
 ## Environment variables

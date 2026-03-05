@@ -150,8 +150,8 @@
     (let [edn-res (run-kimen repo-root base-env ["version" "--edn"])
           edn-payload (parse-edn (:out edn-res))]
       (ensure! (zero? (:exit edn-res)) "version --edn failed" {:res edn-res})
-      (ensure! (= true (get edn-payload "ok")) "version --edn missing ok=true" {:payload edn-payload :res edn-res})
-      (ensure! (= "version" (get edn-payload "action")) "version --edn unexpected action" {:payload edn-payload :res edn-res}))
+      (ensure! (= true (:ok edn-payload)) "version --edn missing :ok true" {:payload edn-payload :res edn-res})
+      (ensure! (= "version" (:action edn-payload)) "version --edn unexpected :action" {:payload edn-payload :res edn-res}))
     (expect-success-json! (run-kimen repo-root base-env ["config" "path" "--json"]) "config_path")
     (let [completion-bash (run-kimen repo-root base-env ["completion" "bash"])
           completion-zsh (run-kimen repo-root base-env ["completion" "zsh"])
