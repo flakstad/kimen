@@ -81,6 +81,31 @@
     (is (= "old.pass" (:old-passphrase-file rekey-opts)))
     (is (= "new.pass" (:new-passphrase-file rekey-opts)))))
 
+(deftest parse-secret-run-render-doctor-cases
+  (let [[secret-opts secret-err]
+        (parse/parse-secret-set-opts ["--json" "demo.secret" "--stdin" "--vault" "/tmp/v.db"])
+        [run-opts run-err]
+        (parse/parse-run-opts ["--json" "--profile" "prod" "--env" "A=secret.a" "--" "env"])
+        [render-opts render-err]
+        (parse/parse-render-opts ["--json" "--profile" "prod" "--dir" "/tmp/render" "--file" "a.txt=secret.a"])
+        [doctor-opts doctor-err]
+        (parse/parse-doctor-opts ["--json" "--strict" "--profile" "prod" "--allow-missing-vault"])]
+    (is (nil? secret-err))
+    (is (= true (:stdin? secret-opts)))
+    (is (= "demo.secret" (:name secret-opts)))
+    (is (= "/tmp/v.db" (:vault-path secret-opts)))
+    (is (nil? run-err))
+    (is (= "prod" (:profile run-opts)))
+    (is (= ["A=secret.a"] (:env-mappings run-opts)))
+    (is (= ["env"] (:command run-opts)))
+    (is (nil? render-err))
+    (is (= "prod" (:profile render-opts)))
+    (is (= "/tmp/render" (:out-dir render-opts)))
+    (is (= ["a.txt=secret.a"] (:file-mappings render-opts)))
+    (is (nil? doctor-err))
+    (is (= true (:strict? doctor-opts)))
+    (is (= true (:allow-missing-vault? doctor-opts)))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
