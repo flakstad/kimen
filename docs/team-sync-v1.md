@@ -2,7 +2,7 @@
 
 This document defines the Team Sync v1 product surface for Kimen.
 
-For orchestration-first v2 milestones and current implementation status, see `docs/team-sync-v2-plan.md`.
+For orchestration-first behavior and current sync model, see `docs/team-sync.md`.
 
 ## Guarantees
 

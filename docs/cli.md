@@ -33,7 +33,7 @@ When using file projections with `kimen run`, Kimen also sets:
 
 ## Passphrase storage and ergonomics
 
-Today, Kimen does **not** ship an “unlock agent” or built-in OS keychain integration (see `docs/plan-1-2-3.md` for non-goals in the current milestone sequence). That means the CLI needs a passphrase source on each invocation.
+Today, Kimen does **not** ship an “unlock agent” or built-in OS keychain integration. That means the CLI needs a passphrase source on each invocation.
 
 Kimen’s lookup order is:
 
@@ -697,7 +697,7 @@ What it does:
 
 Use cases:
 
-- Script clarity and future expansion.
+- Script clarity.
 
 In everyday usage, prefer the short verbs `kimen run` / `kimen render` / `kimen plan`.
 

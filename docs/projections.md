@@ -37,7 +37,7 @@ The explicit, grouped form is also available:
 - `kimen project run`
 - `kimen project render`
 
-The grouped `project` commands exist mainly for clarity and future expansion; the preferred everyday UX is `kimen run` / `kimen render`.
+The grouped `project` commands are an explicit form; the preferred everyday UX is `kimen run` / `kimen render`.
 
 ## Why projections
 

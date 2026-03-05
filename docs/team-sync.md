@@ -2,7 +2,7 @@
 
 Kimen is local-first and complete without a server. Teams still need shared state, conflict handling, and automation-safe coordination.
 
-This document describes what is implemented now and what remains directional.
+This document describes the current shipped Team Sync behavior.
 
 ## The invariant
 
@@ -81,17 +81,7 @@ Interpretation:
 - exit `31`: sync conflict (pull/reconcile/resolve required)
 - exit `32`: non-conflict precondition failure (lock/missing config/other blockers)
 
-## What remains directional
-
-These are not part of the current shipped sync model:
-
-- merge-friendly canonical storage redesign (beyond whole-vault bundle transport)
-- optional hosted coordination service (ciphertext-only)
-- richer membership/key-management UX for larger organizations
-
 ## Related docs
 
 - `docs/team-sync-v1.md`: v1 guarantees and runbooks
-- `docs/team-sync-v2-plan.md`: v2 implementation milestones and status
 - `docs/automation-contract.md`: canonical JSON and exit-code contract
-- `docs/team-sync-roadmap.md`: delivered milestones and directional next phases

@@ -134,7 +134,6 @@ For runbooks and contract details:
 
 - `docs/team-sync.md`
 - `docs/team-sync-v1.md`
-- `docs/team-sync-v2-plan.md`
 - `docs/automation-contract.md`
 
 ## Clojure Library Embedding
