@@ -4,9 +4,9 @@ This checklist is for cutting the first external milestone from branch `agent/ag
 
 ## 1) Freeze and verify
 
-- [ ] `make release-check` passes.
-- [ ] `go test ./...` passes on the release commit.
-- [ ] `make build` succeeds (produces `dist/kimen.jar` and `dist/kimen`).
+- [ ] `bb test-all` passes.
+- [ ] `bb e2e-sync-all` passes.
+- [ ] `bb build-jar` succeeds (produces `dist/kimen.jar` and `dist/kimen`).
 - [ ] Smoke pass completed for:
   - `vault`, `secret`, `run`, `render`, `envfile`
   - `plan` / `project plan`

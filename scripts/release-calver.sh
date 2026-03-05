@@ -12,7 +12,7 @@ Examples:
 
 Behavior:
   - validates CalVer tag format: vYYYY.M.PATCH
-  - runs `make release-check`
+  - runs `bb test-all`, `bb e2e-sync-all`, and `bb build-jar`
   - creates an annotated git tag
   - optionally pushes the tag with --push
 EOF
@@ -47,7 +47,9 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
 fi
 
 echo "Running release checks..."
-make release-check
+bb test-all
+bb e2e-sync-all
+bb build-jar
 
 echo "Creating tag $TAG"
 git tag -a "$TAG" -m "Release $TAG"

@@ -80,7 +80,7 @@ Acceptance gates:
 
 - contract tests cover decisions: `noop`, `push`, `pull`, `blocked`
 - fs/git e2e stays green
-- `go test ./...` passes
+- `bb test` passes
 
 ## v2.2: Conflict intelligence
 
@@ -183,4 +183,4 @@ Acceptance gates:
 2. Update `README.md` as canonical operator entrypoint. (done)
 3. Refresh `docs/cli.md` and `docs/automation-contract.md` to exact command/output behavior. (done)
 4. Align team sync narrative docs (`team-sync-v1`, `team-sync`, `team-sync-roadmap`) with shipped v1/v2 state. (done)
-5. Re-run command-example validation and e2e docs checks (`go test ./...`, `bb e2e-sync-all`). (done)
+5. Re-run command-example validation and e2e docs checks (`bb test`, `bb e2e-sync-all`). (done)

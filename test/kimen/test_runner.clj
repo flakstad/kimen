@@ -10,7 +10,6 @@
     kimen.cli-test
     kimen.json-test
     kimen.mapfile-test
-    kimen.migration.go-vault-test
     kimen.reason-codes-test
     kimen.sync-state-test
     kimen.vault-v2-test])

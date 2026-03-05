@@ -45,8 +45,8 @@ on:
     paths:
       - ".kimen/**"
       - "docs/**"
-      - "internal/**"
-      - "cmd/**"
+      - "src/**"
+      - "test/**"
 
 jobs:
   safety:

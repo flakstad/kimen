@@ -34,10 +34,10 @@ Reference: `docs/team-sync-v1.md`
 - [x] git sync e2e harness (`scripts/e2e-sync-git.sh`)
 - [x] e2e harnesses cover dry-run paths
 - [x] CI runs sync e2e checks
-- [x] `make release-check` includes fs + git sync e2e
+- [x] `bb test-all` + `bb e2e-sync-all` cover fs + git sync e2e
 
 ## Exit Criteria
 
-- [x] `go test ./...` passes
+- [x] `bb test` passes
 - [x] `bb e2e-sync-all` passes
 - [x] Team Sync v1 docs published

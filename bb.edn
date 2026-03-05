@@ -37,8 +37,7 @@
                                     cp-exit)]
                    (System/exit chmod-exit))}
  test {:doc "Run tests"
-        :requires ([kimen.test-runner :as test-runner])
-        :task (System/exit (int (test-runner/main!)))}
+       :task (System/exit (int (:exit (shell {:continue true} "clojure" "-M:test"))))}
   itest {:doc "Run CLI integration tests through bin/kimen"
          :task (System/exit (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))}
   e2e-sync {:doc "Run fs remote sync e2e harness"
@@ -49,13 +48,8 @@
                 :task (let [fs-exit (int (:exit (shell {:continue true} "./scripts/e2e-sync.sh")))
                             git-exit (int (:exit (shell {:continue true} "./scripts/e2e-sync-git.sh")))]
                         (System/exit (if (zero? fs-exit) git-exit fs-exit)))}
-  migrate-go-vault {:doc "Migrate secrets from a Go-era vault to the Clojure vault implementation"
-                    :override-builtin true
-                    :requires ([kimen.migration.go-vault :as migrate])
-                    :task (System/exit (int (migrate/main! *command-line-args*)))}
   test-all {:doc "Run unit and CLI integration tests"
-            :requires ([kimen.test-runner :as test-runner])
-            :task (let [unit-exit (int (test-runner/main!))
+            :task (let [unit-exit (int (:exit (shell {:continue true} "clojure" "-M:test")))
                         itest-exit (int (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))]
                     (System/exit (if (zero? unit-exit) itest-exit unit-exit)))}
   smoke-modes {:doc "Smoke-check bb/jvm/jar/native/library execution modes"
