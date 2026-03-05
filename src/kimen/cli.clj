@@ -2739,15 +2739,7 @@
         (catch Exception e
           (sync-error-result json? e))))))
 
-(defn- parse-json-map
-  [s]
-  (let [s (some-> s str/trim)]
-    (when-not (str/blank? s)
-      (try
-        (let [v (json/read-str s)]
-          (when (map? v)
-            v))
-        (catch Exception _ nil)))))
+(def parse-json-map cli-parse/parse-json-map)
 
 (defn- run-sync-preflight-check
   [ctx check-name argv]
@@ -3170,11 +3162,7 @@
       (= "restore" (first args)) (handle-sync-restore ctx (rest args))
       :else (error-with-help 1 (str "unknown sync command " (pr-str (first args))) sync-usage))))
 
-(defn- parse-cmd-string
-  [s]
-  (->> (str/split (str/trim (str s)) #"\s+")
-       (remove str/blank?)
-       vec))
+(def parse-cmd-string cli-parse/parse-cmd-string)
 
 (defn- read-passphrase-line!
   [input reason message]

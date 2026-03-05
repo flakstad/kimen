@@ -1,7 +1,8 @@
 (ns kimen.cli.parse
   (:require
    [clojure.string :as str]
-   [kimen.commands.init :as init]))
+   [kimen.commands.init :as init]
+   [kimen.json :as json]))
 
 (def ^:private duration-unit-ms
   {"ms" 1
@@ -1792,3 +1793,19 @@
 
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-json-map
+  [s]
+  (let [s (some-> s str/trim)]
+    (when-not (str/blank? s)
+      (try
+        (let [v (json/read-str s)]
+          (when (map? v)
+            v))
+        (catch Exception _ nil)))))
+
+(defn parse-cmd-string
+  [s]
+  (->> (str/split (str/trim (str s)) #"\s+")
+       (remove str/blank?)
+       vec))

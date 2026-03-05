@@ -197,6 +197,15 @@
     (is (nil? cfg-vault-err))
     (is (= "/tmp/vault.db" (:vault-path cfg-vault-opts)))))
 
+(deftest parse-json-map-and-cmd-string-cases
+  (is (= {"ok" true}
+         (parse/parse-json-map "{\"ok\":true}")))
+  (is (nil? (parse/parse-json-map "not-json")))
+  (is (= ["printf" "hello"]
+         (parse/parse-cmd-string "  printf   hello  ")))
+  (is (= []
+         (parse/parse-cmd-string ""))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
