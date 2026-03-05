@@ -1,6 +1,8 @@
 (ns kimen.api
   (:refer-clojure :exclude [run!])
-  (:require [kimen.cli :as cli]))
+  (:require [clojure.string :as str]
+            [kimen.cli :as cli]
+            [kimen.json :as json]))
 
 (set! *warn-on-reflection* true)
 
@@ -10,13 +12,77 @@
   {:read-file slurp
    :stdin System/in})
 
+(defn- split-before-double-dash
+  [argv]
+  (let [args (vec argv)
+        idx (first (keep-indexed (fn [i v] (when (= "--" v) i)) args))]
+    (if (some? idx)
+      [(subvec args 0 idx) (subvec args idx)]
+      [args []])))
+
+(defn- normalize-output-format
+  [argv]
+  (let [raw (vec argv)
+        args (if (and (seq raw) (= "--" (first raw)))
+               (subvec raw 1)
+               raw)
+        [head tail] (split-before-double-dash args)
+        json? (boolean (some #{"--json"} head))
+        edn? (boolean (some #{"--edn"} head))]
+    (cond
+      (and json? edn?)
+      {:error "cannot use both --json and --edn"}
+
+      edn?
+      {:format :edn
+       :argv (vec (concat (mapv (fn [a] (if (= a "--edn") "--json" a)) head)
+                          tail))}
+
+      json?
+      {:format :json
+       :argv args}
+
+      :else
+      {:format :text
+       :argv args})))
+
+(defn- json-text->edn-text
+  [s]
+  (if (nil? s)
+    nil
+    (let [trimmed (str/trim s)]
+      (if (str/blank? trimmed)
+        s
+        (try
+          (str (pr-str (json/read-str trimmed)) "\n")
+          (catch Exception _
+            s))))))
+
+(defn- apply-output-format
+  [format result]
+  (if (= format :edn)
+    (-> result
+        (update :stdout json-text->edn-text)
+        (update :stderr json-text->edn-text))
+    result))
+
+(defn- conflict-format-result
+  []
+  {:exit-code 1
+   :stdout nil
+   :stderr "cannot use both --json and --edn\n"})
+
 (defn run
   "Run Kimen argv and return {:exit-code :stdout :stderr}.
    Optional `ctx` overrides or extends runtime behavior."
   ([argv]
    (run {} argv))
   ([ctx argv]
-   (cli/run (merge (runtime-context) ctx) (vec argv))))
+   (let [{:keys [argv format error]} (normalize-output-format argv)]
+     (if (some? error)
+       (conflict-format-result)
+       (->> (cli/run (merge (runtime-context) ctx) argv)
+            (apply-output-format format))))))
 
 (defn emit-result!
   "Print a run result to stdout/stderr using CLI semantics."

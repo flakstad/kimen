@@ -63,14 +63,14 @@
    ["kimen config"
     ""
     "Usage:"
-    "  kimen config path [--json]"
+    "  kimen config path [--json|--edn]"
     "  kimen config show [--pretty=true|false]"
-    "  kimen config vault set <vault-path> [--json]"
-    "  kimen config vault show [--json]"
-    "  kimen config vault clear [--json]"
-    "  kimen config unlock set <prompt|env|stdin|exec> [-- <command> [args...]] [--json]"
-    "  kimen config unlock show [--json]"
-    "  kimen config unlock clear [--json]"
+    "  kimen config vault set <vault-path> [--json|--edn]"
+    "  kimen config vault show [--json|--edn]"
+    "  kimen config vault clear [--json|--edn]"
+    "  kimen config unlock set <prompt|env|stdin|exec> [-- <command> [args...]] [--json|--edn]"
+    "  kimen config unlock show [--json|--edn]"
+    "  kimen config unlock clear [--json|--edn]"
     ""]))
 
 (def vault-usage
@@ -79,10 +79,10 @@
    ["kimen vault"
     ""
     "Usage:"
-    "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen vault info [--vault <path>] [--json]"
-    "  kimen vault path [--vault <path>] [--json]"
-    "  kimen vault rekey [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>|--old-passphrase-file <path>] [--new-passphrase-stdin|--new-passphrase-cmd <cmd>|--new-passphrase-file <path>|--new-passphrase-env <VAR>] [--dry-run] [--no-backup|--backup-dir <path>] [--json]"
+    "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen vault info [--vault <path>] [--json|--edn]"
+    "  kimen vault path [--vault <path>] [--json|--edn]"
+    "  kimen vault rekey [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>|--old-passphrase-file <path>] [--new-passphrase-stdin|--new-passphrase-cmd <cmd>|--new-passphrase-file <path>|--new-passphrase-env <VAR>] [--dry-run] [--no-backup|--backup-dir <path>] [--json|--edn]"
     ""]))
 
 (def secret-usage
@@ -91,24 +91,24 @@
    ["kimen secret"
     ""
     "Usage:"
-    "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
     ""]))
 
 (def secret-set-usage-line
-  "Usage: kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+  "Usage: kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]")
 
 (def secret-get-usage-line
-  "Usage: kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+  "Usage: kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]")
 
 (def secret-rm-usage-line
-  "Usage: kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+  "Usage: kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]")
 
 (def secret-mv-usage-line
-  "Usage: kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+  "Usage: kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]")
 
 (def remote-usage
   (str/join
@@ -116,11 +116,11 @@
    ["kimen remote"
     ""
     "Usage:"
-    "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
-    "  kimen remote get <name> [--json]"
-    "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
-    "  kimen remote list [--json]"
-    "  kimen remote rm <name> [--json]"
+    "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json|--edn]"
+    "  kimen remote get <name> [--json|--edn]"
+    "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json|--edn]"
+    "  kimen remote list [--json|--edn]"
+    "  kimen remote rm <name> [--json|--edn]"
     ""]))
 
 (def sync-usage
@@ -129,18 +129,18 @@
    ["kimen sync"
     ""
     "Usage:"
-    "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
-    "  kimen sync preflight [--remote <name>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--stale-threshold <dur>] [--strict] [--allow-missing-vault] [--only <check>] [--skip <check>] [--json]"
-    "  kimen sync status [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
-    "  kimen sync conflicts [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
-    "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--lock-wait <dur>] [--break-stale-lock-after <dur>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--no-backup] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote|--rev <sha256>) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json]"
-    "  kimen sync restore --backup <path> [--no-backup] [--json]"
+    "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json|--edn]"
+    "  kimen sync preflight [--remote <name>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--stale-threshold <dur>] [--strict] [--allow-missing-vault] [--only <check>] [--skip <check>] [--json|--edn]"
+    "  kimen sync status [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json|--edn]"
+    "  kimen sync conflicts [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json|--edn]"
+    "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync push [--remote <name>] [--dry-run] [--force] [--lock-wait <dur>] [--break-stale-lock-after <dur>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--no-backup] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote|--rev <sha256>) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
+    "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json|--edn]"
+    "  kimen sync restore --backup <path> [--no-backup] [--json|--edn]"
     ""]))
 
 (def bundle-usage
@@ -149,10 +149,10 @@
    ["kimen bundle"
     ""
     "Usage:"
-    "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
-    "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
-    "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
-    "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
+    "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json|--edn]"
+    "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json|--edn]"
+    "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json|--edn]"
+    "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json|--edn]"
     ""]))
 
 (def map-usage
@@ -161,7 +161,7 @@
    ["kimen map"
     ""
     "Usage:"
-    "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
+    "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json|--edn]"
     ""]))
 
 (def init-usage
@@ -170,9 +170,9 @@
    ["kimen init"
     ""
     "Usage:"
-    "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
-    "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json]"
-    "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
+    "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json|--edn]"
+    "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json|--edn]"
+    "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json|--edn]"
     ""]))
 
 (def run-usage
@@ -181,7 +181,7 @@
    ["kimen run"
     ""
     "Usage:"
-    "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+    "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]"
     ""]))
 
 (def render-usage
@@ -190,7 +190,7 @@
    ["kimen render"
     ""
     "Usage:"
-    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
+    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]"
     ""]))
 
 (def envfile-usage
@@ -199,7 +199,7 @@
    ["kimen envfile"
     ""
     "Usage:"
-    "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
+    "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json|--edn]"
     ""]))
 
 (def plan-usage
@@ -208,7 +208,7 @@
    ["kimen plan"
     ""
     "Usage:"
-    "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]"
     ""]))
 
 (def doctor-usage
@@ -217,7 +217,7 @@
    ["kimen doctor"
     ""
     "Usage:"
-    "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
+    "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json|--edn]"
     ""]))
 
 (def project-usage
@@ -226,13 +226,13 @@
   ["kimen project"
     ""
     "Usage:"
-    "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
-    "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]"
+    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]"
+    "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]"
     ""]))
 
 (def ^:private help-topics
-  {"version" (str/join "\n" ["kimen version" "" "Usage:" "  kimen version [--json]" ""])
+  {"version" (str/join "\n" ["kimen version" "" "Usage:" "  kimen version [--json|--edn]" ""])
    "config" config-usage
    "vault" vault-usage
    "secret" secret-usage
@@ -5473,7 +5473,7 @@
   [ctx args]
   (let [args (vec args)]
     (if (help-arg? (first args))
-      (help-result "Usage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]\n")
+      (help-result "Usage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]\n")
       (let [[opts parse-error] (parse-secret-common-opts args)
             json? (:json? opts)]
         (cond
@@ -5481,7 +5481,7 @@
           (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
           (seq (:rest opts))
-          (secret-error-result json? (ex-info "unexpected argument\nUsage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+          (secret-error-result json? (ex-info "unexpected argument\nUsage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json|--edn]"
                                               {:reason reasons/reason-secret-failed}))
 
           :else
@@ -6199,17 +6199,17 @@
 
       (= "run" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]\n")
+        (help-result "Usage: kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]\n")
         (handle-run ctx (rest args)))
 
       (= "render" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]\n")
+        (help-result "Usage: kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]\n")
         (handle-render ctx (rest args)))
 
       (= "plan" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]\n")
+        (help-result "Usage: kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]\n")
         (handle-plan ctx (rest args)))
 
       :else

@@ -2,6 +2,7 @@
 (ns scripts.cli-integration
   (:require
    [babashka.process :as p]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [kimen.json :as json])
@@ -21,6 +22,10 @@
 (defn- parse-json
   [s]
   (json/read-str s))
+
+(defn- parse-edn
+  [s]
+  (edn/read-string (str s)))
 
 (defn- run-kimen
   [repo-root env-overrides argv & [stdin]]
@@ -142,6 +147,11 @@
         new-pass-cmd "printf integration-passphrase-2"
         _ (spit map-path "env API_KEY=api_key\nfile conf/api.txt=api_key\nenvpath API_KEY_PATH=conf/api.txt\n")]
     (expect-success-json! (run-kimen repo-root base-env ["version" "--json"]) "version")
+    (let [edn-res (run-kimen repo-root base-env ["version" "--edn"])
+          edn-payload (parse-edn (:out edn-res))]
+      (ensure! (zero? (:exit edn-res)) "version --edn failed" {:res edn-res})
+      (ensure! (= true (get edn-payload "ok")) "version --edn missing ok=true" {:payload edn-payload :res edn-res})
+      (ensure! (= "version" (get edn-payload "action")) "version --edn unexpected action" {:payload edn-payload :res edn-res}))
     (expect-success-json! (run-kimen repo-root base-env ["config" "path" "--json"]) "config_path")
     (let [completion-bash (run-kimen repo-root base-env ["completion" "bash"])
           completion-zsh (run-kimen repo-root base-env ["completion" "zsh"])

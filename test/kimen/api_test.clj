@@ -1,8 +1,10 @@
 (ns kimen.api-test
   (:require
+   [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.test :refer [deftest is]]
-   [kimen.api :as api]))
+   [kimen.api :as api]
+   [kimen.exit-code :as exit-code]))
 
 (deftest run-returns-cli-result
   (let [{:keys [exit-code stdout stderr]} (api/run ["version" "--json"])]
@@ -28,3 +30,42 @@
         err-out (str err)]
     (is (str/includes? out "\"action\":\"version\""))
     (is (str/includes? err-out "unknown command"))))
+
+(deftest edn-output-flag-produces-machine-edn
+  (let [{:keys [exit-code stdout stderr]} (api/run ["version" "--edn"])
+        payload (edn/read-string stdout)]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (= true (get payload "ok")))
+    (is (= "version" (get payload "action")))))
+
+(deftest edn-output-flag-converts-error-payload
+  (let [{:keys [exit-code stdout stderr]} (api/run ["map" "lint" "--edn"])
+        payload (edn/read-string stdout)]
+    (is (= exit-code/code-map-lint-failed exit-code))
+    (is (nil? stderr))
+    (is (= false (get payload "ok")))
+    (is (= "map_lint" (get payload "action")))
+    (is (= "invalid_input" (get (first (get payload "issues")) "code")))))
+
+(deftest edn-output-flag-does-not-consume-child-args
+  (let [{:keys [exit-code stdout stderr]}
+        (api/run ["run" "--dry-run" "--env" "API_KEY=const:shh" "--edn" "--" "echo" "--edn"])
+        payload (edn/read-string stdout)]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (= "plan" (get payload "action")))
+    (is (= ["echo" "--edn"] (vec (get payload "command"))))))
+
+(deftest json-and-edn-flags-conflict
+  (let [{:keys [exit-code stdout stderr]} (api/run ["version" "--json" "--edn"])]
+    (is (= 1 exit-code))
+    (is (nil? stdout))
+    (is (str/includes? stderr "cannot use both --json and --edn"))))
+
+(deftest leading-double-dash-still-supports-edn
+  (let [{:keys [exit-code stdout stderr]} (api/run ["--" "version" "--edn"])
+        payload (edn/read-string stdout)]
+    (is (= 0 exit-code))
+    (is (nil? stderr))
+    (is (= "version" (get payload "action")))))

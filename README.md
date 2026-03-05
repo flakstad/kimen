@@ -8,7 +8,7 @@ Kimen keeps secrets encrypted at rest in a local vault and only materializes the
 
 - No server required for runtime use.
 - Explicit projection at command time.
-- Script-friendly JSON output and typed exit codes.
+- Script-friendly JSON/EDN output and typed exit codes.
 - Team sync with encrypted bundle transport (`fs` and `git` remotes).
 
 ## Choose How You Run Kimen
@@ -25,6 +25,7 @@ Install launcher on your path:
 ```bash
 bb install
 kimen version --json
+kimen version --edn
 ```
 
 The launcher (`bin/kimen` and installed `kimen`) runs Kimen through Babashka.
