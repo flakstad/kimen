@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${KIMEN_BIN:-$ROOT_DIR/dist/kimen}"
+BIN="${KIMEN_BIN:-$ROOT_DIR/bin/kimen}"
 
 if [[ ! -x "$BIN" ]]; then
-  echo "error: kimen binary not found at $BIN (run: make build or set KIMEN_BIN)" >&2
+  echo "error: kimen binary not found at $BIN (run: bb run -- version or set KIMEN_BIN)" >&2
   exit 1
 fi
 

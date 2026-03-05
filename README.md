@@ -166,11 +166,12 @@ chmod +x .githooks/pre-commit
 Run the end-to-end sync/conflict/recovery harness:
 
 ```bash
-make go-sync-e2e
-make go-sync-e2e-git
+bb e2e-sync
+bb e2e-sync-git
 ```
 
-`make go-sync-e2e-all` runs both harnesses. `make go-release-check` runs full legacy Go validation.
+`bb e2e-sync-all` runs both harnesses.
+Legacy Go validation remains available during transition via `make go-release-check`.
 
 Set a vault location (optional) and initialize:
 
