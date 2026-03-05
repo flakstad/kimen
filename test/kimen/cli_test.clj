@@ -248,6 +248,31 @@
     (is (= 1 exit-code))
     (is (str/includes? stderr "unknown command"))))
 
+(deftest hierarchical-help-and-actionable-arg-errors
+  (testing "top-level help is concise and command-oriented"
+    (let [{:keys [exit-code stdout stderr]} (run-cli [] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "Commands:"))
+      (is (str/includes? stdout "kimen <command> [<subcommand>] [options]"))))
+
+  (testing "help topic and subcommand help"
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["help" "secret"] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "kimen secret"))
+      (is (str/includes? stdout "kimen secret get <name> --unsafe-stdout")))
+    (let [{:keys [exit-code stdout stderr]} (run-cli ["secret" "--help"] {})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "kimen secret"))))
+
+  (testing "missing required args explain what is expected"
+    (let [{:keys [exit-code stderr]} (run-cli ["secret" "get" "--unsafe-stdout"] {})]
+      (is (= 1 exit-code))
+      (is (str/includes? stderr "expected exactly one secret name"))
+      (is (str/includes? stderr "Usage: kimen secret get <name> --unsafe-stdout")))))
+
 (deftest config-path-and-vault-set-show-clear
   (let [cfg-path (.getPath (java.io.File/createTempFile "kimen-config" ".json"))]
     (.delete (java.io.File. cfg-path))

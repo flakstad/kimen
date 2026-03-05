@@ -28,60 +28,194 @@
 (def usage
   (str/join
    "\n"
-   ["kimen (clojure rewrite, early preview)"
+   ["kimen"
+    "Secret management, projection, and sync."
     ""
-    "usage:"
-    "  kimen version [--json]"
+    "Usage:"
+    "  kimen <command> [<subcommand>] [options]"
+    "  kimen help <command>"
+    ""
+    "Commands:"
+    "  version   Build and version metadata"
+    "  config    Show or edit local config"
+    "  vault     Initialize, inspect, and rekey vault files"
+    "  secret    Set, list, read, remove, or rename secrets"
+    "  remote    Manage sync remote definitions"
+    "  sync      Sync workflows (push/pull/status/conflicts/etc.)"
+    "  bundle    age key and bundle operations"
+    "  map       Mapping utilities (currently: lint)"
+    "  plan      Show projection plan/diff"
+    "  run       Run a command with projected env/files/stdin"
+    "  render    Render projected files"
+    "  envfile   Generate envfile output"
+    "  doctor    Validate config/vault/map/bundle/remote health"
+    "  init      Generate CI helper scripts"
+    "  project   Aliases for run/render/plan"
+    ""
+    "Use `kimen <command> --help` for subcommand usage."
+    ""]))
+
+(def config-usage
+  (str/join
+   "\n"
+   ["kimen config"
+    ""
+    "Usage:"
     "  kimen config path [--json]"
-    "  kimen config show [--pretty=false]"
+    "  kimen config show [--pretty=true|false]"
     "  kimen config vault set <vault-path> [--json]"
     "  kimen config vault show [--json]"
     "  kimen config vault clear [--json]"
     "  kimen config unlock set <prompt|env|stdin|exec> [-- <command> [args...]] [--json]"
     "  kimen config unlock show [--json]"
     "  kimen config unlock clear [--json]"
+    ""]))
+
+(def vault-usage
+  (str/join
+   "\n"
+   ["kimen vault"
+    ""
+    "Usage:"
     "  kimen vault init [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen vault info [--vault <path>] [--json]"
     "  kimen vault path [--vault <path>] [--json]"
     "  kimen vault rekey [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>|--old-passphrase-file <path>] [--new-passphrase-stdin|--new-passphrase-cmd <cmd>|--new-passphrase-file <path>|--new-passphrase-env <VAR>] [--dry-run] [--no-backup|--backup-dir <path>] [--json]"
-    "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--json]"
-    "  kimen secret list [--vault <path>] [--json]"
-    "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--json]"
-    "  kimen secret rm <name> [--vault <path>] [--json]"
-    "  kimen secret mv <old-name> <new-name> [--vault <path>] [--json]"
-    "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
-    "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
-    "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
-    "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
+    ""]))
+
+(def secret-usage
+  (str/join
+   "\n"
+   ["kimen secret"
+    ""
+    "Usage:"
+    "  kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    "  kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+    ""]))
+
+(def secret-set-usage-line
+  "Usage: kimen secret set <name> [--stdin|--value <text>] [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+
+(def secret-get-usage-line
+  "Usage: kimen secret get <name> --unsafe-stdout [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+
+(def secret-rm-usage-line
+  "Usage: kimen secret rm <name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+
+(def secret-mv-usage-line
+  "Usage: kimen secret mv <old-name> <new-name> [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]")
+
+(def remote-usage
+  (str/join
+   "\n"
+   ["kimen remote"
+    ""
+    "Usage:"
     "  kimen remote add <name> --path <path> [--type fs|git] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
     "  kimen remote get <name> [--json]"
     "  kimen remote set <name> [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--derive-recipient|--no-derive-recipient] [--json]"
     "  kimen remote list [--json]"
     "  kimen remote rm <name> [--json]"
+    ""]))
+
+(def sync-usage
+  (str/join
+   "\n"
+   ["kimen sync"
+    ""
+    "Usage:"
+    "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync init [name] [--remote <name>] [--type fs|git] [--path <path>] [--recipient <age1...>] [--identity <path>] [--branch <name>] [--bundle-path <path>] [--update] [--no-check] [--json]"
     "  kimen sync preflight [--remote <name>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--stale-threshold <dur>] [--strict] [--allow-missing-vault] [--only <check>] [--skip <check>] [--json]"
     "  kimen sync status [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
     "  kimen sync conflicts [--remote <name>] [--stale-threshold <dur>] [--strict] [--terse] [--json]"
+    "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync push [--remote <name>] [--dry-run] [--force] [--lock-wait <dur>] [--break-stale-lock-after <dur>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync pull [--remote <name>] [--dry-run] [--reconcile] [--no-backup] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync changes [--remote <name>] [--terse] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync resolve [--remote <name>] --take local|remote [--key <name>] [--key <name> ...] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
-    "  kimen sync [--remote <name>] [--dry-run] [--check] [--no-doctor] [--strict] [--terse] [--stale-threshold <dur>] [--profile <name>] [--bundle-in <path>] [--identity <path>] [--allow-missing-vault] [--force] [--reconcile] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync reset-baseline [--remote <name>] (--clear|--to-remote|--rev <sha256>) --yes [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
     "  kimen sync unlock [--remote <name>] [--if-older-than <dur>] --yes [--json]"
     "  kimen sync restore --backup <path> [--no-backup] [--json]"
-    "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
-    "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
+    ""]))
+
+(def bundle-usage
+  (str/join
+   "\n"
+   ["kimen bundle"
+    ""
+    "Usage:"
+    "  kimen bundle keygen --out <path> [--overwrite] [--print-recipient] [--json]"
+    "  kimen bundle recipient (--identity <path>|--identity-stdin) [--json]"
+    "  kimen bundle seal [--vault <path>] --out <path> --recipient <age1...> [--recipient <age1...> ...] [--json]"
+    "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json]"
+    ""]))
+
+(def map-usage
+  (str/join
+   "\n"
+   ["kimen map"
+    ""
+    "Usage:"
     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json]"
-    "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-    "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
-    "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
-    "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
-    "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
+    ""]))
+
+(def init-usage
+  (str/join
+   "\n"
+   ["kimen init"
+    ""
+    "Usage:"
     "  kimen init ci-pr-safety [--out <path>] [--force] [--profile <name>] [--command <cmd>] [--json]"
     "  kimen init ci-deploy [--out <path>] [--force] [--profile <name>] [--deploy-command <cmd>] [--json]"
     "  kimen init ci-sync-gate [--out <path>] [--force] [--remote-name <name>] [--remote-type git|fs] [--remote-path <path>] [--remote-branch <name>] [--remote-bundle-path <path>] [--local-bundle <path>] [--profile <name>] [--stale-threshold <dur>] [--json]"
+    ""]))
+
+(def run-usage
+  (str/join
+   "\n"
+   ["kimen run"
+    ""
+    "Usage:"
+    "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
+    ""]))
+
+(def render-usage
+  (str/join
+   "\n"
+   ["kimen render"
+    ""
+    "Usage:"
+    "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
+    ""]))
+
+(def envfile-usage
+  (str/join
+   "\n"
+   ["kimen envfile"
+    ""
+    "Usage:"
+    "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json]"
+    ""]))
+
+(def plan-usage
+  (str/join
+   "\n"
+   ["kimen plan"
+    ""
+    "Usage:"
+    "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
+    ""]))
+
+(def doctor-usage
+  (str/join
+   "\n"
+   ["kimen doctor"
+    ""
+    "Usage:"
+    "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json]"
     ""]))
 
 (def project-usage
@@ -89,11 +223,28 @@
    "\n"
    ["kimen project"
     ""
-    "usage:"
+    "Usage:"
     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]"
     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]"
     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]"
     ""]))
+
+(def ^:private help-topics
+  {"version" (str/join "\n" ["kimen version" "" "Usage:" "  kimen version [--json]" ""])
+   "config" config-usage
+   "vault" vault-usage
+   "secret" secret-usage
+   "remote" remote-usage
+   "sync" sync-usage
+   "bundle" bundle-usage
+   "map" map-usage
+   "plan" plan-usage
+   "run" run-usage
+   "render" render-usage
+   "envfile" envfile-usage
+   "doctor" doctor-usage
+   "init" init-usage
+   "project" project-usage})
 
 (def remote-name-re #"^[A-Za-z0-9_.-]+$")
 (def systemd-service-name-re #"^[A-Za-z0-9_.@-]+$")
@@ -136,6 +287,29 @@
   [exit-code message]
   (result {:exit-code exit-code
            :stderr (str message "\n")}))
+
+(def ^:private help-args #{"help" "--help" "-h"})
+
+(defn- help-arg?
+  [s]
+  (contains? help-args (str s)))
+
+(defn- help-result
+  [text]
+  (result {:exit-code 0
+           :stdout text}))
+
+(defn- error-with-help
+  [exit-code message help-text]
+  (result {:exit-code exit-code
+           :stderr (str message "\n\n" help-text)}))
+
+(declare help-topics)
+
+(defn- command-help
+  [topic]
+  (or (get help-topics (some-> topic str/trim))
+      usage))
 
 (defn- parse-flag-value
   [args flag]
@@ -2058,6 +2232,19 @@
       (result {:exit-code exit-code
                :stdout (str (map-lint/render-report-text report) "\n")}))))
 
+(defn- handle-map
+  [ctx args]
+  (let [args (vec args)]
+    (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result map-usage)
+
+      (= "lint" (first args))
+      (handle-map-lint ctx (rest args))
+
+      :else
+      (error-with-help 1 (str "unknown map command " (pr-str (first args))) map-usage))))
+
 (defn- handle-plan
   [ctx args]
   (let [[opts parse-error] (parse-plan-opts args)
@@ -2277,6 +2464,9 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result config-usage)
+
       (= ["path"] args) (config-path ctx [])
       (and (= "path" (first args))) (config-path ctx (rest args))
 
@@ -2298,7 +2488,7 @@
       (config-unlock-clear ctx (drop 2 args))
 
       :else
-      (error-text 1 "unknown config command"))))
+      (error-with-help 1 (str "unknown config command " (pr-str (first args))) config-usage))))
 
 (defn- remote-error-result
   [json? e]
@@ -2568,6 +2758,9 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result remote-usage)
+
       (= "add" (first args)) (handle-remote-add ctx (rest args))
       (= "get" (first args)) (handle-remote-get ctx (rest args))
       (= "set" (first args)) (handle-remote-set ctx (rest args))
@@ -2575,7 +2768,7 @@
       (or (= "rm" (first args))
           (= "remove" (first args))
           (= "delete" (first args))) (handle-remote-rm ctx (rest args))
-      :else (error-text 1 "unknown remote command"))))
+      :else (error-with-help 1 (str "unknown remote command " (pr-str (first args))) remote-usage))))
 
 (defn- sync-exit-code-for-reason
   [reason]
@@ -3844,7 +4037,7 @@
                                             (dissoc acc k)))
                                         baseline
                                         selected-keys)
-                  remaining (analyze-sync-changes baseline-resolved
+              remaining (analyze-sync-changes baseline-resolved
                                               (:hashes local-resolved)
                                               (:hashes remote-snap))
               _ (when-not (.exists (io/file vault-path))
@@ -4905,6 +5098,9 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (help-arg? (first args))
+      (help-result sync-usage)
+
       (or (empty? args)
           (str/starts-with? (first args) "-")) (handle-sync-auto ctx args)
       (= "init" (first args)) (handle-sync-init ctx (rest args))
@@ -4918,7 +5114,7 @@
       (= "reset-baseline" (first args)) (handle-sync-reset-baseline ctx (rest args))
       (= "unlock" (first args)) (handle-sync-unlock ctx (rest args))
       (= "restore" (first args)) (handle-sync-restore ctx (rest args))
-      :else (error-text 1 "unknown sync command"))))
+      :else (error-with-help 1 (str "unknown sync command " (pr-str (first args))) sync-usage))))
 
 (defn- parse-cmd-string
   [s]
@@ -5223,11 +5419,14 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result vault-usage)
+
       (= "init" (first args)) (handle-vault-init ctx (rest args))
       (= "info" (first args)) (handle-vault-info ctx (rest args))
       (= "path" (first args)) (handle-vault-path ctx (rest args))
       (= "rekey" (first args)) (handle-vault-rekey ctx (rest args))
-      :else (error-text 1 "unknown vault command"))))
+      :else (error-with-help 1 (str "unknown vault command " (pr-str (first args))) vault-usage))))
 
 (defn- secret-vault-path
   [ctx opts]
@@ -5239,142 +5438,165 @@
 
 (defn- handle-secret-set
   [ctx args]
-  (let [[opts parse-error] (parse-secret-set-opts args)
-        json? (:json? opts)]
-    (cond
-      parse-error
-      (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
+  (let [args (vec args)]
+    (if (help-arg? (first args))
+      (help-result (str secret-set-usage-line "\n"))
+      (let [[opts parse-error] (parse-secret-set-opts args)
+            json? (:json? opts)]
+        (cond
+          parse-error
+          (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
-      (str/blank? (:name opts))
-      (secret-error-result json? (ex-info "empty secret name" {:reason reasons/reason-empty-secret-name}))
+          (str/blank? (:name opts))
+          (secret-error-result json? (ex-info (str "missing required argument <name>\n" secret-set-usage-line)
+                                              {:reason reasons/reason-empty-secret-name}))
 
-      :else
-      (try
-        (let [path (secret-vault-path ctx opts)
-              pp (resolve-passphrase! ctx opts)
-              value (read-secret-value ctx opts)
-              {:keys [name]} (vault-v2/set-secret! path pp (:name opts) value)]
-          (if json?
-            (secret-json-success {:action "set"
-                                  :name name
-                                  :type (:type opts)})
-            (result {:exit-code 0
-                     :stdout "ok\n"})))
-        (catch Exception e
-          (secret-error-result json? e))))))
+          :else
+          (try
+            (let [path (secret-vault-path ctx opts)
+                  pp (resolve-passphrase! ctx opts)
+                  value (read-secret-value ctx opts)
+                  {:keys [name]} (vault-v2/set-secret! path pp (:name opts) value)]
+              (if json?
+                (secret-json-success {:action "set"
+                                      :name name
+                                      :type (:type opts)})
+                (result {:exit-code 0
+                         :stdout "ok\n"})))
+            (catch Exception e
+              (secret-error-result json? e))))))))
 
 (defn- handle-secret-list
   [ctx args]
-  (let [[opts parse-error] (parse-secret-common-opts args)
-        json? (:json? opts)]
-    (cond
-      parse-error
-      (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
+  (let [args (vec args)]
+    (if (help-arg? (first args))
+      (help-result "Usage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]\n")
+      (let [[opts parse-error] (parse-secret-common-opts args)
+            json? (:json? opts)]
+        (cond
+          parse-error
+          (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
-      (seq (:rest opts))
-      (secret-error-result json? (ex-info "unexpected argument" {:reason reasons/reason-secret-failed}))
+          (seq (:rest opts))
+          (secret-error-result json? (ex-info "unexpected argument\nUsage: kimen secret list [--vault <path>] [--passphrase-stdin|--passphrase-cmd <cmd>] [--json]"
+                                              {:reason reasons/reason-secret-failed}))
 
-      :else
-      (try
-        (let [path (secret-vault-path ctx opts)
-              pp (resolve-passphrase! ctx opts)
-              names (vault-v2/list-secret-names path pp)]
-          (if json?
-            (secret-json-success {:action "list"
-                                  :names names})
-            (result {:exit-code 0
-                     :stdout (str (when (seq names) (str/join "\n" names)) (when (seq names) "\n"))})))
-        (catch Exception e
-          (secret-error-result json? e))))))
+          :else
+          (try
+            (let [path (secret-vault-path ctx opts)
+                  pp (resolve-passphrase! ctx opts)
+                  names (vault-v2/list-secret-names path pp)]
+              (if json?
+                (secret-json-success {:action "list"
+                                      :names names})
+                (result {:exit-code 0
+                         :stdout (str (when (seq names) (str/join "\n" names)) (when (seq names) "\n"))})))
+            (catch Exception e
+              (secret-error-result json? e))))))))
 
 (defn- handle-secret-get
   [ctx args]
-  (let [[opts parse-error] (parse-secret-common-opts args)
-        json? (:json? opts)
-        names (:rest opts)]
-    (cond
-      parse-error
-      (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
+  (let [args (vec args)]
+    (if (help-arg? (first args))
+      (help-result (str secret-get-usage-line "\n"))
+      (let [[opts parse-error] (parse-secret-common-opts args)
+            json? (:json? opts)
+            names (:rest opts)]
+        (cond
+          parse-error
+          (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
-      (not= 1 (count names))
-      (secret-error-result json? (ex-info "expected secret name" {:reason reasons/reason-empty-secret-name}))
+          (not= 1 (count names))
+          (secret-error-result json? (ex-info (str "expected exactly one secret name\n" secret-get-usage-line)
+                                              {:reason reasons/reason-empty-secret-name}))
 
-      (not (:unsafe-stdout? opts))
-      (secret-error-result json? (ex-info "refusing to print secrets; use --unsafe-stdout if you really want this"
-                                          {:reason reasons/reason-unsafe-stdout-required}))
+          (not (:unsafe-stdout? opts))
+          (secret-error-result json? (ex-info (str "refusing to print secrets; use --unsafe-stdout if you really want this\n" secret-get-usage-line)
+                                              {:reason reasons/reason-unsafe-stdout-required}))
 
-      :else
-      (try
-        (let [path (secret-vault-path ctx opts)
-              pp (resolve-passphrase! ctx opts)
-              sec (vault-v2/get-secret path pp (first names))]
-          (if json?
-            (let [value-b64 (.encodeToString (Base64/getEncoder) (.getBytes (:value sec) "UTF-8"))]
-              (secret-json-success {:action "get"
-                                    :name (:name sec)
-                                    :encoding "base64"
-                                    :value_b64 value-b64}))
-            (result {:exit-code 0
-                     :stdout (:value sec)})))
-        (catch Exception e
-          (secret-error-result json? e))))))
+          :else
+          (try
+            (let [path (secret-vault-path ctx opts)
+                  pp (resolve-passphrase! ctx opts)
+                  sec (vault-v2/get-secret path pp (first names))]
+              (if json?
+                (let [value-b64 (.encodeToString (Base64/getEncoder) (.getBytes (:value sec) "UTF-8"))]
+                  (secret-json-success {:action "get"
+                                        :name (:name sec)
+                                        :encoding "base64"
+                                        :value_b64 value-b64}))
+                (result {:exit-code 0
+                         :stdout (:value sec)})))
+            (catch Exception e
+              (secret-error-result json? e))))))))
 
 (defn- handle-secret-rm
   [ctx args]
-  (let [[opts parse-error] (parse-secret-common-opts args)
-        json? (:json? opts)
-        names (:rest opts)]
-    (cond
-      parse-error
-      (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
+  (let [args (vec args)]
+    (if (help-arg? (first args))
+      (help-result (str secret-rm-usage-line "\n"))
+      (let [[opts parse-error] (parse-secret-common-opts args)
+            json? (:json? opts)
+            names (:rest opts)]
+        (cond
+          parse-error
+          (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
-      (not= 1 (count names))
-      (secret-error-result json? (ex-info "expected secret name" {:reason reasons/reason-empty-secret-name}))
+          (not= 1 (count names))
+          (secret-error-result json? (ex-info (str "expected exactly one secret name\n" secret-rm-usage-line)
+                                              {:reason reasons/reason-empty-secret-name}))
 
-      :else
-      (try
-        (let [path (secret-vault-path ctx opts)
-              pp (resolve-passphrase! ctx opts)
-              {:keys [name]} (vault-v2/delete-secret! path pp (first names))]
-          (if json?
-            (secret-json-success {:action "rm" :name name})
-            (result {:exit-code 0 :stdout "ok\n"})))
-        (catch Exception e
-          (secret-error-result json? e))))))
+          :else
+          (try
+            (let [path (secret-vault-path ctx opts)
+                  pp (resolve-passphrase! ctx opts)
+                  {:keys [name]} (vault-v2/delete-secret! path pp (first names))]
+              (if json?
+                (secret-json-success {:action "rm" :name name})
+                (result {:exit-code 0 :stdout "ok\n"})))
+            (catch Exception e
+              (secret-error-result json? e))))))))
 
 (defn- handle-secret-mv
   [ctx args]
-  (let [[opts parse-error] (parse-secret-common-opts args)
-        json? (:json? opts)
-        names (:rest opts)]
-    (cond
-      parse-error
-      (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
+  (let [args (vec args)]
+    (if (help-arg? (first args))
+      (help-result (str secret-mv-usage-line "\n"))
+      (let [[opts parse-error] (parse-secret-common-opts args)
+            json? (:json? opts)
+            names (:rest opts)]
+        (cond
+          parse-error
+          (secret-error-result json? (ex-info parse-error {:reason reasons/reason-secret-failed}))
 
-      (not= 2 (count names))
-      (secret-error-result json? (ex-info "expected old and new secret names" {:reason reasons/reason-empty-secret-name}))
+          (not= 2 (count names))
+          (secret-error-result json? (ex-info (str "expected <old-name> and <new-name>\n" secret-mv-usage-line)
+                                              {:reason reasons/reason-empty-secret-name}))
 
-      :else
-      (try
-        (let [path (secret-vault-path ctx opts)
-              pp (resolve-passphrase! ctx opts)
-              {:keys [from to]} (vault-v2/rename-secret! path pp (first names) (second names))]
-          (if json?
-            (secret-json-success {:action "mv" :from from :to to})
-            (result {:exit-code 0 :stdout "ok\n"})))
-        (catch Exception e
-          (secret-error-result json? e))))))
+          :else
+          (try
+            (let [path (secret-vault-path ctx opts)
+                  pp (resolve-passphrase! ctx opts)
+                  {:keys [from to]} (vault-v2/rename-secret! path pp (first names) (second names))]
+              (if json?
+                (secret-json-success {:action "mv" :from from :to to})
+                (result {:exit-code 0 :stdout "ok\n"})))
+            (catch Exception e
+              (secret-error-result json? e))))))))
 
 (defn- handle-secret
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result secret-usage)
+
       (= "set" (first args)) (handle-secret-set ctx (rest args))
       (= "list" (first args)) (handle-secret-list ctx (rest args))
       (= "get" (first args)) (handle-secret-get ctx (rest args))
       (or (= "rm" (first args)) (= "delete" (first args))) (handle-secret-rm ctx (rest args))
       (= "mv" (first args)) (handle-secret-mv ctx (rest args))
-      :else (error-text 1 "unknown secret command"))))
+      :else (error-with-help 1 (str "unknown secret command " (pr-str (first args))) secret-usage))))
 
 (defn- projection-error-code
   [reason]
@@ -5838,11 +6060,14 @@
   [ctx args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result bundle-usage)
+
       (= "keygen" (first args)) (handle-bundle-keygen (rest args))
       (= "recipient" (first args)) (handle-bundle-recipient ctx (rest args))
       (= "seal" (first args)) (handle-bundle-seal ctx (rest args))
       (= "open" (first args)) (handle-bundle-open ctx (rest args))
-      :else (error-text 1 "unknown bundle command"))))
+      :else (error-with-help 1 (str "unknown bundle command " (pr-str (first args))) bundle-usage))))
 
 (defn- doctor-error-result
   [json? e]
@@ -5942,34 +6167,41 @@
   [args]
   (let [args (vec args)]
     (cond
+      (or (empty? args) (help-arg? (first args)))
+      (help-result init-usage)
+
       (= "ci-pr-safety" (first args)) (handle-init-ci-pr-safety (rest args))
       (= "ci-deploy" (first args)) (handle-init-ci-deploy (rest args))
       (= "ci-sync-gate" (first args)) (handle-init-ci-sync-gate (rest args))
-      :else (error-text 1 "unknown init command"))))
+      :else (error-with-help 1 (str "unknown init command " (pr-str (first args))) init-usage))))
 
 (defn- handle-project
   [ctx args]
   (let [args (vec args)]
     (cond
       (empty? args)
-      (result {:exit-code 0
-               :stdout project-usage})
+      (help-result project-usage)
 
-      (some #{"help" "--help" "-h"} [(first args)])
-      (result {:exit-code 0
-               :stdout project-usage})
+      (help-arg? (first args))
+      (help-result project-usage)
 
       (= "run" (first args))
-      (handle-run ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result "Usage: kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json] [--dry-run] [-- <command> [args...]]\n")
+        (handle-run ctx (rest args)))
 
       (= "render" (first args))
-      (handle-render ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result "Usage: kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json]\n")
+        (handle-render ctx (rest args)))
 
       (= "plan" (first args))
-      (handle-plan ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result "Usage: kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json] [-- <command> [args...]]\n")
+        (handle-plan ctx (rest args)))
 
       :else
-      (error-text 1 "unknown project command"))))
+      (error-with-help 1 (str "unknown project command " (pr-str (first args))) project-usage))))
 
 (defn run
   [ctx argv]
@@ -5979,15 +6211,19 @@
                raw-args)]
     (cond
       (empty? args)
-      (result {:exit-code 0
-               :stdout usage})
+      (help-result usage)
 
-      (some #{(first args)} ["help" "--help" "-h"])
-      (result {:exit-code 0
-               :stdout usage})
+      (and (help-arg? (first args))
+           (empty? (rest args)))
+      (help-result usage)
+
+      (help-arg? (first args))
+      (help-result (command-help (first (rest args))))
 
       (= "version" (first args))
-      (handle-version (rest args))
+      (if (help-arg? (second args))
+        (help-result (command-help "version"))
+        (handle-version (rest args)))
 
       (= "config" (first args))
       (handle-config ctx (rest args))
@@ -5999,19 +6235,27 @@
       (handle-secret ctx (rest args))
 
       (= "run" (first args))
-      (handle-run ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result run-usage)
+        (handle-run ctx (rest args)))
 
       (= "render" (first args))
-      (handle-render ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result render-usage)
+        (handle-render ctx (rest args)))
 
       (= "envfile" (first args))
-      (handle-envfile ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result envfile-usage)
+        (handle-envfile ctx (rest args)))
 
       (= "bundle" (first args))
       (handle-bundle ctx (rest args))
 
       (= "doctor" (first args))
-      (handle-doctor ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result doctor-usage)
+        (handle-doctor ctx (rest args)))
 
       (= "init" (first args))
       (handle-init (rest args))
@@ -6022,15 +6266,16 @@
       (= "sync" (first args))
       (handle-sync ctx (rest args))
 
-      (and (= "map" (first args)) (= "lint" (second args)))
-      (handle-map-lint ctx (drop 2 args))
+      (= "map" (first args))
+      (handle-map ctx (rest args))
 
       (= "plan" (first args))
-      (handle-plan ctx (rest args))
+      (if (help-arg? (second args))
+        (help-result plan-usage)
+        (handle-plan ctx (rest args)))
 
       (= "project" (first args))
       (handle-project ctx (rest args))
 
       :else
-      (result {:exit-code 1
-               :stderr (str "unknown command\n\n" usage)}))))
+      (error-with-help 1 (str "unknown command " (pr-str (first args))) usage))))
