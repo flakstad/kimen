@@ -14,12 +14,13 @@
 
 (defn- mock-exec
   [responses calls]
-  (fn [{:keys [bin args]}]
-    (swap! calls conj [bin args])
-    (or (get responses [bin args])
+  (fn [{:keys [bin args stdin]}]
+    (swap! calls conj {:bin bin :args args :stdin stdin})
+    (or (get responses [bin args stdin])
+        (get responses [bin args])
         {:exit 1
          :out ""
-         :err (str "unexpected command: " (pr-str [bin args]))})))
+         :err (str "unexpected command: " (pr-str [bin args stdin]))})))
 
 (defn- list-args
   [vault pass-cmd]
@@ -45,10 +46,10 @@
    "--json"])
 
 (defn- set-args
-  [name value vault pass-cmd]
+  [name vault pass-cmd]
   ["secret" "set"
    name
-   "--value" value
+   "--stdin"
    "--vault" vault
    "--passphrase-cmd" pass-cmd
    "--json"])
@@ -141,9 +142,9 @@
                    ["go-kimen" (get-args "token" "/tmp/source.db" "printf old")]
                    (response {"action" "get"
                               "value_b64" "dG9rZW4="})
-                   ["bin/kimen" (set-args "api_key" "secret" target-vault "printf new")]
+                   ["bin/kimen" (set-args "api_key" target-vault "printf new") "secret"]
                    (response {"action" "set"})
-                   ["bin/kimen" (set-args "token" "token" target-vault "printf new")]
+                   ["bin/kimen" (set-args "token" target-vault "printf new") "token"]
                    (response {"action" "set"})}
         payload (migrate/migrate! opts (mock-exec responses calls))]
     (is (= true (:ok payload)))
@@ -152,6 +153,29 @@
     (is (= false (:dry_run payload)))
     (is (= true (:target_initialized payload)))
     (is (= 6 (count @calls)))))
+
+(deftest migrate-preserves-empty-secret-values
+  (let [opts {:source-bin "go-kimen"
+              :source-vault "/tmp/source.db"
+              :source-passphrase-cmd "printf old"
+              :target-bin "bin/kimen"
+              :target-vault "/tmp/target.db"
+              :target-passphrase-cmd "printf new"
+              :init-target? false
+              :dry-run? false}
+        calls (atom [])
+        responses {["go-kimen" (list-args "/tmp/source.db" "printf old")]
+                   (response {"action" "list"
+                              "names" ["empty_secret"]})
+                   ["go-kimen" (get-args "empty_secret" "/tmp/source.db" "printf old")]
+                   (response {"action" "get"
+                              "value_b64" ""})
+                   ["bin/kimen" (set-args "empty_secret" "/tmp/target.db" "printf new") ""]
+                   (response {"action" "set"})}
+        payload (migrate/migrate! opts (mock-exec responses calls))]
+    (is (= true (:ok payload)))
+    (is (= 1 (:count payload)))
+    (is (= ["empty_secret"] (:names payload)))))
 
 (deftest migrate-propagates-command-failures
   (let [opts {:source-bin "go-kimen"

@@ -2923,11 +2923,17 @@
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"action\":\"set\"")))
 
+    (let [{:keys [exit-code stdout]} (run-cli ["secret" "set" "empty_value" "--value" "" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"set\"")))
+
     (let [{:keys [exit-code stdout]} (run-cli ["secret" "list" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                                               {:config-path cfg-path})]
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"action\":\"list\""))
-      (is (str/includes? stdout "\"names\":[\"api_key\"]")))
+      (is (str/includes? stdout "\"api_key\""))
+      (is (str/includes? stdout "\"empty_value\"")))
 
     (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "api_key" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                                               {:config-path cfg-path})]
@@ -2936,12 +2942,23 @@
       (is (str/includes? stdout "\"encoding\":\"base64\""))
       (is (str/includes? stdout "\"value_b64\":\"c2ho\"")))
 
+    (let [{:keys [exit-code stdout]} (run-cli ["secret" "get" "empty_value" "--unsafe-stdout" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"get\""))
+      (is (str/includes? stdout "\"value_b64\":\"\"")))
+
     (let [{:keys [exit-code stdout]} (run-cli ["secret" "mv" "api_key" "api_key2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                                               {:config-path cfg-path})]
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"action\":\"mv\"")))
 
     (let [{:keys [exit-code stdout]} (run-cli ["secret" "rm" "api_key2" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+                                              {:config-path cfg-path})]
+      (is (= 0 exit-code))
+      (is (str/includes? stdout "\"action\":\"rm\"")))
+
+    (let [{:keys [exit-code stdout]} (run-cli ["secret" "rm" "empty_value" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
                                               {:config-path cfg-path})]
       (is (= 0 exit-code))
       (is (str/includes? stdout "\"action\":\"rm\"")))

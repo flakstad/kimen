@@ -159,7 +159,7 @@
                   (str "#!/usr/bin/env bash\n"
                        "set -euo pipefail\n"
                        "if [[ \"$1\" == \"secret\" && \"$2\" == \"list\" ]]; then\n"
-                       "  echo '{\"ok\":true,\"action\":\"list\",\"exit_code\":0,\"names\":[\"legacy_api\",\"legacy_token\"]}'\n"
+                       "  echo '{\"ok\":true,\"action\":\"list\",\"exit_code\":0,\"names\":[\"legacy_api\",\"legacy_token\",\"legacy_empty\"]}'\n"
                        "  exit 0\n"
                        "fi\n"
                        "if [[ \"$1\" == \"secret\" && \"$2\" == \"get\" && \"$3\" == \"legacy_api\" ]]; then\n"
@@ -168,6 +168,10 @@
                        "fi\n"
                        "if [[ \"$1\" == \"secret\" && \"$2\" == \"get\" && \"$3\" == \"legacy_token\" ]]; then\n"
                        "  echo '{\"ok\":true,\"action\":\"get\",\"exit_code\":0,\"value_b64\":\"bGVnYWN5LXRva2Vu\"}'\n"
+                       "  exit 0\n"
+                       "fi\n"
+                       "if [[ \"$1\" == \"secret\" && \"$2\" == \"get\" && \"$3\" == \"legacy_empty\" ]]; then\n"
+                       "  echo '{\"ok\":true,\"action\":\"get\",\"exit_code\":0,\"value_b64\":\"\"}'\n"
                        "  exit 0\n"
                        "fi\n"
                        "echo \"unsupported legacy shim command\" >&2\n"
@@ -226,15 +230,19 @@
                                 "list")
           migrated-token (expect-success-json!
                           (run-kimen repo-root base-env ["secret" "get" "legacy_token" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
+                          "get")
+          migrated-empty (expect-success-json!
+                          (run-kimen repo-root base-env ["secret" "get" "legacy_empty" "--unsafe-stdout" "--vault" migrated-vault-path "--passphrase-cmd" pass-cmd "--json"])
                           "get")]
       (ensure! (= true (get migrate-dry-run "dry_run")) "expected dry_run=true from migration dry-run payload" {:migrate-dry-run migrate-dry-run})
       (ensure! (false? (.exists (io/file dry-run-target-vault-path))) "migration dry-run should not create target vault" {:dry-run-target-vault-path dry-run-target-vault-path})
       (ensure! (zero? (:exit migrate-script-res)) "migration shell script failed" {:migrate-script-res migrate-script-res})
-      (ensure! (= 2 (get migrate-result "count")) "expected two migrated secrets" {:migrate-result migrate-result})
-      (ensure! (= ["legacy_api" "legacy_token"] (get migrated-list "names")) "unexpected migrated secret names" {:migrated-list migrated-list})
-      (ensure! (= ["legacy_api" "legacy_token"] (get migrated-script-list "names")) "unexpected migrated script secret names" {:migrated-script-list migrated-script-list :res migrate-script-res})
+      (ensure! (= 3 (get migrate-result "count")) "expected three migrated secrets" {:migrate-result migrate-result})
+      (ensure! (= ["legacy_api" "legacy_empty" "legacy_token"] (get migrated-list "names")) "unexpected migrated secret names" {:migrated-list migrated-list})
+      (ensure! (= ["legacy_api" "legacy_empty" "legacy_token"] (get migrated-script-list "names")) "unexpected migrated script secret names" {:migrated-script-list migrated-script-list :res migrate-script-res})
       (ensure! (= "bGVnYWN5LWFwaQ==" (get migrated-api "value_b64")) "unexpected migrated legacy_api value" {:migrated-api migrated-api})
-      (ensure! (= "bGVnYWN5LXRva2Vu" (get migrated-token "value_b64")) "unexpected migrated legacy_token value" {:migrated-token migrated-token}))
+      (ensure! (= "bGVnYWN5LXRva2Vu" (get migrated-token "value_b64")) "unexpected migrated legacy_token value" {:migrated-token migrated-token})
+      (ensure! (= "" (get migrated-empty "value_b64")) "unexpected migrated legacy_empty value" {:migrated-empty migrated-empty}))
 
     (expect-success-json! (run-kimen repo-root base-env ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "set")
     (expect-success-json! (run-kimen repo-root base-env ["secret" "list" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]) "list")

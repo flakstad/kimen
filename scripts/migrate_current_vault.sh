@@ -75,9 +75,7 @@ json_count_names() {
 
 is_clj_v2_vault() {
   local path="$1"
-  local probe
-  probe="$(head -c 4096 "$path" 2>/dev/null | tr -d '[:space:]')"
-  [[ "$probe" == *'"format_version":"kimen-v2"'* ]]
+  LC_ALL=C head -c 4096 "$path" 2>/dev/null | LC_ALL=C grep -a -q '"format_version":"kimen-v2"'
 }
 
 derive_default_target_vault() {

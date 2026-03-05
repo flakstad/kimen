@@ -2018,16 +2018,10 @@
     (throw (ex-info "provide either --stdin or --value, not both" {:reason reasons/reason-secret-failed}))
 
     stdin?
-    (let [v (read-secret-value-from-stdin ctx)]
-      (when (str/blank? v)
-        (throw (ex-info "empty secret value" {:reason reasons/reason-empty-secret-value})))
-      v)
+    (read-secret-value-from-stdin ctx)
 
     (some? value)
-    (let [v (str value)]
-      (when (str/blank? v)
-        (throw (ex-info "empty secret value" {:reason reasons/reason-empty-secret-value})))
-      v)
+    (str value)
 
     :else
     (if-let [console (System/console)]

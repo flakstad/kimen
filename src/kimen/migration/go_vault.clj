@@ -124,15 +124,17 @@
   (str/join " " (map pr-str (into [bin] args))))
 
 (defn- run-command!
-  [exec-fn bin args]
-  (let [{:keys [exit out err]} (exec-fn {:bin bin :args args})]
-    (when-not (zero? exit)
-      (throw (ex-info (format "command failed: %s" (command-display bin args))
-                      {:exit exit
-                       :stdout out
-                       :stderr err
-                       :command [bin args]})))
-    out))
+  ([exec-fn bin args]
+   (run-command! exec-fn bin args nil))
+  ([exec-fn bin args stdin]
+   (let [{:keys [exit out err]} (exec-fn {:bin bin :args args :stdin stdin})]
+     (when-not (zero? exit)
+       (throw (ex-info (format "command failed: %s" (command-display bin args))
+                       {:exit exit
+                        :stdout out
+                        :stderr err
+                        :command [bin args]})))
+     out)))
 
 (defn- run-json-command!
   [exec-fn bin args]
@@ -194,10 +196,11 @@
                            target-bin
                            ["secret" "set"
                             name
-                            "--value" value
+                            "--stdin"
                             "--vault" target-vault
                             "--passphrase-cmd" target-passphrase-cmd
-                            "--json"]))))
+                            "--json"]
+                           value))))
        {:ok true
         :action "migrate_go_vault"
         :exit_code 0

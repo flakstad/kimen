@@ -356,8 +356,6 @@
     (when (nil? value)
       (fail! reasons/reason-missing-secret-value "no secret value provided"))
     (let [value (str value)]
-      (when (str/blank? value)
-        (fail! reasons/reason-empty-secret-value "empty secret value"))
       (let [{:keys [data] :as opened} (open-vault path passphrase)
             now (now-iso)
             old (get-in data ["secrets" name])
