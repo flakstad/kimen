@@ -137,6 +137,37 @@
     (is (= "git" (:type remote-upsert-opts)))
     (is (= "vault.age" (:bundle-path remote-upsert-opts)))))
 
+(deftest parse-sync-cases
+  (let [[init-opts init-err]
+        (parse/parse-sync-init-opts ["--json" "team" "--type" "git" "--path" "git@example/repo.git"])
+        [status-opts status-err]
+        (parse/parse-sync-status-opts ["--json" "--stale-threshold" "30s" "--remote" "team"])
+        [transfer-opts transfer-err]
+        (parse/parse-sync-transfer-opts ["--json" "--dry-run" "--lock-wait" "2s" "--remote" "team"])
+        [auto-opts auto-err]
+        (parse/parse-sync-auto-opts ["--json" "--strict" "--profile" "prod" "--remote" "team"])
+        [reset-opts reset-err]
+        (parse/parse-sync-reset-baseline-opts ["--json" "--remote" "team" "--to-remote" "--yes"])
+        [unlock-opts unlock-err]
+        (parse/parse-sync-unlock-opts ["--json" "--if-older-than" "90s" "--yes" "--remote" "team"])]
+    (is (nil? init-err))
+    (is (= "team" (:remote init-opts)))
+    (is (= "git" (:type init-opts)))
+    (is (nil? status-err))
+    (is (= 30000 (:stale-threshold-ms status-opts)))
+    (is (nil? transfer-err))
+    (is (= true (:dry-run? transfer-opts)))
+    (is (= 2000 (:lock-wait-ms transfer-opts)))
+    (is (nil? auto-err))
+    (is (= "prod" (:profile auto-opts)))
+    (is (= true (:strict? auto-opts)))
+    (is (nil? reset-err))
+    (is (= true (:to-remote? reset-opts)))
+    (is (= true (:yes? reset-opts)))
+    (is (nil? unlock-err))
+    (is (= true (:yes? unlock-opts)))
+    (is (= 90000 (:if-older-than-ms unlock-opts)))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
