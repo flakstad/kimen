@@ -143,13 +143,16 @@
       (throw (ex-info (format "invalid profile name %s (allowed: letters, digits, ., _, -)" (pr-str name))
                       {:reason "invalid_profile_name"})))
     (let [filename (str name ".kmap")
+          xdg-config-home (some-> (System/getenv "XDG_CONFIG_HOME") str/trim not-empty)
+          user-config-home (some-> (System/getProperty "user.home") str/trim not-empty (str "/.config"))
           candidates (->> [(some-> (System/getenv env-profile-dir) str/trim not-empty)
                            (str (io/file ".kimen/profiles"))
-                           (let [cfg-home (or (some-> (System/getenv "XDG_CONFIG_HOME") str/trim not-empty)
-                                              (some-> (System/getProperty "user.home") str/trim not-empty (str "/.config")))]
-                             (when cfg-home
-                               (str (io/file cfg-home "kimen/profiles"))))]
+                           (when xdg-config-home
+                             (str (io/file xdg-config-home "kimen/profiles")))
+                           (when user-config-home
+                             (str (io/file user-config-home "kimen/profiles")))]
                           (remove nil?)
+                          distinct
                           (map #(str (io/file % filename)))
                           vec)
           hit (some (fn [p]
