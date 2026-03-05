@@ -6,6 +6,7 @@
 (def test-namespaces
   '[kimen.api-test
     kimen.bundle-test
+    kimen.cli-helpers-test
     kimen.cli-test
     kimen.json-test
     kimen.mapfile-test
