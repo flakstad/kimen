@@ -82,6 +82,7 @@ In practice, most projections read bytes from the local vault by secret name. Ki
 - Preflight checks: `kimen doctor` (human/JSON, strict mode)
 - Build metadata: `kimen version` (`--json` supported)
 - Safe planning: `kimen plan` (no secret values)
+- Programmatic embedding via `kimen.api` (`run`/`run!`/`main!`)
 - CI scaffolding: `kimen init ci-pr-safety|ci-deploy|ci-sync-gate` (generate workflow starters)
 - CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
 - Local remote sync: `kimen remote add/get/set/list/rm` + orchestration/default sync (`kimen sync`) + explicit sync subcommands (`init/preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`) for `fs` and `git` remotes (push lock files apply to shared fs remotes)
@@ -115,6 +116,13 @@ Build and install the Clojure launcher from source:
 
 ```bash
 bb install
+```
+
+Use Kimen as a library in another Clojure process:
+
+```clj
+(require '[kimen.api :as kimen])
+(kimen/run ["version" "--json"])   ;; => {:exit-code 0, :stdout ..., :stderr nil}
 ```
 
 Build a JAR artifact:
@@ -186,6 +194,12 @@ bb e2e-sync-git
 
 `bb e2e-sync-all` runs both harnesses.
 Legacy Go validation remains available during transition via `make go-release-check`.
+
+Validate all supported execution modes (bb, JVM, jar, native, library API):
+
+```bash
+bb smoke-modes
+```
 
 Set a vault location (optional) and initialize:
 
