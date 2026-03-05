@@ -714,3 +714,245 @@
 
           :else
           [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-bundle-keygen-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :overwrite? false
+               :print-recipient? false
+               :out-path nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--overwrite")
+          (recur (rest args) (assoc opts :overwrite? true))
+
+          (= a "--print-recipient")
+          (recur (rest args) (assoc opts :print-recipient? true))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-path v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-bundle-recipient-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :identity-file nil
+               :identity-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--identity-stdin")
+          (recur (rest args) (assoc opts :identity-stdin? true))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity-file v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-bundle-seal-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :vault-path nil
+               :out-path nil
+               :recipients []}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (or (= a "--vault") (str/starts-with? a "--vault="))
+          (let [[v next-args err] (parse-flag-value args "--vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :vault-path v))))
+
+          (or (= a "--out") (str/starts-with? a "--out="))
+          (let [[v next-args err] (parse-flag-value args "--out")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-path v))))
+
+          (or (= a "--recipient") (str/starts-with? a "--recipient="))
+          (let [[v next-args err] (parse-flag-value args "--recipient")]
+            (if err
+              [opts err]
+              (recur next-args (update opts :recipients conj v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-bundle-open-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :overwrite? false
+               :in-path nil
+               :out-vault nil
+               :identity-file nil
+               :identity-stdin? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--overwrite")
+          (recur (rest args) (assoc opts :overwrite? true))
+
+          (= a "--identity-stdin")
+          (recur (rest args) (assoc opts :identity-stdin? true))
+
+          (or (= a "--in") (str/starts-with? a "--in="))
+          (let [[v next-args err] (parse-flag-value args "--in")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :in-path v))))
+
+          (or (= a "--out-vault") (str/starts-with? a "--out-vault="))
+          (let [[v next-args err] (parse-flag-value args "--out-vault")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :out-vault v))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity-file v))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-remote-name-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :name nil}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:name opts))
+          (recur (rest args) (assoc opts :name a))
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))
+
+(defn parse-remote-upsert-opts
+  [args]
+  (loop [args args
+         opts {:json? false
+               :name nil
+               :type nil
+               :path nil
+               :recipient nil
+               :identity nil
+               :branch nil
+               :bundle-path nil
+               :derive-recipient? false
+               :no-derive-recipient? false
+               :type-set? false
+               :path-set? false
+               :recipient-set? false
+               :identity-set? false
+               :branch-set? false
+               :bundle-path-set? false}]
+    (if (empty? args)
+      [opts nil]
+      (let [a (first args)]
+        (cond
+          (= a "--json")
+          (recur (rest args) (assoc opts :json? true))
+
+          (= a "--derive-recipient")
+          (recur (rest args) (assoc opts :derive-recipient? true))
+
+          (= a "--no-derive-recipient")
+          (recur (rest args) (assoc opts :no-derive-recipient? true))
+
+          (or (= a "--type") (str/starts-with? a "--type="))
+          (let [[v next-args err] (parse-flag-value args "--type")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :type v :type-set? true))))
+
+          (or (= a "--path") (str/starts-with? a "--path="))
+          (let [[v next-args err] (parse-flag-value args "--path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :path v :path-set? true))))
+
+          (or (= a "--recipient") (str/starts-with? a "--recipient="))
+          (let [[v next-args err] (parse-flag-value args "--recipient")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :recipient v :recipient-set? true))))
+
+          (or (= a "--identity") (str/starts-with? a "--identity="))
+          (let [[v next-args err] (parse-flag-value args "--identity")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :identity v :identity-set? true))))
+
+          (or (= a "--branch") (str/starts-with? a "--branch="))
+          (let [[v next-args err] (parse-flag-value args "--branch")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :branch v :branch-set? true))))
+
+          (or (= a "--bundle-path") (str/starts-with? a "--bundle-path="))
+          (let [[v next-args err] (parse-flag-value args "--bundle-path")]
+            (if err
+              [opts err]
+              (recur next-args (assoc opts :bundle-path v :bundle-path-set? true))))
+
+          (str/starts-with? a "-")
+          [opts (str "unknown flag " a)]
+
+          (nil? (:name opts))
+          (recur (rest args) (assoc opts :name a))
+
+          :else
+          [opts (str "unexpected argument " (pr-str a))])))))

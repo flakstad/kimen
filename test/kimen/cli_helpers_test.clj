@@ -106,6 +106,37 @@
     (is (= true (:strict? doctor-opts)))
     (is (= true (:allow-missing-vault? doctor-opts)))))
 
+(deftest parse-bundle-and-remote-cases
+  (let [[keygen-opts keygen-err]
+        (parse/parse-bundle-keygen-opts ["--json" "--out" "id.agekey" "--overwrite" "--print-recipient"])
+        [recipient-opts recipient-err]
+        (parse/parse-bundle-recipient-opts ["--json" "--identity" "id.agekey"])
+        [seal-opts seal-err]
+        (parse/parse-bundle-seal-opts ["--json" "--vault" "vault.db" "--out" "vault.age" "--recipient" "age1xxx"])
+        [open-opts open-err]
+        (parse/parse-bundle-open-opts ["--json" "--in" "vault.age" "--out-vault" "vault.db" "--identity" "id.agekey" "--overwrite"])
+        [remote-name-opts remote-name-err]
+        (parse/parse-remote-name-opts ["--json" "team"])
+        [remote-upsert-opts remote-upsert-err]
+        (parse/parse-remote-upsert-opts ["--json" "team" "--type" "git" "--path" "git@example/repo.git" "--bundle-path" "vault.age"])]
+    (is (nil? keygen-err))
+    (is (= "id.agekey" (:out-path keygen-opts)))
+    (is (= true (:overwrite? keygen-opts)))
+    (is (nil? recipient-err))
+    (is (= "id.agekey" (:identity-file recipient-opts)))
+    (is (nil? seal-err))
+    (is (= "vault.age" (:out-path seal-opts)))
+    (is (= ["age1xxx"] (:recipients seal-opts)))
+    (is (nil? open-err))
+    (is (= "vault.age" (:in-path open-opts)))
+    (is (= true (:overwrite? open-opts)))
+    (is (nil? remote-name-err))
+    (is (= "team" (:name remote-name-opts)))
+    (is (nil? remote-upsert-err))
+    (is (= "team" (:name remote-upsert-opts)))
+    (is (= "git" (:type remote-upsert-opts)))
+    (is (= "vault.age" (:bundle-path remote-upsert-opts)))))
+
 (deftest usage-help-topics-include-known-commands
   (let [completion "completion help text"
         topics (usage/help-topics completion)]
