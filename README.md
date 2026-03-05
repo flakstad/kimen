@@ -4,7 +4,12 @@ Kimen is a local-first secrets tool.
 
 Kimen stores secrets in an encrypted local vault and lets you project them into runtime only when you explicitly ask.
 
-If you are currently juggling `.env` files, copied tokens, or long-lived shell exports, Kimen is meant to replace that with a safer, explicit workflow.
+Environment variables are often a perfectly good interface for applications.
+Kimen is designed so your app can keep reading standard env vars or files, while Kimen handles secret preparation outside the app process.
+Profiles (`.kmap`) define that projection boundary outside your application code.
+That helps avoid application-level config complexity like reading from many sources with layered secret override rules.
+
+If you are currently juggling `.env` files, copied tokens, or long-lived shell exports, Kimen gives you a safer, explicit workflow.
 
 ## Why Consider Kimen
 
