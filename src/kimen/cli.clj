@@ -226,13 +226,40 @@
 (def parse-config-unlock-set-opts cli-parse/parse-config-unlock-set-opts)
 (def parse-config-vault-set-opts cli-parse/parse-config-vault-set-opts)
 
-(defn- resolve-passphrase!
+(defn- resolve-passphrase-info!
   [ctx opts]
-  (passphrase/resolve-passphrase
+  (passphrase/resolve-passphrase-info
    {:config-path (:config-path ctx)
-    :stdin (or (:stdin ctx) System/in)}
+    :stdin (or (:stdin ctx) System/in)
+    :getenv #(getenv ctx %)
+    :prompt-reader (:prompt-reader ctx)}
    {:passphrase-cmd (:passphrase-cmd opts)
     :passphrase-stdin? (:passphrase-stdin? opts)}))
+
+(defn- resolve-passphrase!
+  [ctx opts]
+  (:passphrase (resolve-passphrase-info! ctx opts)))
+
+(defn- with-passphrase-retry
+  [ctx opts f]
+  (letfn [(attempt [retry?]
+            (let [{:keys [passphrase source]} (resolve-passphrase-info! ctx opts)]
+              (try
+                (f passphrase)
+                (catch Exception e
+                  (if (and retry?
+                           (= :prompt source)
+                           (= reasons/reason-wrong-passphrase (:reason (ex-data e))))
+                    (attempt false)
+                    (throw e))))))]
+    (attempt true)))
+
+(defn- resolve-unlock-passphrase!
+  [ctx opts validate-passphrase!]
+  (with-passphrase-retry ctx opts
+    (fn [passphrase]
+      (validate-passphrase! passphrase)
+      passphrase)))
 
 (defn- read-secret-value-from-stdin
   [ctx]
@@ -1401,7 +1428,7 @@
 
 (defn- maybe-sync-passphrase
   [ctx opts]
-  (let [env-pp (some-> (System/getenv passphrase/env-passphrase) str/trim not-empty)
+  (let [env-pp (some-> (getenv ctx passphrase/env-passphrase) str/trim not-empty)
         cmd-pp (some-> (:passphrase-cmd opts) str/trim not-empty)]
     (when (or env-pp cmd-pp (:passphrase-stdin? opts))
       (resolve-passphrase! ctx opts))))
@@ -1905,14 +1932,18 @@
         has-local (boolean (.exists (io/file vault-path)))
         sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
         baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
-        passphrase (when (or has-local has_remote)
-                     (resolve-passphrase! ctx opts))
-        local-snap (if has-local
-                     (load-vault-snapshot vault-path passphrase false)
-                     {:hashes {}})
-        remote-snap (if has_remote
-                      (load-remote-vault-snapshot remote passphrase false)
-                      {:hashes {}})
+        {:keys [local-snap remote-snap]}
+        (if (or has-local has_remote)
+          (with-passphrase-retry ctx opts
+            (fn [passphrase]
+              {:local-snap (if has-local
+                             (load-vault-snapshot vault-path passphrase false)
+                             {:hashes {}})
+               :remote-snap (if has_remote
+                              (load-remote-vault-snapshot remote passphrase false)
+                              {:hashes {}})}))
+          {:local-snap {:hashes {}}
+           :remote-snap {:hashes {}}})
         analysis (analyze-sync-changes baseline (:hashes local-snap) (:hashes remote-snap))
         current-diff (diff-current-snapshots (:hashes local-snap) (:hashes remote-snap))
         can-reconcile (boolean (and (:has-baseline analysis)
@@ -2066,9 +2097,12 @@
               _ (when-not (.exists (io/file vault-path))
                   (throw (ex-info (format "local vault missing: %s" vault-path)
                                   {:reason reasons/reason-local-vault-missing})))
-              passphrase (resolve-passphrase! ctx opts)
-              local-snap (load-vault-snapshot vault-path passphrase false)
-              remote-snap (load-remote-vault-snapshot remote passphrase (= take "remote"))
+              {:keys [passphrase local-snap remote-snap]}
+              (with-passphrase-retry ctx opts
+                (fn [passphrase]
+                  {:passphrase passphrase
+                   :local-snap (load-vault-snapshot vault-path passphrase false)
+                   :remote-snap (load-remote-vault-snapshot remote passphrase (= take "remote"))}))
               sync-entry (config/config-sync-entry (:config-path ctx) remote-name)
               baseline (normalize-hash-map (get sync-entry "baseline_secret_hashes"))
               _ (when (nil? baseline)
@@ -2362,16 +2396,22 @@
                   (throw (ex-info "cannot reconcile without baseline key hashes; run `kimen sync pull` first"
                                   {:reason reasons/reason-reconcile-baseline-missing
                                    :recommended_action "sync_pull"})))
-              reconcile-passphrase (when (and reconcile? has-conflict)
-                                     (resolve-passphrase! ctx opts))
-              reconcile-local-snap (when reconcile-passphrase
-                                     (load-vault-snapshot vault-path reconcile-passphrase false))
-              reconcile-remote-snap (when reconcile-passphrase
-                                      (load-remote-vault-snapshot remote reconcile-passphrase true))
-              reconcile-analysis (when reconcile-passphrase
-                                   (analyze-sync-changes baseline-secret-hashes-in
-                                                         (:hashes reconcile-local-snap)
-                                                         (:hashes reconcile-remote-snap)))
+              {:keys [reconcile-passphrase reconcile-local-snap reconcile-remote-snap reconcile-analysis]}
+              (if (and reconcile? has-conflict)
+                (with-passphrase-retry ctx opts
+                  (fn [passphrase]
+                    (let [local-snap (load-vault-snapshot vault-path passphrase false)
+                          remote-snap (load-remote-vault-snapshot remote passphrase true)]
+                      {:reconcile-passphrase passphrase
+                       :reconcile-local-snap local-snap
+                       :reconcile-remote-snap remote-snap
+                       :reconcile-analysis (analyze-sync-changes baseline-secret-hashes-in
+                                                                 (:hashes local-snap)
+                                                                 (:hashes remote-snap))})))
+                {:reconcile-passphrase nil
+                 :reconcile-local-snap nil
+                 :reconcile-remote-snap nil
+                 :reconcile-analysis nil})
               would-backup (boolean (and local-exists? (not (:no-backup? opts))))
               _ (when (and reconcile-passphrase
                            (seq (:conflict-keys reconcile-analysis)))
@@ -3500,7 +3540,7 @@
           :else
           (try
             (let [path (secret-vault-path ctx opts)
-                  pp (resolve-passphrase! ctx opts)
+                  pp (resolve-unlock-passphrase! ctx opts #(vault-v2/open-vault path %))
                   value (read-secret-value ctx opts)
                   {:keys [name]} (vault-v2/set-secret! path pp (:name opts) value)]
               (if json?
@@ -3530,7 +3570,7 @@
           :else
           (try
             (let [path (secret-vault-path ctx opts)
-                  pp (resolve-passphrase! ctx opts)
+                  pp (resolve-unlock-passphrase! ctx opts #(vault-v2/open-vault path %))
                   names (vault-v2/list-secret-names path pp)]
               (if json?
                 (secret-json-success {:action "list"
@@ -3563,7 +3603,7 @@
           :else
           (try
             (let [path (secret-vault-path ctx opts)
-                  pp (resolve-passphrase! ctx opts)
+                  pp (resolve-unlock-passphrase! ctx opts #(vault-v2/open-vault path %))
                   sec (vault-v2/get-secret path pp (first names))]
               (if json?
                 (let [^String secret-value (:value sec)
@@ -3596,7 +3636,7 @@
           :else
           (try
             (let [path (secret-vault-path ctx opts)
-                  pp (resolve-passphrase! ctx opts)
+                  pp (resolve-unlock-passphrase! ctx opts #(vault-v2/open-vault path %))
                   {:keys [name]} (vault-v2/delete-secret! path pp (first names))]
               (if json?
                 (secret-json-success {:action "rm" :name name})
@@ -3623,7 +3663,7 @@
           :else
           (try
             (let [path (secret-vault-path ctx opts)
-                  pp (resolve-passphrase! ctx opts)
+                  pp (resolve-unlock-passphrase! ctx opts #(vault-v2/open-vault path %))
                   {:keys [from to]} (vault-v2/rename-secret! path pp (first names) (second names))]
               (if json?
                 (secret-json-success {:action "mv" :from from :to to})
@@ -3785,20 +3825,23 @@
          :against-env-paths env-paths
          :against-label label}))))
 
-(defn- make-secret-lookup
-  [vault-path passphrase]
-  (let [opened* (delay (vault-v2/open-vault vault-path passphrase))]
-    (fn [secret-name]
-      (try
-        (:value (vault-v2/get-opened-secret @opened* secret-name))
-        (catch clojure.lang.ExceptionInfo e
-          (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
-            (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
-                            (assoc (or (ex-data e) {})
-                                   :reason reasons/reason-secret-not-found
-                                   :secret_name secret-name)
-                            e))
-            (throw e)))))))
+(defn- opened-secret-value
+  [opened secret-name]
+  (try
+    (:value (vault-v2/get-opened-secret opened secret-name))
+    (catch clojure.lang.ExceptionInfo e
+      (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
+        (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
+                        (assoc (or (ex-data e) {})
+                               :reason reasons/reason-secret-not-found
+                               :secret_name secret-name)
+                        e))
+        (throw e)))))
+
+(defn- make-opened-secret-lookup
+  [opened]
+  (fn [secret-name]
+    (opened-secret-value opened secret-name)))
 
 (defn- validate-envpaths!
   [request env-paths files-dir reason-on-missing-files-dir]
@@ -3881,8 +3924,9 @@
             (let [_ (when (empty? (:command opts))
                       (throw (ex-info "missing command" {:reason reasons/reason-missing-command})))
                   vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
-                  pp (resolve-passphrase! ctx opts)
-                  lookup (make-secret-lookup vault-path pp)
+                  lookup (with-passphrase-retry ctx opts
+                           (fn [passphrase]
+                             (make-opened-secret-lookup (vault-v2/open-vault vault-path passphrase))))
                   requested-files-dir (some-> (:files-dir opts) str/trim not-empty)
                   auto-files-dir (when (and (seq (:files request)) (nil? requested-files-dir))
                                    (runtime-temp-dir))
@@ -3929,8 +3973,9 @@
               _ (when (empty? (:files request))
                   (throw (ex-info "no files to render" {:reason reasons/reason-no-files-to-render})))
               vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
-              pp (resolve-passphrase! ctx opts)
-              lookup (make-secret-lookup vault-path pp)
+              lookup (with-passphrase-retry ctx opts
+                       (fn [passphrase]
+                         (make-opened-secret-lookup (vault-v2/open-vault vault-path passphrase))))
               n (projection/render-files! {:lookup-secret lookup} out-dir (:files request))]
           (if json?
             (success-json (cond-> {:ok true
@@ -3967,8 +4012,9 @@
                   (throw (ex-info "missing env mappings" {:reason reasons/reason-missing-env-mappings})))
               _ (validate-envpaths! request env-paths (:files-dir opts) true)
               vault-path (vault-path/resolve-vault-path ctx (:vault-path opts))
-              pp (resolve-passphrase! ctx opts)
-              lookup (make-secret-lookup vault-path pp)
+              lookup (with-passphrase-retry ctx opts
+                       (fn [passphrase]
+                         (make-opened-secret-lookup (vault-v2/open-vault vault-path passphrase))))
               env-map (projection/env-overrides {:lookup-secret lookup
                                                  :files-dir (:files-dir opts)}
                                                 request

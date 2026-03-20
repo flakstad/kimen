@@ -24,6 +24,13 @@
                    ctx)
             argv)))
 
+(defn- prompt-reader
+  [responses*]
+  (fn [_]
+    (let [response (first @responses*)]
+      (swap! responses* rest)
+      response)))
+
 (defn- with-system-property
   [k v f]
   (let [prev (System/getProperty k)]
@@ -3156,6 +3163,45 @@
                                               {:config-path cfg-path})]
       (is (= exit-code/code-wrong-passphrase exit-code))
       (is (str/includes? stderr "\"reason\":\"wrong_passphrase\"")))))
+
+(deftest prompted-unlock-retries-once-for-envfile
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        out-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"
+        prompts* (atom '("wrong-passphrase" "test-passphrase"))]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+
+    (let [{:keys [exit-code stdout stderr]}
+          (run-cli ["envfile" "--env" "API_KEY=api_key" "--out" out-path "--vault" vault-path "--json"] {}
+                   {:config-path cfg-path
+                    :getenv (constantly nil)
+                    :prompt-reader (prompt-reader prompts*)})]
+      (is (= 0 exit-code))
+      (is (nil? stderr))
+      (is (str/includes? stdout "\"action\":\"envfile\""))
+      (is (= "API_KEY=shh\n" (slurp out-path)))
+      (is (empty? @prompts*)))))
+
+(deftest prompted-unlock-stops-after-one-retry
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        pass-cmd "printf test-passphrase"
+        prompts* (atom '("wrong-a" "wrong-b" "test-passphrase"))]
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+
+    (let [{:keys [exit-code stderr]}
+          (run-cli ["secret" "list" "--vault" vault-path "--json"] {}
+                   {:config-path cfg-path
+                    :getenv (constantly nil)
+                    :prompt-reader (prompt-reader prompts*)})]
+      (is (= exit-code/code-wrong-passphrase exit-code))
+      (is (str/includes? stderr "\"reason\":\"wrong_passphrase\""))
+      (is (= '("test-passphrase") @prompts*)))))
 
 (deftest bundle-cli-roundtrip-and-typed-errors
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

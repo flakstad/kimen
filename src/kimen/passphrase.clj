@@ -9,6 +9,12 @@
 
 (def env-passphrase "KIMEN_PASSPHRASE")
 
+(defn- getenv
+  [ctx k]
+  (if-let [lookup (:getenv ctx)]
+    (lookup k)
+    (System/getenv k)))
+
 (defn- fail!
   [reason message]
   (throw (ex-info message {:reason reason})))
@@ -37,14 +43,19 @@
         line))))
 
 (defn- prompt-passphrase
-  []
-  (if-let [console (System/console)]
-    (let [chars (.readPassword console "Passphrase: " (object-array 0))
-          line (some-> chars String. str/trim)]
+  [ctx]
+  (if-let [prompt-reader (:prompt-reader ctx)]
+    (let [line (some-> (prompt-reader "Passphrase: ") str/trim)]
       (if (str/blank? line)
         (fail! reasons/reason-missing-passphrase "no passphrase provided")
         line))
-    (fail! reasons/reason-missing-passphrase "no passphrase provided (set KIMEN_PASSPHRASE, use --passphrase-stdin/--passphrase-cmd, or configure `kimen config unlock ...`)")))
+    (if-let [console (System/console)]
+      (let [chars (.readPassword console "Passphrase: " (object-array 0))
+            line (some-> chars String. str/trim)]
+        (if (str/blank? line)
+          (fail! reasons/reason-missing-passphrase "no passphrase provided")
+          line))
+      (fail! reasons/reason-missing-passphrase "no passphrase provided (set KIMEN_PASSPHRASE, use --passphrase-stdin/--passphrase-cmd, or configure `kimen config unlock ...`)"))))
 
 (defn- parse-cmd-string
   [s]
@@ -52,35 +63,55 @@
        (remove str/blank?)
        vec))
 
-(defn resolve-passphrase
-  [{:keys [config-path stdin]
+(defn resolve-passphrase-info
+  [{:keys [config-path stdin prompt-reader]
+    env-getter :getenv
     :or {stdin System/in}}
    {:keys [passphrase-cmd passphrase-stdin?]}]
-  (if-let [p (some-> (System/getenv env-passphrase) str/trim not-empty)]
-    p
-    (do
-      (when (and (some? passphrase-cmd) (str/blank? passphrase-cmd))
-        (fail! reasons/reason-empty-passphrase-command "empty --passphrase-cmd"))
-      (when (and (not (str/blank? passphrase-cmd)) passphrase-stdin?)
-        (fail! reasons/reason-config-failed "conflicting passphrase sources"))
-      (cond
-        (not (str/blank? passphrase-cmd))
-        (passphrase-from-exec (parse-cmd-string passphrase-cmd))
+  (let [ctx {:config-path config-path
+             :stdin stdin
+             :getenv env-getter
+             :prompt-reader prompt-reader}
+        env-pass (fn []
+                   (some-> (getenv ctx env-passphrase)
+                           str/trim
+                           not-empty))]
+    (if-let [p (env-pass)]
+      {:passphrase p
+       :source :env}
+      (do
+        (when (and (some? passphrase-cmd) (str/blank? passphrase-cmd))
+          (fail! reasons/reason-empty-passphrase-command "empty --passphrase-cmd"))
+        (when (and (not (str/blank? passphrase-cmd)) passphrase-stdin?)
+          (fail! reasons/reason-config-failed "conflicting passphrase sources"))
+        (cond
+          (not (str/blank? passphrase-cmd))
+          {:passphrase (passphrase-from-exec (parse-cmd-string passphrase-cmd))
+           :source :cmd}
 
-        passphrase-stdin?
-        (read-line-one stdin)
+          passphrase-stdin?
+          {:passphrase (read-line-one stdin)
+           :source :stdin}
 
-        :else
-        (let [{:keys [method exec]} (config/config-unlock-show config-path)
-              method (or (some-> method str/lower-case str/trim) "prompt")]
-          (case method
-            "prompt" (prompt-passphrase)
-            "env" (if-let [p (some-> (System/getenv env-passphrase) str/trim not-empty)]
-                     p
-                     (fail! reasons/reason-missing-passphrase (format "unlock.method=env but %s is not set" env-passphrase)))
-            "stdin" (read-line-one stdin)
-            "exec" (if (seq exec)
-                     (passphrase-from-exec exec)
-                     (fail! reasons/reason-missing-unlock-exec-command "unlock.method=exec but unlock.exec is empty"))
-            (fail! reasons/reason-unknown-unlock-method
-                   (format "unknown unlock.method %s (expected prompt|env|stdin|exec)" (pr-str method)))))))))
+          :else
+          (let [{:keys [method exec]} (config/config-unlock-show config-path)
+                method (or (some-> method str/lower-case str/trim) "prompt")]
+            (case method
+              "prompt" {:passphrase (prompt-passphrase ctx)
+                        :source :prompt}
+              "env" (if-let [p (env-pass)]
+                      {:passphrase p
+                       :source :env}
+                      (fail! reasons/reason-missing-passphrase (format "unlock.method=env but %s is not set" env-passphrase)))
+              "stdin" {:passphrase (read-line-one stdin)
+                       :source :stdin}
+              "exec" (if (seq exec)
+                       {:passphrase (passphrase-from-exec exec)
+                        :source :exec}
+                       (fail! reasons/reason-missing-unlock-exec-command "unlock.method=exec but unlock.exec is empty"))
+              (fail! reasons/reason-unknown-unlock-method
+                     (format "unknown unlock.method %s (expected prompt|env|stdin|exec)" (pr-str method))))))))))
+
+(defn resolve-passphrase
+  [ctx opts]
+  (:passphrase (resolve-passphrase-info ctx opts)))
