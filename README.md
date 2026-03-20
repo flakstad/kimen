@@ -199,6 +199,7 @@ kimen doctor --edn
 - `docs/recommended-paths.md`: practical path conventions
 - `docs/threat-model.md`: what Kimen protects and does not protect
 - `docs/stability.md`: early-stage compatibility expectations
+- `docs/session-agent.md`: MVP design for the planned local session agent
 
 ## Contributing
 
