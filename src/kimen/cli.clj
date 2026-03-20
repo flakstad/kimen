@@ -3787,12 +3787,10 @@
 
 (defn- make-secret-lookup
   [vault-path passphrase]
-  (let [opened* (delay (vault-v2/open-vault vault-path passphrase))
-        lookup-secret* (memoize (fn [secret-name]
-                                  (:value (vault-v2/get-opened-secret @opened* secret-name))))]
+  (let [opened* (delay (vault-v2/open-vault vault-path passphrase))]
     (fn [secret-name]
       (try
-        (lookup-secret* secret-name)
+        (:value (vault-v2/get-opened-secret @opened* secret-name))
         (catch clojure.lang.ExceptionInfo e
           (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
             (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
