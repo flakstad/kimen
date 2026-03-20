@@ -26,6 +26,16 @@ Check installation:
 kimen version
 ```
 
+Build from source and refresh the installed launcher:
+
+```bash
+bb native
+kimen version
+```
+
+`bb native` writes `target/kimen` and updates `~/.local/bin/kimen` to `exec` that binary.
+Set `KIMEN_INSTALL_BIN=off` to skip installing the launcher.
+
 ## 5-Minute Tutorial
 
 ### 1) Initialize your vault

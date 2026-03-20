@@ -20,24 +20,14 @@
                                      (shell {:continue true} "chmod" "+x" "dist/kimen")
                                      {:exit (:exit cp-bin)})]
                      (System/exit (int (:exit chmod-bin))))}
-  build-native {:doc "Build native binary via GraalVM native-image"
+  native {:doc "Build native binary via GraalVM native-image and install the kimen launcher"
+          :task (System/exit (int (:exit (shell {:continue true} "clojure" "-T:build" "native"))))}
+  build-native {:doc "Alias for native"
                 :task (System/exit (int (:exit (shell {:continue true} "clojure" "-T:build" "native"))))}
-  install {:doc "Install launcher to ~/.local/bin (or $INSTALL_BIN_DIR)"
-           :task (let [build-exit (int (:exit (shell {:continue true} "bb" "build-jar")))
-                       target-dir (or (System/getenv "INSTALL_BIN_DIR")
-                                      (str (System/getProperty "user.home") "/.local/bin"))
-                       mk-exit (if (zero? build-exit)
-                                 (int (:exit (shell {:continue true} "mkdir" "-p" target-dir)))
-                                 build-exit)
-                       cp-exit (if (zero? mk-exit)
-                                 (int (:exit (shell {:continue true} "cp" "bin/kimen" (str target-dir "/kimen"))))
-                                 mk-exit)
-                       chmod-exit (if (zero? cp-exit)
-                                    (int (:exit (shell {:continue true} "chmod" "+x" (str target-dir "/kimen"))))
-                                    cp-exit)]
-                   (System/exit chmod-exit))}
- test {:doc "Run tests"
-       :task (System/exit (int (:exit (shell {:continue true} "clojure" "-M:test"))))}
+  install {:doc "Alias for native (build native binary and install the kimen launcher)"
+           :task (System/exit (int (:exit (shell {:continue true} "clojure" "-T:build" "native"))))}
+  test {:doc "Run tests"
+        :task (System/exit (int (:exit (shell {:continue true} "clojure" "-M:test"))))}
   itest {:doc "Run CLI integration tests through bin/kimen"
          :task (System/exit (:exit (shell {:continue true} "bb" "scripts/cli_integration.clj")))}
   e2e-sync {:doc "Run fs remote sync e2e harness"

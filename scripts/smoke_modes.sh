@@ -15,7 +15,7 @@ bb build-jar >/dev/null
 java -jar target/kimen.jar version --json >/dev/null
 
 echo "[smoke-modes] native build + binary smoke"
-bb build-native >/dev/null
+KIMEN_INSTALL_BIN=off bb native >/dev/null
 ./target/kimen version --json >/dev/null
 
 echo "[smoke-modes] library embedding via kimen.api"

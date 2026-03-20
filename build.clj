@@ -10,10 +10,69 @@
 (def class-dir "target/classes")
 (def uber-file "target/kimen.jar")
 (def native-out "target/kimen")
+(def default-install-bin "kimen")
 
 (defn- windows?
   []
   (str/starts-with? (str/lower-case (System/getProperty "os.name" "")) "windows"))
+
+(defn- ensure-parent-dir!
+  [path]
+  (when-let [parent (some-> path io/file .getParentFile)]
+    (when-not (.exists ^java.io.File parent)
+      (.mkdirs ^java.io.File parent))))
+
+(defn- default-install-bin-name
+  []
+  (if (windows?)
+    (str default-install-bin ".cmd")
+    default-install-bin))
+
+(defn- default-install-bin-path
+  []
+  (if (windows?)
+    (let [local-app-data (some-> (System/getenv "LOCALAPPDATA") str/trim not-empty)
+          user-home (some-> (System/getProperty "user.home") str/trim not-empty)
+          base (or local-app-data user-home ".")]
+      (str (io/file base "bin" (default-install-bin-name))))
+    (let [user-home (or (some-> (System/getProperty "user.home") str/trim not-empty) ".")]
+      (str (io/file user-home ".local" "bin" (default-install-bin-name))))))
+
+(defn- legacy-install-bin-path
+  []
+  (when-let [install-dir (some-> (System/getenv "INSTALL_BIN_DIR") str/trim not-empty)]
+    (str (io/file install-dir (default-install-bin-name)))))
+
+(defn- resolve-install-bin-path
+  []
+  (let [raw (some-> (System/getenv "KIMEN_INSTALL_BIN") str/trim not-empty)]
+    (cond
+      (nil? raw) (or (legacy-install-bin-path) (default-install-bin-path))
+      (#{"0" "false" "off" "no" "none"} (str/lower-case raw)) nil
+      :else raw)))
+
+(defn- shell-escape-double-quotes
+  [s]
+  (str/replace (str s) "\"" "\\\""))
+
+(defn- install-native-launcher!
+  [native-bin]
+  (when-let [install-path (resolve-install-bin-path)]
+    (let [native-bin-path (.getCanonicalPath (io/file (str native-bin)))
+          install-file (io/file install-path)]
+      (ensure-parent-dir! install-path)
+      (if (windows?)
+        (spit install-file
+              (str "@echo off\r\n"
+                   "\"" (str/replace native-bin-path "\"" "\\\"") "\" %*\r\n"))
+        (spit install-file
+              (str "#!/usr/bin/env bash\n"
+                   "set -euo pipefail\n"
+                   "exec \"" (shell-escape-double-quotes native-bin-path) "\" \"$@\"\n")))
+      (.setExecutable ^java.io.File install-file true false)
+      (println (str "installed launcher " (.getPath install-file)
+                    " -> " native-bin-path))
+      (.getPath install-file))))
 
 (defn- file->ns
   [^java.io.File f]
@@ -116,6 +175,12 @@
       nil)))
 
 (defn native
+  "Build an uberjar and then a GraalVM native-image executable.
+
+  Optional env overrides:
+  - KIMEN_NATIVE_OUT (default: target/kimen)
+  - KIMEN_INSTALL_BIN (default: ~/.local/bin/kimen; set to 'off' to skip launcher install)
+  - INSTALL_BIN_DIR (legacy directory override for the installed launcher)"
   [_]
   (uber-with-basis (b/create-basis {:project "deps.edn"
                                     :aliases [:native-image]}))
@@ -138,4 +203,5 @@
                        :out (:out res)
                        :err (:err res)
                        :cmd cmd})))
+    (install-native-launcher! out)
     out))
