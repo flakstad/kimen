@@ -20,13 +20,13 @@ in-app config layers that merge multiple secret sources with brittle and confusi
 
 Kimen is primarily used as a native binary named `kimen`.
 
-Check installation:
+Install from the latest GitHub release:
 
-```bash
-kimen version
-```
+- Download `kimen` if you want the launcher script.
+- Download `kimen.jar` if you prefer `java -jar`.
+- Verify the artifact against `SHA256SUMS`.
 
-Build from source and refresh the installed launcher:
+Or build from source and refresh the installed launcher:
 
 ```bash
 bb native
@@ -35,6 +35,13 @@ kimen version
 
 `bb native` writes `target/kimen` and updates `~/.local/bin/kimen` to `exec` that binary.
 Set `KIMEN_INSTALL_BIN=off` to skip installing the launcher.
+
+If you want the JVM artifact instead:
+
+```bash
+bb build-jar
+java -jar dist/kimen.jar version
+```
 
 ## 5-Minute Tutorial
 
@@ -191,3 +198,17 @@ kimen doctor --edn
 - `docs/ci-github-actions.md`: CI integration patterns
 - `docs/recommended-paths.md`: practical path conventions
 - `docs/threat-model.md`: what Kimen protects and does not protect
+- `docs/stability.md`: early-stage compatibility expectations
+
+## Contributing
+
+See `CONTRIBUTING.md` for local development, test commands, and contribution
+expectations.
+
+## Security
+
+See `SECURITY.md` for private vulnerability reporting guidance.
+
+## License
+
+Kimen is available under the MIT license. See `LICENSE`.
