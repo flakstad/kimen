@@ -8,7 +8,8 @@
    [kimen.cli :as cli]
    [kimen.commands.init :as init]
    [kimen.exit-code :as exit-code]
-   [kimen.json :as json]))
+   [kimen.json :as json]
+   [kimen.vault.v2 :as vault-v2]))
 
 (set! *warn-on-reflection* true)
 
@@ -3283,6 +3284,73 @@
       (let [body (slurp envfile-path)]
         (is (str/includes? body "API_KEY=shh"))
         (is (str/includes? body (str "API_KEY_PATH=" out-dir "/conf/api.txt")))))))
+
+(deftest projection-commands-open-vault-once-per-command
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        vault-path (str (.getPath dir) "/vault.db")
+        cfg-path (str (.getPath dir) "/config.json")
+        run-map-path (str (.getPath dir) "/run.kmap")
+        render-map-path (str (.getPath dir) "/render.kmap")
+        envfile-map-path (str (.getPath dir) "/envfile.kmap")
+        render-out-dir (str (.getPath dir) "/render")
+        envfile-path (str (.getPath dir) "/app.env")
+        pass-cmd "printf test-passphrase"
+        orig-open-vault vault-v2/open-vault]
+    (spit run-map-path (str "env API_KEY=api_key\n"
+                            "env API_KEY_2=api_key\n"
+                            "file conf/api.txt=api_key\n"
+                            "envpath API_KEY_PATH=conf/api.txt\n"
+                            "stdin api_key\n"))
+    (spit render-map-path (str "file conf/api.txt=api_key\n"
+                               "file conf/api-2.txt=api_key\n"))
+    (spit envfile-map-path (str "env API_KEY=api_key\n"
+                                "env API_KEY_2=api_key\n"))
+
+    (run-cli ["vault" "init" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {} {:config-path cfg-path})
+    (run-cli ["secret" "set" "api_key" "--value" "shh" "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"] {}
+             {:config-path cfg-path})
+
+    (testing "run opens the vault once across env, file, envpath, and stdin lookups"
+      (let [open-count (atom 0)]
+        (with-redefs [vault-v2/open-vault (fn [& args]
+                                            (swap! open-count inc)
+                                            (apply orig-open-vault args))]
+          (let [{:keys [exit-code stderr]}
+                (run-cli ["run" "--map" run-map-path "--vault" vault-path "--passphrase-cmd" pass-cmd "--"
+                          "sh" "-c" "cat >/dev/null"]
+                         {}
+                         {:config-path cfg-path})]
+            (is (= 0 exit-code))
+            (is (nil? stderr))))
+        (is (= 1 @open-count))))
+
+    (testing "render opens the vault once for multiple files"
+      (let [open-count (atom 0)]
+        (with-redefs [vault-v2/open-vault (fn [& args]
+                                            (swap! open-count inc)
+                                            (apply orig-open-vault args))]
+          (let [{:keys [exit-code stderr]}
+                (run-cli ["render" "--map" render-map-path "--dir" render-out-dir
+                          "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                         {}
+                         {:config-path cfg-path})]
+            (is (= 0 exit-code))
+            (is (nil? stderr))))
+        (is (= 1 @open-count))))
+
+    (testing "envfile opens the vault once for multiple env lookups"
+      (let [open-count (atom 0)]
+        (with-redefs [vault-v2/open-vault (fn [& args]
+                                            (swap! open-count inc)
+                                            (apply orig-open-vault args))]
+          (let [{:keys [exit-code stderr]}
+                (run-cli ["envfile" "--map" envfile-map-path "--out" envfile-path
+                          "--vault" vault-path "--passphrase-cmd" pass-cmd "--json"]
+                         {}
+                         {:config-path cfg-path})]
+            (is (= 0 exit-code))
+            (is (nil? stderr))))
+        (is (= 1 @open-count))))))
 
 (deftest render-systemd-service-mode-and-target-validation
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory "kimen-clj-test" (make-array java.nio.file.attribute.FileAttribute 0)))

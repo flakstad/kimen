@@ -3787,17 +3787,20 @@
 
 (defn- make-secret-lookup
   [vault-path passphrase]
-  (fn [secret-name]
-    (try
-      (:value (vault-v2/get-secret vault-path passphrase secret-name))
-      (catch clojure.lang.ExceptionInfo e
-        (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
-          (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
-                          (assoc (or (ex-data e) {})
-                                 :reason reasons/reason-secret-not-found
-                                 :secret_name secret-name)
-                          e))
-          (throw e))))))
+  (let [opened* (delay (vault-v2/open-vault vault-path passphrase))
+        lookup-secret* (memoize (fn [secret-name]
+                                  (:value (vault-v2/get-opened-secret @opened* secret-name))))]
+    (fn [secret-name]
+      (try
+        (lookup-secret* secret-name)
+        (catch clojure.lang.ExceptionInfo e
+          (if (= reasons/reason-secret-not-found (:reason (ex-data e)))
+            (throw (ex-info (format "secret not found: %s" (pr-str secret-name))
+                            (assoc (or (ex-data e) {})
+                                   :reason reasons/reason-secret-not-found
+                                   :secret_name secret-name)
+                            e))
+            (throw e)))))))
 
 (defn- validate-envpaths!
   [request env-paths files-dir reason-on-missing-files-dir]

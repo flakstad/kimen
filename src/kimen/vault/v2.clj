@@ -336,13 +336,12 @@
         secrets (get data "secrets")]
     (->> (keys secrets) sort vec)))
 
-(defn get-secret
-  [path passphrase name]
+(defn get-opened-secret
+  [{:keys [data]} name]
   (let [name (some-> name str/trim)]
     (when (str/blank? name)
       (fail! reasons/reason-empty-secret-name "empty secret name"))
-    (let [{:keys [data]} (open-vault path passphrase)
-          sec (get-in data ["secrets" name])]
+    (let [sec (get-in data ["secrets" name])]
       (when-not (map? sec)
         (fail! reasons/reason-secret-not-found "secret not found"))
       {:name name
@@ -350,6 +349,10 @@
        :created_at (get sec "created_at")
        :updated_at (get sec "updated_at")
        :value (String. (b64-decode (or (get sec "value_b64") "")) "UTF-8")})))
+
+(defn get-secret
+  [path passphrase name]
+  (get-opened-secret (open-vault path passphrase) name))
 
 (defn set-secret!
   [path passphrase name value]
