@@ -3,6 +3,8 @@
     [clojure.test :refer [deftest is]]
     [kimen.reason-codes :as reason-codes]))
 
+(set! *warn-on-reflection* true)
+
 (def snake-case-re #"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 
 (deftest reason-codes-are-unique-and-snake-case

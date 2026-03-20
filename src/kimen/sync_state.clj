@@ -3,6 +3,8 @@
    [clojure.string :as str]
    [kimen.reason-codes :as reasons]))
 
+(set! *warn-on-reflection* true)
+
 (def conflict-reasons
   #{reasons/reason-remote-disappeared
     reasons/reason-no-local-baseline

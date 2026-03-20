@@ -3,6 +3,8 @@
     [clojure.string :as str]
     [kimen.config :as config]))
 
+(set! *warn-on-reflection* true)
+
 (def env-vault-path "KIMEN_VAULT")
 
 (defn default-vault-path

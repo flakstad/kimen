@@ -5,6 +5,8 @@
     [kimen.config :as config]
     [kimen.reason-codes :as reasons]))
 
+(set! *warn-on-reflection* true)
+
 (def env-passphrase "KIMEN_PASSPHRASE")
 
 (defn- fail!

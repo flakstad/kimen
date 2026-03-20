@@ -4,6 +4,8 @@
    [kimen.commands.init :as init]
    [kimen.json :as json]))
 
+(set! *warn-on-reflection* true)
+
 (def ^:private duration-unit-ms
   {"ms" 1
    "s" 1000

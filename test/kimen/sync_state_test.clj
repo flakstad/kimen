@@ -4,6 +4,8 @@
     [kimen.reason-codes :as reasons]
     [kimen.sync-state :as sync-state]))
 
+(set! *warn-on-reflection* true)
+
 (deftest detect-conflict-cases
   (testing "no baseline and no remote data is clean"
     (is (= {:has-conflict false}

@@ -2,6 +2,8 @@
   (:require
    [clojure.string :as str]))
 
+(set! *warn-on-reflection* true)
+
 (def usage
   (str/join
    "\n"

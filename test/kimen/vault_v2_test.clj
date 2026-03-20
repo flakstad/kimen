@@ -11,11 +11,13 @@
    [javax.crypto Cipher SecretKeyFactory]
    [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]))
 
+(set! *warn-on-reflection* true)
+
 (defn- b64-encode
   [^bytes b]
   (.encodeToString (Base64/getEncoder) b))
 
-(defn- b64-decode
+(defn- ^"[B" b64-decode
   [^String s]
   (.decode (Base64/getDecoder) s))
 
@@ -65,7 +67,8 @@
         salt (byte-array-from (range 1 17))
         nonce (byte-array-from (range 21 33))
         key (legacy-derive-key passphrase salt iterations key-len)
-        plaintext (.getBytes (json/write-str {"secrets" secrets}) "UTF-8")
+        ^String plaintext-json (json/write-str {"secrets" secrets})
+        plaintext (.getBytes plaintext-json "UTF-8")
         ciphertext (legacy-encrypt-bytes key plaintext nonce)]
     {"format_version" "kimen-v2"
      "kdf" {"name" "pbkdf2-hmac-sha256"

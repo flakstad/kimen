@@ -8,6 +8,8 @@
     [java.nio.file Files Path Paths StandardCopyOption]
     [java.nio.file.attribute PosixFilePermission]))
 
+(set! *warn-on-reflection* true)
+
 (def env-config-path "KIMEN_CONFIG")
 
 (defn- config-root-dir
@@ -96,7 +98,7 @@
       (try
         [(normalize-config (json/read-str (slurp f))) true]
         (catch Exception e
-          (throw (ex-info (format "invalid config JSON at %s: %s" path (.getMessage e))
+          (throw (ex-info (format "invalid config JSON at %s: %s" path (ex-message e))
                           {:reason "invalid_config_json"
                            :config-path path}
                           e)))))))
@@ -312,7 +314,7 @@
                                     :stdin nil})]
       (bundle/recipient-for-identity id))
     (catch Exception e
-      (throw (ex-info (format "derive recipient from identity: %s" (.getMessage e))
+      (throw (ex-info (format "derive recipient from identity: %s" (ex-message e))
                       {:reason "recipient_derivation_failed"}
                       e)))))
 

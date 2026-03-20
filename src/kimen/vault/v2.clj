@@ -13,6 +13,8 @@
    [javax.crypto Cipher SecretKeyFactory]
    [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]))
 
+(set! *warn-on-reflection* true)
+
 (def format-version "kimen-v2")
 (def kdf-name "pbkdf2-hmac-sha256")
 (def cipher-name "aes-gcm")
@@ -35,21 +37,21 @@
   [^bytes b]
   (.encodeToString (Base64/getEncoder) b))
 
-(defn- b64-decode
+(defn- ^"[B" b64-decode
   [^String s]
   (try
     (.decode (Base64/getDecoder) s)
     (catch Exception _
       (fail! reasons/reason-invalid-vault-file "invalid base64 payload in vault file"))))
 
-(defn- random-bytes
+(defn- ^"[B" random-bytes
   [n]
   (let [b (byte-array n)
         rng (SecureRandom.)]
     (.nextBytes rng b)
     b))
 
-(defn- derive-key
+(defn- ^"[B" derive-key
   [passphrase ^bytes salt iterations key-len-bytes]
   (let [spec (PBEKeySpec. (.toCharArray (str passphrase))
                           salt
@@ -62,7 +64,7 @@
       (finally
         (.clearPassword spec)))))
 
-(defn- encrypt-bytes
+(defn- ^"[B" encrypt-bytes
   [^bytes key ^bytes plaintext ^bytes nonce aad]
   (let [cipher (Cipher/getInstance "AES/GCM/NoPadding")
         key-spec (SecretKeySpec. key "AES")
@@ -74,12 +76,12 @@
 (defn- auth-failure?
   [^Exception e]
   (let [class-name (.getName (class e))
-        msg (some-> (.getMessage e) str/lower-case)]
+        msg (some-> (ex-message e) str/lower-case)]
     (or (str/includes? class-name "AEADBadTagException")
         (and msg (or (str/includes? msg "tag mismatch")
                      (str/includes? msg "mac check"))))))
 
-(defn- decrypt-bytes
+(defn- ^"[B" decrypt-bytes
   [^bytes key ^bytes ciphertext ^bytes nonce aad wrong-passphrase? invalid-message]
   (try
     (let [cipher (Cipher/getInstance "AES/GCM/NoPadding")
@@ -93,7 +95,7 @@
         (fail! reasons/reason-wrong-passphrase "wrong passphrase")
         (fail! reasons/reason-invalid-vault-file invalid-message)))))
 
-(defn- concat-bytes
+(defn- ^"[B" concat-bytes
   [^bytes a ^bytes b]
   (let [out (byte-array (+ (alength a) (alength b)))]
     (System/arraycopy a 0 out 0 (alength a))
@@ -173,15 +175,15 @@
           (long (or (get kdf "iterations") 0))
           (long (or (get kdf "key_len") 0))))
 
-(defn- wrap-dek
+(defn- ^"[B" wrap-dek
   [^bytes kek ^bytes dek kdf]
   (let [nonce (random-bytes default-nonce-len)
         ciphertext (encrypt-bytes kek dek nonce (str aad-wrap-prefix "|" (kdf-aad kdf)))]
     (concat-bytes nonce ciphertext)))
 
-(defn- unwrap-dek
+(defn- ^"[B" unwrap-dek
   [^bytes kek wrapped-b64 kdf]
-  (let [wrapped (b64-decode wrapped-b64)]
+  (let [^bytes wrapped (b64-decode wrapped-b64)]
     (when (<= (alength wrapped) default-nonce-len)
       (fail! reasons/reason-invalid-vault-file "invalid wrapped key payload"))
     (let [nonce (byte-array default-nonce-len)
@@ -261,7 +263,8 @@
         kek (derive-key passphrase salt iterations key-len)
         dek (random-bytes default-key-len-bytes)
         nonce (random-bytes default-nonce-len)
-        plaintext (.getBytes (json/write-str {"secrets" (or (get data "secrets") {})}) "UTF-8")]
+        ^String plaintext-json (json/write-str {"secrets" (or (get data "secrets") {})})
+        plaintext (.getBytes plaintext-json "UTF-8")]
     (try
       (let [wrapped-dek (wrap-dek kek dek kdf')
             ciphertext (encrypt-bytes dek plaintext nonce aad-vault)]

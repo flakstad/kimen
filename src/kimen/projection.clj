@@ -5,6 +5,8 @@
     [clojure.string :as str]
     [kimen.reason-codes :as reasons]))
 
+(set! *warn-on-reflection* true)
+
 (def exec-prefix "exec:")
 (def secret-prefix "secret:")
 (def const-prefix "const:")
@@ -170,5 +172,5 @@
   [path]
   (let [f (io/file path)]
     (when (.exists f)
-      (doseq [child (reverse (file-seq f))]
+      (doseq [^java.io.File child (reverse (file-seq f))]
         (.delete child)))))

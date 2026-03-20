@@ -3,6 +3,8 @@
     [clojure.test :refer [deftest is testing]]
     [kimen.mapfile :as mapfile]))
 
+(set! *warn-on-reflection* true)
+
 (defn- with-system-property
   [k v f]
   (let [prev (System/getProperty k)]

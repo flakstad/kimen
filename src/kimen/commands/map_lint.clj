@@ -4,6 +4,8 @@
     [kimen.exit-code :as exit-code]
     [kimen.mapfile :as mapfile]))
 
+(set! *warn-on-reflection* true)
+
 (def exec-prefix "exec:")
 
 (def shell-sensitive-exec-chars
@@ -215,7 +217,7 @@
        :mode (or mode "all")
        :error_count 1
        :warning_count 0
-       :issues [(issue "invalid_map" "error" (.getMessage e))]
+       :issues [(issue "invalid_map" "error" (ex-message e))]
        :exit_code exit-code/code-map-lint-failed})))
 
 (defn invalid-input-report

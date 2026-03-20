@@ -1,5 +1,7 @@
 (ns kimen.reason-codes)
 
+(set! *warn-on-reflection* true)
+
 (def reason-vault-not-found "vault_not_found")
 (def reason-secret-not-found "secret_not_found")
 (def reason-secret-exists "secret_exists")

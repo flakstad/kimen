@@ -28,6 +28,8 @@
    [java.nio.file Paths]
    [java.util Base64]))
 
+(set! *warn-on-reflection* true)
+
 (def usage cli-usage/usage)
 (def config-usage cli-usage/config-usage)
 (def vault-usage cli-usage/vault-usage)
@@ -178,7 +180,7 @@
   [json? e]
   (let [reason (vault-error-reason e)
         code (vault-error-code reason)
-        message (.getMessage e)]
+        message (ex-message e)]
     (if json?
       (error-json code reason message)
       (error-text code message))))
@@ -200,7 +202,7 @@
   [json? e]
   (let [reason (secret-error-reason e)
         code (secret-error-code reason)
-        message (.getMessage e)]
+        message (ex-message e)]
     (if json?
       (error-json code reason message)
       (error-text code message))))
@@ -208,7 +210,7 @@
 (defn- config-error-result
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-config-failed)
-        message (.getMessage e)]
+        message (ex-message e)]
     (if json?
       (error-json exit-code/code-config-failed reason message)
       (error-text exit-code/code-config-failed message))))
@@ -276,7 +278,7 @@
                   source ((:read-file ctx) resolved-path)]
               (map-lint/lint-source {:source source :mode mode}))
             (catch Exception e
-              (map-lint/invalid-input-report mode (.getMessage e)))))
+              (map-lint/invalid-input-report mode (ex-message e)))))
         report (map-lint/apply-strict report (:strict? opts))
         payload (assoc report :action "map_lint")
         exit-code (:exit_code report)]
@@ -330,7 +332,7 @@
                     (let [reason (:reason (ex-data e))]
                       (if (or (= reason reasons/reason-envpath-requires-projected-files)
                               (= reason reasons/reason-envpath-missing-projected-file))
-                        (throw (ex-info (format "against spec is invalid: %s" (.getMessage e))
+                        (throw (ex-info (format "against spec is invalid: %s" (ex-message e))
                                         {:reason reasons/reason-invalid-against-spec}
                                         e))
                         (throw e)))))
@@ -345,9 +347,9 @@
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)
                 reason (or (:reason data) reasons/reason-plan-failed)]
-            (plan-error json? reason (.getMessage e))))
+            (plan-error json? reason (ex-message e))))
         (catch Exception e
-          (plan-error json? reasons/reason-plan-failed (.getMessage e)))))))
+          (plan-error json? reasons/reason-plan-failed (ex-message e)))))))
 
 (defn- handle-version
   [args]
@@ -548,8 +550,8 @@
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-remote-failed)]
     (if json?
-      (error-json exit-code/code-remote-failed reason (.getMessage e))
-      (error-text exit-code/code-remote-failed (.getMessage e)))))
+      (error-json exit-code/code-remote-failed reason (ex-message e))
+      (error-text exit-code/code-remote-failed (ex-message e)))))
 
 (defn- validate-remote-name!
   [name]
@@ -839,7 +841,7 @@
       explicit
 
       :else
-      (or (sync-state/infer-error-reason-from-message (.getMessage e))
+      (or (sync-state/infer-error-reason-from-message (ex-message e))
           explicit
           reasons/reason-sync-failed))))
 
@@ -855,7 +857,7 @@
         recommended-action (or (:recommended_action data)
                                (sync-state/recommended-action-for-reason reason))
         payload (cond-> {:ok false
-                         :error (.getMessage e)
+                         :error (ex-message e)
                          :exit_code code
                          :reason reason}
                   (some? (:expected_rev data)) (assoc :expected_rev (:expected_rev data))
@@ -864,7 +866,7 @@
     (if json?
       (result {:exit-code code
                :stderr (json-line payload)})
-      (error-text code (.getMessage e)))))
+      (error-text code (ex-message e)))))
 
 (defn- sync-init-next-command
   [remote-name recommended-action]
@@ -965,10 +967,12 @@
 
 (defn- copy-file!
   [src dst]
-  (Files/copy (.toPath (io/file src))
-              (.toPath (io/file dst))
-              (into-array StandardCopyOption [StandardCopyOption/REPLACE_EXISTING]))
-  dst)
+  (let [^"[Ljava.nio.file.CopyOption;" copy-options
+        (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING])]
+    (Files/copy (.toPath (io/file src))
+                (.toPath (io/file dst))
+                copy-options)
+    dst))
 
 (def ^:private git-env-skip-vars
   #{"GIT_DIR"
@@ -1016,7 +1020,7 @@
   [path]
   (let [f (some-> path io/file)]
     (when (and (some? f) (.exists f))
-      (doseq [child (reverse (file-seq f))]
+      (doseq [^java.io.File child (reverse (file-seq f))]
         (try
           (Files/deleteIfExists (.toPath child))
           (catch Exception _ nil))))))
@@ -1126,7 +1130,7 @@
               (git-run! repo-dir ["push" "--quiet" "origin" (format "HEAD:refs/heads/%s" branch)])
               (catch clojure.lang.ExceptionInfo e
                 (if (git-push-rejected? e)
-                  (throw (ex-info (.getMessage e) (assoc (ex-data e) :git_push_rejected true) e))
+                  (throw (ex-info (ex-message e) (assoc (ex-data e) :git_push_rejected true) e))
                   (throw e))))
             (file-sha256-hex target-path))))
       (finally
@@ -2261,7 +2265,7 @@
                                 conflict (detect-sync-conflict remote-rev-before current-rev current-has-remote)
                                 reason (:reason conflict)]
                             (if (:has-conflict conflict)
-                              (throw (ex-info (or (:message conflict) (.getMessage e))
+                              (throw (ex-info (or (:message conflict) (ex-message e))
                                               (cond-> {:reason reason}
                                                 (some? (:expected-rev conflict)) (assoc :expected_rev (:expected-rev conflict))
                                                 (some? (:actual-rev conflict)) (assoc :actual_rev (:actual-rev conflict))
@@ -3273,12 +3277,12 @@
       :else
       (prompt-new-passphrase-for-rekey!))))
 
-(defn- vault-dir-file
+(defn- ^java.io.File vault-dir-file
   [vault-path]
   (or (.getParentFile (io/file vault-path))
       (io/file ".")))
 
-(defn- vault-rekey-backup-dir-file
+(defn- ^java.io.File vault-rekey-backup-dir-file
   [vault-path backup-dir]
   (if-let [d (some-> backup-dir str/trim not-empty)]
     (io/file d)
@@ -3286,7 +3290,7 @@
 
 (defn- assert-backup-dir-exists!
   [vault-path backup-dir]
-  (let [dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
+  (let [^java.io.File dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
         dir-path (.getPath dir-file)]
     (when-not (.exists dir-file)
       (throw (ex-info (format "backup directory not found: %s" dir-path)
@@ -3311,8 +3315,8 @@
 (defn- create-vault-backup!
   [vault-path backup-dir]
   (let [vault-file (io/file vault-path)
-        vault-dir (vault-dir-file vault-path)
-        backup-dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
+        ^java.io.File vault-dir (vault-dir-file vault-path)
+        ^java.io.File backup-dir-file (vault-rekey-backup-dir-file vault-path backup-dir)
         _ (when (and (not (.exists backup-dir-file))
                      (not (.mkdirs backup-dir-file)))
             (throw (ex-info (format "failed to create backup directory %s" (.getPath backup-dir-file))
@@ -3562,7 +3566,8 @@
                   pp (resolve-passphrase! ctx opts)
                   sec (vault-v2/get-secret path pp (first names))]
               (if json?
-                (let [value-b64 (.encodeToString (Base64/getEncoder) (.getBytes (:value sec) "UTF-8"))]
+                (let [^String secret-value (:value sec)
+                      value-b64 (.encodeToString (Base64/getEncoder) (.getBytes secret-value "UTF-8"))]
                   (secret-json-success {:action "get"
                                         :name (:name sec)
                                         :encoding "base64"
@@ -3661,16 +3666,16 @@
   (let [reason (or (:reason (ex-data e)) reasons/reason-projection-failed)
         code (projection-error-code reason)]
     (if json?
-      (error-json code reason (.getMessage e))
-      (error-text code (.getMessage e)))))
+      (error-json code reason (ex-message e))
+      (error-text code (ex-message e)))))
 
 (defn- envfile-error-result
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-envfile-failed)
         code (envfile-error-code reason)]
     (if json?
-      (error-json code reason (.getMessage e))
-      (error-text code (.getMessage e)))))
+      (error-json code reason (ex-message e))
+      (error-text code (ex-message e)))))
 
 (defn- resolve-map-path!
   [opts missing-reason]
@@ -3707,7 +3712,7 @@
 (defn- wrap-mapfile-ex
   [e default-reason]
   (let [reason (normalize-mapfile-reason (:reason (ex-data e)) default-reason)]
-    (ex-info (.getMessage e) {:reason reason} e)))
+    (ex-info (ex-message e) {:reason reason} e)))
 
 (defn- parse-map-source!
   [source default-reason]
@@ -3983,8 +3988,8 @@
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-bundle-failed)]
     (if json?
-      (error-json exit-code/code-bundle-failed reason (.getMessage e))
-      (error-text exit-code/code-bundle-failed (.getMessage e)))))
+      (error-json exit-code/code-bundle-failed reason (ex-message e))
+      (error-text exit-code/code-bundle-failed (ex-message e)))))
 
 (defn- resolve-identity!
   [ctx opts]
@@ -4124,15 +4129,15 @@
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-doctor-failed)]
     (if json?
-      (error-json exit-code/code-doctor-failed reason (.getMessage e))
-      (error-text exit-code/code-doctor-failed (.getMessage e)))))
+      (error-json exit-code/code-doctor-failed reason (ex-message e))
+      (error-text exit-code/code-doctor-failed (ex-message e)))))
 
 (defn- init-error-result
   [json? e]
   (let [reason (or (:reason (ex-data e)) reasons/reason-init-failed)]
     (if json?
-      (error-json exit-code/code-init-failed reason (.getMessage e))
-      (error-text exit-code/code-init-failed (.getMessage e)))))
+      (error-json exit-code/code-init-failed reason (ex-message e))
+      (error-text exit-code/code-init-failed (ex-message e)))))
 
 (defn- handle-doctor
   [ctx args]

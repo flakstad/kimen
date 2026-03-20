@@ -4,6 +4,8 @@
     [clojure.string :as str]
     [kimen.reason-codes :as reasons]))
 
+(set! *warn-on-reflection* true)
+
 (def default-ci-sync-gate-workflow-path ".github/workflows/kimen-sync-gate.yml")
 (def default-ci-pr-safety-workflow-path ".github/workflows/kimen-pr-safety.yml")
 (def default-ci-deploy-workflow-path ".github/workflows/kimen-deploy.yml")

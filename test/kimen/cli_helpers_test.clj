@@ -5,6 +5,8 @@
    [kimen.cli.usage :as usage]
    [clojure.string :as str]))
 
+(set! *warn-on-reflection* true)
+
 (deftest parse-flag-value-cases
   (testing "flag value via separate arg"
     (let [[v rest-args err] (parse/parse-flag-value ["--vault" "/tmp/vault.db" "tail"] "--vault")]

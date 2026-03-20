@@ -4,6 +4,8 @@
     [kimen.mapfile :as mapfile]
     [kimen.reason-codes :as reasons]))
 
+(set! *warn-on-reflection* true)
+
 (def valid-modes #{"run" "render" "envfile"})
 
 (defn- fail!
@@ -131,7 +133,7 @@
         (try
           (mapfile/parse-string source)
           (catch Exception e
-            (fail! reasons/reason-plan-failed (.getMessage e))))]
+            (fail! reasons/reason-plan-failed (ex-message e))))]
     (plan-from-mappings {:request request
                          :env-paths env-paths
                          :mode mode

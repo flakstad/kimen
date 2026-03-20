@@ -10,6 +10,8 @@
    [kimen.exit-code :as exit-code]
    [kimen.json :as json]))
 
+(set! *warn-on-reflection* true)
+
 (defn- run-cli
   ([argv files]
    (run-cli argv files {}))
@@ -1235,7 +1237,9 @@
         (is (nil? (get-in cfg ["sync" "origin"]))))
 
       (let [backups (file-seq (.getParentFile (io/file vault-path)))
-            backup-files (filter #(str/starts-with? (.getName %) "vault.db.bak.") backups)]
+            backup-files (filter (fn [^java.io.File f]
+                                   (str/starts-with? (.getName f) "vault.db.bak."))
+                                 backups)]
         (is (empty? backup-files))))))
 
 (deftest sync-push-dry-run-does-not-mutate-baseline-or-remote-fs

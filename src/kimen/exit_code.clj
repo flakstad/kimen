@@ -1,5 +1,7 @@
 (ns kimen.exit-code)
 
+(set! *warn-on-reflection* true)
+
 (def code-secret-not-found 12)
 (def code-secret-exists 13)
 (def code-vault-not-found 14)

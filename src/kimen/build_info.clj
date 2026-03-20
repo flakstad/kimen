@@ -1,5 +1,7 @@
 (ns kimen.build-info)
 
+(set! *warn-on-reflection* true)
+
 (defn current
   []
   {:version (or (some-> (System/getProperty "kimen.version") str)

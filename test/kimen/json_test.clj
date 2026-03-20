@@ -3,6 +3,8 @@
     [clojure.test :refer [deftest is testing]]
     [kimen.json :as json]))
 
+(set! *warn-on-reflection* true)
+
 (deftest write-str-encodes-basic-values
   (is (= "{\"ok\":true,\"count\":2,\"label\":\"x\"}"
          (json/write-str (array-map :ok true :count 2 :label "x")))))

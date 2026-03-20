@@ -12,6 +12,8 @@
     [java.nio.file Files Path Paths StandardCopyOption]
     [java.nio.file.attribute PosixFilePermission]))
 
+(set! *warn-on-reflection* true)
+
 (def format-version "kimen-bundle-v1")
 (def cipher-name "aes-gcm")
 (def aad-data "kimen-bundle-v1|vault")
@@ -181,8 +183,9 @@
   (ensure-parent-dir! path)
   (let [target (Paths/get path (make-array String 0))
         parent (or (.getParent target) (Paths/get "." (make-array String 0)))
-        tmp (Files/createTempFile parent "bundle-open." ".tmp" (make-array java.nio.file.attribute.FileAttribute 0))]
-    (Files/write tmp content (make-array java.nio.file.OpenOption 0))
+        tmp (Files/createTempFile parent "bundle-open." ".tmp" (make-array java.nio.file.attribute.FileAttribute 0))
+        ^"[Ljava.nio.file.OpenOption;" no-options (make-array java.nio.file.OpenOption 0)]
+    (Files/write tmp content no-options)
     (set-posix-600! tmp)
     (try
       (Files/move tmp target

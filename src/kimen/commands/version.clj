@@ -1,6 +1,8 @@
 (ns kimen.commands.version
   (:require [kimen.build-info :as build-info]))
 
+(set! *warn-on-reflection* true)
+
 (defn payload
   []
   (let [{:keys [version raw-version commit date]} (build-info/current)]

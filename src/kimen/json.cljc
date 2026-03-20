@@ -2,6 +2,8 @@
   #?(:bb (:require [cheshire.core :as cheshire])
      :clj (:require [clojure.data.json :as data-json])))
 
+(set! *warn-on-reflection* true)
+
 (defn write-str
   [x]
   #?(:bb (cheshire/generate-string x)

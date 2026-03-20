@@ -3,6 +3,8 @@
     [clojure.java.io :as io]
     [clojure.string :as str]))
 
+(set! *warn-on-reflection* true)
+
 (def env-var-re #"^[A-Za-z_][A-Za-z0-9_]*$")
 (def profile-name-re #"^[A-Za-z0-9_.-]+$")
 (def env-profile-dir "KIMEN_PROFILE_DIR")

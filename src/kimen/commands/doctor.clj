@@ -14,6 +14,8 @@
     [java.nio.file Files]
     [java.security MessageDigest]))
 
+(set! *warn-on-reflection* true)
+
 (def doctor-status-ok "ok")
 (def doctor-status-warning "warning")
 (def doctor-status-error "error")
@@ -74,7 +76,7 @@
                 (add-check state "mapping_profile" doctor-status-ok (format "%s -> %s" profile p))
                 p)
               (catch Exception e
-                (reduced (add-check state "mapping_spec" doctor-status-error (.getMessage e))))))]
+                (reduced (add-check state "mapping_spec" doctor-status-error (ex-message e))))))]
       (if (reduced? resolved-path)
         @resolved-path
         (try
@@ -95,7 +97,7 @@
               :else
               (add-check state "mapping_lint" doctor-status-ok "no lint issues")))
           (catch Exception e
-            (add-check state "mapping_parse" doctor-status-error (.getMessage e))))))))
+            (add-check state "mapping_parse" doctor-status-error (ex-message e))))))))
 
 (defn- bundle-checks
   [state {:keys [bundle-in identity]}]
@@ -137,7 +139,7 @@
                                                            :stdin nil})]
                       [(add-check state "bundle_identity" doctor-status-ok identity) loaded-id true])
                     (catch Exception e
-                      [(add-check state "bundle_identity" doctor-status-error (.getMessage e)) nil false])))))
+                      [(add-check state "bundle_identity" doctor-status-error (ex-message e)) nil false])))))
             state
             (cond
               (and bundle-ready? identity-ready?)
@@ -145,7 +147,7 @@
                 (bundle/validate-bundle-with-identity bundle-in identity-data)
                 (add-check state "bundle_decrypt" doctor-status-ok "bundle decrypt validated")
                 (catch Exception e
-                  (add-check state "bundle_decrypt" doctor-status-error (.getMessage e))))
+                  (add-check state "bundle_decrypt" doctor-status-error (ex-message e))))
 
               (and bundle-ready? (str/blank? identity))
               (add-check state "bundle_decrypt" doctor-status-warning "bundle file present but no identity provided; decryptability not verified")
@@ -308,7 +310,7 @@
         cfg-path (try
                    (config/resolve-config-path (:config-path ctx))
                    (catch Exception e
-                     (str "unavailable:" (.getMessage e))))
+                     (str "unavailable:" (ex-message e))))
         state (if (str/starts-with? cfg-path "unavailable:")
                 (add-check state "config_path" doctor-status-error cfg-path)
                 (add-check state "config_path" doctor-status-ok cfg-path))
@@ -320,7 +322,7 @@
                       "config file not found (defaults apply)")]
             [cfg true (add-check state "config_json" doctor-status-ok msg)])
           (catch Exception e
-            [nil false (add-check state "config_json" doctor-status-error (.getMessage e))]))
+            [nil false (add-check state "config_json" doctor-status-error (ex-message e))]))
         state (passphrase-source-check cfg-error cfg cfg-valid?)
         vault-path (vault-path/resolve-vault-path ctx nil)
         state (add-check state "vault_path" doctor-status-ok vault-path)
@@ -343,7 +345,7 @@
                     kdf (get-in info ["kdf" "name"])]
                 (add-check state "vault_metadata" doctor-status-ok (format "format=%s kdf=%s" fmt kdf)))
               (catch Exception e
-                (add-check state "vault_metadata" doctor-status-error (.getMessage e))))))
+                (add-check state "vault_metadata" doctor-status-error (ex-message e))))))
         state (mapping-checks state {:map-path map-path :profile profile})
         state (bundle-checks state {:bundle-in bundle-in :identity identity})
         state (remote-checks state cfg cfg-valid?)]

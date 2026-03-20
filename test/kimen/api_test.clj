@@ -6,6 +6,8 @@
    [kimen.api :as api]
    [kimen.exit-code :as exit-code]))
 
+(set! *warn-on-reflection* true)
+
 (deftest run-returns-cli-result
   (let [{:keys [exit-code stdout stderr]} (api/run ["version" "--json"])]
     (is (= 0 exit-code))
