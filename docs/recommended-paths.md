@@ -5,7 +5,7 @@ Use one of these as your default operating pattern.
 ## 1) Local dev (single machine)
 
 1. Initialize vault and set secrets.
-2. Use maps/profiles for repeatable intent.
+2. Use a map file or profile for a reusable projection spec.
 3. Run apps with `kimen project run`.
 
 Example:

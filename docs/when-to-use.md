@@ -7,7 +7,7 @@ Use Kimen when you want:
 - Secrets scoped to a single process run (`kimen run`)
 - Secrets materialized into files with strict perms (`kimen render`, `kimen envfile`)
 - A safe planning step that never prints secret values (`kimen plan`)
-- Repeatable intent via maps/profiles (`--map`, `--profile`)
+- Reusable projection specs via map files and profiles (`--map`, `--profile`)
 - Team sync for `fs`/`git` remotes with orchestration-first defaults (`kimen sync`, `sync preflight`)
 
 Use something else when you want:

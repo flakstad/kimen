@@ -1,10 +1,11 @@
 # Maps and profiles
 
 Kimen supports map files and profiles to avoid repeating long lists of `--env` / `--file` flags.
+A map file is the projection spec itself. A profile is a name that resolves to a map file.
 
 ## Map files (`--map`)
 
-A map file is a comment-friendly, line-oriented projection spec.
+A map file is a comment-friendly, line-oriented projection spec. By convention, these files use the `.kmap` extension.
 
 Each non-empty line is one of:
 
@@ -49,7 +50,7 @@ kimen run --map .kimen/profiles/linje-prod.kmap -- clojure -M:dev
 
 ## Profiles (`--profile`)
 
-Profiles are named map files. A profile name resolves to `<name>.kmap` in one of these locations:
+Profiles are named map files. For example, `--profile linje-prod` resolves to `linje-prod.kmap` in one of these locations:
 
 1) `$KIMEN_PROFILE_DIR/<name>.kmap`
 2) `./.kimen/profiles/<name>.kmap` (relative to the current working directory)

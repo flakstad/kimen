@@ -133,6 +133,13 @@
     "  kimen bundle open --in <path> [--out-vault <path>] (--identity <path>|--identity-stdin) [--overwrite] [--json|--edn]"
     ""]))
 
+(def map-profile-usage-note
+  (str/join
+   "\n"
+   ["Notes:"
+    "  --map points to a .kmap file."
+    "  --profile resolves a profile name to <name>.kmap."]))
+
 (def map-usage
   (str/join
    "\n"
@@ -140,6 +147,8 @@
     ""
     "Usage:"
     "  kimen map lint [--map <path>|--profile <name>] [--mode all|run|render|envfile] [--strict] [--json|--edn]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def init-usage
@@ -160,6 +169,8 @@
     ""
     "Usage:"
     "  kimen run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def render-usage
@@ -169,6 +180,8 @@
     ""
     "Usage:"
     "  kimen render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def envfile-usage
@@ -178,6 +191,8 @@
     ""
     "Usage:"
     "  kimen envfile [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] --out <path> [--files-dir <path>] [--json|--edn]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def plan-usage
@@ -187,6 +202,8 @@
     ""
     "Usage:"
     "  kimen plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def doctor-usage
@@ -196,6 +213,8 @@
     ""
     "Usage:"
     "  kimen doctor [--map <path>|--profile <name>] [--bundle-in <path>] [--identity <path>] [--strict] [--allow-missing-vault] [--json|--edn]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (def project-usage
@@ -207,6 +226,8 @@
     "  kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]"
     "  kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]"
     "  kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]"
+    ""
+    map-profile-usage-note
     ""]))
 
 (defn help-topics

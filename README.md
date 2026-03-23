@@ -123,7 +123,9 @@ kimen run \
 
 ## Maps and Profiles
 
-Use `.kmap` files for repeatable intent:
+Use `.kmap` files to define reusable projection maps.
+A profile is the name Kimen uses to load one of those map files, usually from `.kimen/profiles/<name>.kmap`.
+In this example, `dev` is the profile name and `.kimen/profiles/dev.kmap` is the profile file:
 
 ```bash
 mkdir -p .kimen/profiles

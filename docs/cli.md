@@ -14,6 +14,8 @@ This document describes what each command does, how it works, and the typical us
   - interactive terminal prompt (when available)
 - Kimen tries hard to avoid printing secret values by default.
 - Many commands accept `--map` / `--profile` to avoid repeating long mapping lists (see `docs/maps.md`).
+  - `--map` points to a `.kmap` file directly.
+  - `--profile` resolves a profile name to `<name>.kmap`.
 - For machine integrations, see the canonical contract in `docs/automation-contract.md`.
 - Machine-readable output supports `--json` and `--edn` (mutually exclusive).
   - `--json` uses JSON object keys.
@@ -542,7 +544,7 @@ kimen run --file cfg.txt=api_key -- sh -lc 'cat "$KIMEN_FILES_DIR/cfg.txt"'
 kimen run --stdin api_key -- sh -lc 'cat -'
 ```
 
-Maps and profiles:
+Maps and profiles (`--map` points to a `.kmap` file; `--profile` resolves a profile name to `<name>.kmap`):
 
 ```bash
 kimen run --map .kimen/profiles/linje-prod.kmap -- clojure -M:dev
@@ -618,7 +620,7 @@ Automation notes:
 - on failure, `kimen render --json` emits a structured JSON error envelope on stderr
 - render error envelopes include a machine-readable `reason` field
 
-Maps and profiles:
+Maps and profiles (`--map` points to a `.kmap` file; `--profile` resolves a profile name to `<name>.kmap`):
 
 ```bash
 kimen render --dir "$OUTDIR" --map .kimen/profiles/linje-prod.kmap

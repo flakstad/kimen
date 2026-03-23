@@ -4290,17 +4290,29 @@
 
       (= "run" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]\n")
+        (help-result (str "Usage: kimen project run [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--files-dir <path>] [--json|--edn] [--dry-run] [-- <command> [args...]]\n"
+                          "\n"
+                          "Notes:\n"
+                          "  --map points to a .kmap file.\n"
+                          "  --profile resolves a profile name to <name>.kmap.\n"))
         (handle-run ctx (rest args)))
 
       (= "render" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]\n")
+        (help-result (str "Usage: kimen project render [--map <path>|--profile <name>] [--file relpath=<value>] (--dir <path>|--systemd-service <name>) [--runtime-dir <path>] [--print-systemd-hints] [--json|--edn]\n"
+                          "\n"
+                          "Notes:\n"
+                          "  --map points to a .kmap file.\n"
+                          "  --profile resolves a profile name to <name>.kmap.\n"))
         (handle-render ctx (rest args)))
 
       (= "plan" (first args))
       (if (help-arg? (second args))
-        (help-result "Usage: kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]\n")
+        (help-result (str "Usage: kimen project plan [--map <path>|--profile <name>] [--env VAR=<value>] [--file relpath=<value>] [--envpath VAR=relpath] [--stdin <value>] [--against-map <path>|--against-profile <name>] [--mode run|render|envfile] [--json|--edn] [-- <command> [args...]]\n"
+                          "\n"
+                          "Notes:\n"
+                          "  --map points to a .kmap file.\n"
+                          "  --profile resolves a profile name to <name>.kmap.\n"))
         (handle-plan ctx (rest args)))
 
       :else
