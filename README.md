@@ -1,222 +1,303 @@
 # Kimen
 
-Kimen is a local-first tool for bringing secrets into usable runtime form. It stores secrets securely at rest and produces short-lived, context-specific projections—such as environment variables, rendered configuration files, or scoped execution contexts—only when they are intentionally requested.
+Kimen is a local-first secrets tool.
 
-Kimen treats secrets as *latent capabilities*, not static values: secrets remain inert by default, and only become “real” in a specific form when intent is expressed.
+It keeps secrets encrypted at rest in a local vault and projects them into runtime form only when you explicitly ask: env vars, files, envfiles, or a single scoped command execution.
 
-## Why Kimen
+The design goal is simple:
 
-Kimen solves one problem especially well:
+> keep secrets inert by default, and only make them usable for a specific command, file, or runtime context.
 
-> “I want secrets encrypted at rest locally, but I need them to show up only at the moment I run something, as env vars or files, and then disappear.”
+## What It Does
 
-That’s what projections are for: `kimen run` scopes secrets to a single process, and file projections can live in a temp directory that is removed immediately after the command exits.
+- Local encrypted vault
+- Secret lifecycle commands: `set`, `list`, `get`, `rm`, `mv`
+- Projection commands:
+  - `kimen run`
+  - `kimen render`
+  - `kimen envfile`
+  - `kimen plan`
+  - `kimen project run|render|plan`
+- Reusable projection specs via maps and profiles
+- JSON output and typed exit codes for automation
+- Optional Team Sync over `fs` and `git` remotes
+- Bundle transport via `age`
 
-## Status
+## Install
 
-Kimen is early-stage and evolving. The CLI and on-disk formats may change.
-Releases use CalVer tags: `vYYYY.M.PATCH` (for example, `v2026.2.1`).
-
-## Team Sync
-
-Kimen ships Team Sync for `fs` and `git` remotes, including:
-
-- orchestration-first default `kimen sync` (with `--check` / `--dry-run` / `--json`)
-- `sync init/preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`
-- disjoint-merge pulls via `sync pull --reconcile`
-- orchestration auto-reconcile for disjoint local+remote edits (`kimen sync` selects reconcile path)
-- explicit overlap conflict handling via `sync resolve --take local|remote`
-- strict CI gating via `sync preflight --strict`
-- no-mutation preflight via `sync pull --dry-run` and `sync push --dry-run`
-- remote readiness + sync-state checks in `kimen doctor`
-- bootstrap/setup ergonomics via `sync init` and automatic recipient derivation in `remote add/set` (with opt-out flag)
-
-See:
-
-- `docs/team-sync-v1.md`
-- `docs/team-sync-v1-checklist.md`
-- `docs/automation-contract.md`
-
-## Mental model
-
-- **Secrets** are encrypted, inert source material.
-- **Intent** is an explicit request for a secret *in a particular form*, for a particular use.
-- **Projections** are the realized output (env vars, files, exec contexts, etc.) with an explicit lifetime.
-
-In practice, most projections read bytes from the local vault by secret name. Kimen can also support producing projected bytes at projection time (e.g. from local commands) while keeping the same projection-first workflow.
-
-## Features
-
-- Local encrypted vault (`vault.db`)
-- Secret lifecycle commands (`secret set/list/rm/mv`, with `secret get` as an escape hatch)
-- Script-friendly JSON + typed exit codes across `secret`, `vault`, `config`, `bundle`, `plan`, `envfile`, and projection commands
-- Projections:
-  - `kimen run` (scoped env/files for a single command)
-  - `kimen render` (write secret files with strict perms)
-  - `kimen project run/render/plan` (explicit grouped projection commands)
-  - `kimen render --systemd-service ...` (predictable runtime path mode for service wiring)
-  - `kimen envfile` (write `KEY=VALUE` envfiles without printing secrets)
-- Repeatable intent: `--map` / `--profile`
-- Plan diffing: `kimen plan --against-map/--against-profile`
-- Map/profile linting: `kimen map lint` (with optional `--strict`)
-- Preflight checks: `kimen doctor` (human/JSON, strict mode)
-- Build metadata: `kimen version` (`--json` supported)
-- Shell completion: `kimen completion <bash|zsh|fish|powershell>`
-- Safe planning: `kimen plan` (no secret values)
-- CI scaffolding: `kimen init ci-pr-safety|ci-deploy|ci-sync-gate` (generate workflow starters)
-- CI/sync primitive: `kimen bundle seal/open` (ciphertext transport via `age`)
-- Local remote sync: `kimen remote add/get/set/list/rm` + orchestration/default sync (`kimen sync`) + explicit sync subcommands (`init/preflight/changes/resolve/status/conflicts/push/pull/reset-baseline/unlock/restore`) for `fs` and `git` remotes (push lock files apply to shared fs remotes)
-
-## Projections
-
-Kimen’s core abstraction is the **projection**: secrets are inert at rest and only become usable when you explicitly project them into a runtime shape.
-
-Common entrypoints:
-
-- `kimen run` (preferred): run a command with projected env/files
-- `kimen render`: render projected files into a directory
-- `kimen project ...`: explicit grouped projection commands
-
-See `docs/projections.md`.
-
-## Quickstart
-
-Build and install from source:
+Build and install:
 
 ```bash
 make install
 ```
 
-Or build a local binary without installing:
+Or build without installing:
 
 ```bash
 make build
 ./dist/kimen version
 ```
 
+## Quickstart
+
+Initialize a vault:
+
+```bash
+kimen vault init
+```
+
+Store a secret:
+
+```bash
+echo -n 'shh' | kimen secret set api_key --stdin
+```
+
+Use it for one command:
+
+```bash
+kimen run --env API_KEY=api_key -- printenv API_KEY
+```
+
+Render it to a file:
+
+```bash
+OUTDIR="$(mktemp -d)"
+kimen render --dir "$OUTDIR" --file api-key.txt=api_key
+```
+
+Generate an envfile:
+
+```bash
+kimen envfile --env API_KEY=api_key --out .env.runtime
+```
+
+## Mental Model
+
+- Secrets are stored encrypted at rest.
+- A projection is a specific runtime form of a secret.
+- Projections should be explicit, scoped, and short-lived.
+
+In practice, most values come from the local vault by secret name, but mappings can also use:
+
+- bare name: secret lookup
+- `secret:<name>`: explicit secret lookup
+- `const:<literal>`: inline literal
+- `exec:<command...>`: derive value from a local command
+
+## Maps And Profiles
+
+Maps are line-oriented projection specs. Profiles are named map files.
+
+Example `.kmap`:
+
+```text
+env API_KEY=api_key
+file credentials.json=gcp_service_account_json
+envpath GOOGLE_APPLICATION_CREDENTIALS=credentials.json
+```
+
+Run with a map:
+
+```bash
+kimen run --map .kimen/profiles/dev.kmap -- ./your-app
+```
+
+Run with a profile:
+
+```bash
+kimen run --profile dev -- ./your-app
+```
+
+Profile lookup order:
+
+1. `$KIMEN_PROFILE_DIR/<name>.kmap`
+2. `./.kimen/profiles/<name>.kmap`
+3. `$XDG_CONFIG_HOME/kimen/profiles/<name>.kmap`
+4. `$HOME/.config/kimen/profiles/<name>.kmap`
+
+## CLI / API Reference
+
+The CLI is the primary API.
+
+Vault and config:
+
+- `kimen version`
+- `kimen config path|show`
+- `kimen config vault set|show|clear`
+- `kimen config unlock set|show|clear`
+- `kimen vault init|info|path|rekey`
+
+Secrets:
+
+- `kimen secret set <name> [--stdin|--value <text>]`
+- `kimen secret list`
+- `kimen secret get <name> --unsafe-stdout`
+- `kimen secret rm <name>`
+- `kimen secret mv <old-name> <new-name>`
+
+Projection and planning:
+
+- `kimen run`
+- `kimen render`
+- `kimen envfile`
+- `kimen plan`
+- `kimen map lint`
+- `kimen doctor`
+- `kimen project run|render|plan`
+
+Bundles, remotes, and sync:
+
+- `kimen bundle keygen|recipient|seal|open`
+- `kimen remote add|get|set|list|rm`
+- `kimen sync`
+- `kimen sync init|preflight|status|conflicts|changes|push|pull|resolve|reset-baseline|unlock|restore`
+
+Other:
+
+- `kimen init ci-pr-safety|ci-deploy|ci-sync-gate`
+- `kimen completion <bash|zsh|fish|powershell>`
+
+Common conventions:
+
+- vault precedence: `--vault` > `KIMEN_VAULT` > `config.vault.path` > default user config location
+- passphrase sources: `KIMEN_PASSPHRASE`, `--passphrase-cmd`, `--passphrase-stdin`, configured unlock method, then TTY prompt
+- machine-readable mode: `--json`
+
+## JSON Contract
+
+Kimen is designed to be scriptable.
+
+Rules:
+
+- success JSON is emitted on `stdout`
+- standard error envelopes are emitted on `stderr`
+- `map lint --json`, `doctor --json`, and `sync preflight --json` emit reports on `stdout`
+
+Standard error envelope:
+
+```json
+{
+  "ok": false,
+  "error": "human-readable message",
+  "exit_code": 23,
+  "reason": "machine_readable_reason"
+}
+```
+
+General rule:
+
+- success payloads that include `ok` also include `exit_code: 0`
+- `config show` is a raw JSON config dump, not a standard envelope
+
+Important success shapes:
+
+- `secret --json`: `{"ok":true,"action":"set|list|get|rm|mv","exit_code":0,...}`
+- `vault --json`: `{"ok":true,"action":"vault_init|vault_info|vault_path|vault_rekey","exit_code":0,...}`
+- `bundle --json`: `{"ok":true,"action":"bundle_keygen|bundle_recipient|bundle_seal|bundle_open","exit_code":0,...}`
+- `remote --json`: `{"ok":true,"action":"remote_add|remote_get|remote_set|remote_list|remote_rm","exit_code":0,...}`
+- `sync --json`: orchestration report on `stdout`
+- `sync preflight --json`: preflight report on `stdout`
+
+Important reasons you can branch on include:
+
+- `secret_not_found`
+- `secret_exists`
+- `vault_not_found`
+- `wrong_passphrase`
+- `invalid_vault_file`
+- `remote_not_found`
+- `remote_exists`
+- `remote_lock_present`
+- `remote_changed`
+- `no_local_baseline`
+
+Important typed exits:
+
+- `0`: success
+- `20`: map lint failure
+- `31`: sync conflict / reconciliation required
+- `32`: sync precondition failure
+
+## Team Sync
+
+Team Sync is optional. Runtime remains local even when sync is configured.
+
+Shipped surface:
+
+- `fs` and `git` remotes
+- orchestration-first `kimen sync`
+- explicit operator subcommands for status, conflicts, pull/push, resolve, unlock, and baseline reset
+- ciphertext-only transport via `vault.age`
+- strict CI gating with `kimen sync preflight --strict --json`
+
+Recommended default operating model:
+
+- one writer pushes
+- others pull
+
+Useful commands:
+
+```bash
+kimen sync preflight --remote team --strict --json
+kimen sync conflicts --remote team --strict --json
+kimen sync push --remote team
+kimen sync pull --remote team --reconcile
+```
+
+## CI
+
+The intended CI pattern is:
+
+1. keep a ciphertext bundle such as `vault.age`
+2. open it locally inside the job with `kimen bundle open`
+3. run `doctor`, `envfile`, or `project run` against the job-local vault
+
+The repo includes starter workflow templates in `.github/workflows/`:
+
+- `kimen-pr-safety-template.yml`
+- `kimen-deploy-template.yml`
+- `kimen-sync-gate-template.yml`
+
+You can scaffold them with:
+
+```bash
+kimen init ci-pr-safety
+kimen init ci-deploy
+kimen init ci-sync-gate
+```
+
 ## Development
 
-### Pre-commit hook (tests + build)
-
-Hooks are stored in `.githooks/` and can be enabled via:
+Enable the pre-commit hook:
 
 ```bash
 git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
-### Sync E2E Smoke Test
+Run tests:
 
-Run the end-to-end sync/conflict/recovery harness:
+```bash
+go test ./...
+```
+
+Run sync E2E smoke tests:
 
 ```bash
 make sync-e2e
 make sync-e2e-git
 ```
 
-`make sync-e2e-all` runs both harnesses. `make release-check` includes both fs + git sync E2E checks.
-
-Set a vault location (optional) and initialize:
-
-```bash
-export KIMEN_VAULT="$HOME/.config/kimen/vault.db"
-kimen vault init
-```
-
-Add a secret:
-
-```bash
-echo -n 'shh' | kimen secret set api_key --stdin
-```
-
-Run a command with projected secrets (env + files):
-
-```bash
-kimen run --env API_KEY=api_key --file config.txt=api_key -- printenv API_KEY
-```
-
-Value sources:
-
-- bare value (default): secret name lookup
-- `secret:<name>`: explicit secret lookup
-- `const:<literal>`: inline literal value
-- `exec:<command...>`: derive value from command stdout
-
-Create a map/profile (optional, recommended for real projects):
-
-```bash
-mkdir -p .kimen/profiles
-cat > .kimen/profiles/dev.kmap <<'EOF'
-env API_KEY=api_key
-EOF
-kimen run --profile dev -- printenv API_KEY
-```
-
-Export/import the vault as an age-encrypted bundle (useful for CI and “no-trust” sync transports):
-
-```bash
-kimen bundle keygen --out ci.agekey --print-recipient > ci.agepub
-kimen bundle seal --out vault.age --recipient "$(cat ci.agepub)"
-kimen bundle open --in vault.age --out-vault "$KIMEN_VAULT" --identity path/to/age.key --overwrite
-```
-
-See also `docs/ci-github-actions.md`.
-
 ## Release
 
-Kimen releases use CalVer tags: `vYYYY.M.PATCH` (example: `v2026.2.1`).
-GitHub release automation triggers only for tags matching `v[0-9][0-9][0-9][0-9].[0-9]*.[0-9]*` and publishes GoReleaser artifacts from this repository.
+Releases use CalVer tags: `vYYYY.M.PATCH`.
 
-Recommended release flow:
+Cut a release with:
 
 ```bash
-# 1) Validate branch state
 make release-check
-
-# 2) Create annotated CalVer tag
 git tag -a v2026.2.1 -m "Release v2026.2.1"
-
-# 3) Push tag to cut release
 git push origin v2026.2.1
 ```
 
-Or use the helper script:
-
-```bash
-scripts/release-calver.sh v2026.2.1 --push
-```
-
-Verify:
-
-```bash
-git tag -l "v2026.*"
-gh run list --workflow release.yml --limit 5
-```
-
-Pushing a matching tag triggers [.github/workflows/release.yml](.github/workflows/release.yml), which runs GoReleaser using [.goreleaser.yaml](.goreleaser.yaml) and publishes release artifacts.
-
-## Roadmap
-
-Ideas and possible future projection types live in `docs/roadmap.md`.
-
-## Docs
-
-- `docs/cli.md`: full CLI/API reference with use-cases and how it works
-- `docs/automation-contract.md`: canonical JSON output + exit-code contract for automation
-- `docs/projections.md`: the projection model (why `run`/`render` exist)
-- `docs/ci-github-actions.md`: CI pattern using bundles + projections
-- `docs/ci-workflow-templates.md`: choose and adapt workflow templates in `.github/workflows/`
-- `docs/recommended-paths.md`: recommended default paths for dev, CI, and systemd usage
-- `docs/maps.md`: map files and profiles (`--map` / `--profile`)
-- `docs/plan-1-2-3.md`: historical milestone plan (maps/profiles, plan, envfile)
-- `docs/when-to-use.md`: guidance on when Kimen fits (and when it doesn’t)
-- `docs/alternatives.md`: adjacent tools and comparisons
-- `docs/team-sync.md`: Team Sync current model, runbooks, and boundaries
-- `docs/team-sync-roadmap.md`: delivered sync milestones + directional next phases
-- `docs/team-sync-v1.md`: Team Sync v1 guarantees, operating models, and runbooks
-- `docs/team-sync-v1-checklist.md`: Team Sync v1 exit checklist
-- `docs/threat-model.md`: what Kimen does and does not protect against
-- `docs/stability.md`: early-stage stability and upgrade expectations
-- `docs/release-v0.1-checklist.md`: milestone release checklist
-- `docs/release-notes-template.md`: draft template for GitHub release notes
-- `docs/feedback-template.md`: structured early-adopter feedback template
+The release workflow in [.github/workflows/release.yml](.github/workflows/release.yml) publishes GoReleaser artifacts for matching tags.
