@@ -1,0 +1,60 @@
+name: kimen-pr-safety-template
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Kimen profile name (without .kmap)"
+        required: false
+        default: "ci"
+      command:
+        description: "Command to plan (space-separated)"
+        required: false
+        default: "echo ci-check"
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build kimen
+        run: go build -o kimen ./cmd/kimen
+
+      - name: Template checklist
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROFILE="${{ inputs.profile }}"
+          MAP_PATH=".kimen/profiles/${PROFILE}.kmap"
+          if [[ ! -f "$MAP_PATH" ]]; then
+            echo "::error::Missing map file: $MAP_PATH"
+            exit 1
+          fi
+
+      - name: Map lint + plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROFILE="${{ inputs.profile }}"
+
+          ./kimen map lint --profile "$PROFILE" --strict --json | tee kimen-map-lint.json
+
+          # shellcheck disable=SC2206
+          CMD=( ${{ inputs.command }} )
+          ./kimen project plan --profile "$PROFILE" --json -- "${CMD[@]}" | tee kimen-plan.json
+
+      - name: Upload Kimen artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kimen-pr-safety-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            kimen-map-lint.json
+            kimen-plan.json

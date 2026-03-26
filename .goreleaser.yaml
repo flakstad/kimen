@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: kimen
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: kimen-unix
+    main: ./cmd/kimen
+    binary: kimen
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X kimen/internal/buildinfo.Version={{ .Version }}
+      - -X kimen/internal/buildinfo.Commit={{ .Commit }}
+      - -X kimen/internal/buildinfo.Date={{ .Date }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: kimen-windows
+    main: ./cmd/kimen
+    binary: kimen
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X kimen/internal/buildinfo.Version={{ .Version }}
+      - -X kimen/internal/buildinfo.Commit={{ .Commit }}
+      - -X kimen/internal/buildinfo.Date={{ .Date }}
+    goos:
+      - windows
+    goarch:
+      - amd64
+
+archives:
+  - id: unix
+    builds:
+      - kimen-unix
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  - id: windows
+    builds:
+      - kimen-windows
+    format: zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
