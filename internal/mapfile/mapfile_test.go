@@ -33,15 +33,11 @@ envpath GOOGLE_APPLICATION_CREDENTIALS=key.json
 }
 
 func TestResolveProfile_EnvDir(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "linje-prod.kmap"), []byte("env X=x\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	old := os.Getenv(envProfileDir)
-	_ = os.Setenv(envProfileDir, dir)
-	t.Cleanup(func() { _ = os.Setenv(envProfileDir, old) })
+	t.Setenv(envProfileDir, dir)
 
 	p, err := ResolveProfile("linje-prod")
 	if err != nil {
@@ -71,8 +67,6 @@ func TestResolveProfile_InvalidName(t *testing.T) {
 }
 
 func TestResolveProfile_ChecksUserHomeConfigDirWhenXDGConfigHomeMisses(t *testing.T) {
-	t.Parallel()
-
 	homeDir := t.TempDir()
 	xdgDir := t.TempDir()
 	profilePath := filepath.Join(homeDir, ".config", "kimen", "profiles", "linje-prod.kmap")
@@ -83,17 +77,9 @@ func TestResolveProfile_ChecksUserHomeConfigDirWhenXDGConfigHomeMisses(t *testin
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	oldXDG := os.Getenv("XDG_CONFIG_HOME")
-	oldProfileDir := os.Getenv(envProfileDir)
-	_ = os.Unsetenv(envProfileDir)
-	_ = os.Setenv("HOME", homeDir)
-	_ = os.Setenv("XDG_CONFIG_HOME", xdgDir)
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("XDG_CONFIG_HOME", oldXDG)
-		_ = os.Setenv(envProfileDir, oldProfileDir)
-	})
+	t.Setenv(envProfileDir, "")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 
 	p, err := ResolveProfile("linje-prod")
 	if err != nil {
