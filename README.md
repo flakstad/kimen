@@ -20,6 +20,7 @@ The design goal is simple:
   - `kimen project run|render|plan`
 - Reusable projection specs via maps and profiles
 - JSON output and typed exit codes for automation
+- Short-lived local unlock sessions for trusted same-user tools and agents
 - Optional Team Sync over `fs` and `git` remotes
 - Bundle transport via `age`
 
@@ -71,11 +72,20 @@ Generate an envfile:
 kimen envfile --env API_KEY=api_key --out .env.runtime
 ```
 
+Unlock once for a short local session:
+
+```bash
+kimen session start --ttl 15m
+kimen secret list
+kimen session lock
+```
+
 ## Mental Model
 
 - Secrets are stored encrypted at rest.
 - A projection is a specific runtime form of a secret.
 - Projections should be explicit, scoped, and short-lived.
+- An unlock session is a temporary local grant to reuse the vault passphrase for the same vault.
 
 In practice, most values come from the local vault by secret name, but mappings can also use:
 
@@ -126,6 +136,7 @@ Vault and config:
 - `kimen config vault set|show|clear`
 - `kimen config unlock set|show|clear`
 - `kimen vault init|info|path|rekey`
+- `kimen session start|status|lock|stop`
 
 Secrets:
 
@@ -151,7 +162,6 @@ Bundles, remotes, and sync:
 - `kimen remote add|get|set|list|rm`
 - `kimen sync`
 - `kimen sync init|preflight|status|conflicts|changes|push|pull|resolve|reset-baseline|unlock|restore`
-- `kimen session start|status|lock|stop`
 
 Other:
 
@@ -166,7 +176,7 @@ Common conventions:
 
 ## Unlock Sessions
 
-`kimen session` provides a short-lived, local unlock window for trusted same-user processes.
+`kimen session` provides a short-lived, local unlock window for trusted same-user processes. It is useful when you want tools, scripts, or AI agents running as your user to use Kimen for a bounded period without receiving or re-entering the vault passphrase.
 
 ```bash
 kimen session start --ttl 15m
@@ -175,9 +185,39 @@ kimen session lock
 kimen session stop
 ```
 
-`session start` verifies the passphrase against the selected vault and stores it only in a background daemon's memory. Commands that open that same vault reuse the session when no explicit passphrase source was provided. `lock` forgets the in-memory passphrase, and `stop` shuts down the daemon.
+`session start` verifies the passphrase against the selected vault and stores it only in a background daemon's memory. The daemon listens on a local Unix socket and keeps an idle TTL. Each successful reuse refreshes the expiry.
 
-The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `$XDG_RUNTIME_DIR/kimen`, or the user cache directory. Treat an active session as a deliberate grant to local processes running as your user for the TTL window.
+Commands that open the same vault reuse the session when no explicit passphrase source was provided:
+
+```bash
+kimen session start --ttl 15m
+cd /some/other/project
+kimen secret list --vault ~/.config/kimen/vault.db
+kimen envfile --env API_KEY=api_key --out .env.runtime
+kimen session lock
+```
+
+Session reuse is scoped by the canonical vault path, not by the current directory. If a command resolves to a different vault path, Kimen falls back to the normal passphrase sources.
+
+Passphrase source precedence is:
+
+1. `KIMEN_PASSPHRASE`
+2. `--passphrase-cmd`
+3. `--passphrase-stdin`
+4. active local session for the same vault
+5. configured unlock method
+6. TTY prompt
+
+`session status` reports whether the daemon is stopped, locked, or unlocked:
+
+```bash
+kimen session status
+kimen session status --json
+```
+
+`session lock` forgets the in-memory passphrase but leaves the daemon running. `session stop` forgets the passphrase and shuts down the daemon.
+
+The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `$XDG_RUNTIME_DIR/kimen`, or the user cache directory with strict local permissions. Treat an active session as a deliberate grant: any local process running as your OS user can use Kimen commands against the unlocked vault until the session is locked, stopped, or expires. This is not a sandbox boundary between processes running as the same user.
 
 ## JSON Contract
 
