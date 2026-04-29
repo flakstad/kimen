@@ -20,11 +20,12 @@ const envPassphrase = "KIMEN_PASSPHRASE"
 type passphraseSource string
 
 const (
-	passphraseSourceEnv    passphraseSource = "env"
-	passphraseSourceCmd    passphraseSource = "cmd"
-	passphraseSourceStdin  passphraseSource = "stdin"
-	passphraseSourcePrompt passphraseSource = "prompt"
-	passphraseSourceExec   passphraseSource = "exec"
+	passphraseSourceEnv     passphraseSource = "env"
+	passphraseSourceCmd     passphraseSource = "cmd"
+	passphraseSourceStdin   passphraseSource = "stdin"
+	passphraseSourceSession passphraseSource = "session"
+	passphraseSourcePrompt  passphraseSource = "prompt"
+	passphraseSourceExec    passphraseSource = "exec"
 )
 
 var openTTY = func() (*os.File, error) {
@@ -37,6 +38,15 @@ func resolvePassphrase(passphraseCmdFlag string, passphraseStdinFlag bool) ([]by
 }
 
 func resolvePassphraseInfo(passphraseCmdFlag string, passphraseStdinFlag bool) ([]byte, passphraseSource, error) {
+	return resolvePassphraseInfoForVault("", passphraseCmdFlag, passphraseStdinFlag)
+}
+
+func resolvePassphraseForVault(vaultPath, passphraseCmdFlag string, passphraseStdinFlag bool) ([]byte, error) {
+	pp, _, err := resolvePassphraseInfoForVault(vaultPath, passphraseCmdFlag, passphraseStdinFlag)
+	return pp, err
+}
+
+func resolvePassphraseInfoForVault(vaultPath, passphraseCmdFlag string, passphraseStdinFlag bool) ([]byte, passphraseSource, error) {
 	if p := os.Getenv(envPassphrase); p != "" {
 		return []byte(p), passphraseSourceEnv, nil
 	}
@@ -52,6 +62,12 @@ func resolvePassphraseInfo(passphraseCmdFlag string, passphraseStdinFlag bool) (
 	if passphraseStdinFlag {
 		pp, err := readLine(os.Stdin)
 		return pp, passphraseSourceStdin, err
+	}
+
+	if strings.TrimSpace(vaultPath) != "" {
+		if pp, ok := resolvePassphraseFromSession(vaultPath); ok {
+			return pp, passphraseSourceSession, nil
+		}
 	}
 
 	c, _, err := loadConfig()
@@ -107,7 +123,7 @@ func openVaultWithPassphraseRetry(vaultPath, passphraseCmdFlag string, passphras
 	var opened *vault.Vault
 	pp, err := withResolvedPassphraseRetry(
 		func() ([]byte, passphraseSource, error) {
-			return resolvePassphraseInfo(passphraseCmdFlag, passphraseStdinFlag)
+			return resolvePassphraseInfoForVault(vaultPath, passphraseCmdFlag, passphraseStdinFlag)
 		},
 		func(pp []byte) error {
 			v, err := vault.Open(vaultPath, pp)

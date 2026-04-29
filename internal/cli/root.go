@@ -27,6 +27,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newConfigCommand())
 	cmd.AddCommand(newRemoteCommand())
 	cmd.AddCommand(newSyncCommand())
+	cmd.AddCommand(newSessionCommand())
 	cmd.AddCommand(newMapCommand())
 	cmd.AddCommand(newDoctorCommand())
 	cmd.AddCommand(newInitCommand())

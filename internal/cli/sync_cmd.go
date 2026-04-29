@@ -855,7 +855,7 @@ func newSyncChangesCommand() *cobra.Command {
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
-			pp, err := resolvePassphrase("", false)
+			pp, err := resolvePassphraseForVault(vaultPath, "", false)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -990,7 +990,7 @@ func newSyncResolveCommand() *cobra.Command {
 				})
 			}
 
-			pp, err := resolvePassphrase("", false)
+			pp, err := resolvePassphraseForVault(vaultPath, "", false)
 			if err != nil {
 				return syncCommandError(cmd, jsonOut, err)
 			}
@@ -2168,7 +2168,7 @@ func newSyncPullCommand() *cobra.Command {
 			remoteSnap := syncVaultSnapshot{}
 			reconcileAnalysis := syncChangeAnalysis{}
 			if reconcile && hasLocal {
-				pp, err = resolvePassphrase("", false)
+				pp, err = resolvePassphraseForVault(vaultPath, "", false)
 				if err != nil {
 					return syncCommandError(cmd, jsonOut, err)
 				}

@@ -151,6 +151,7 @@ Bundles, remotes, and sync:
 - `kimen remote add|get|set|list|rm`
 - `kimen sync`
 - `kimen sync init|preflight|status|conflicts|changes|push|pull|resolve|reset-baseline|unlock|restore`
+- `kimen session start|status|lock|stop`
 
 Other:
 
@@ -160,8 +161,23 @@ Other:
 Common conventions:
 
 - vault precedence: `--vault` > `KIMEN_VAULT` > `config.vault.path` > default user config location
-- passphrase sources: `KIMEN_PASSPHRASE`, `--passphrase-cmd`, `--passphrase-stdin`, configured unlock method, then TTY prompt
+- passphrase sources: `KIMEN_PASSPHRASE`, `--passphrase-cmd`, `--passphrase-stdin`, active local session, configured unlock method, then TTY prompt
 - machine-readable mode: `--json`
+
+## Unlock Sessions
+
+`kimen session` provides a short-lived, local unlock window for trusted same-user processes.
+
+```bash
+kimen session start --ttl 15m
+kimen session status
+kimen session lock
+kimen session stop
+```
+
+`session start` verifies the passphrase against the selected vault and stores it only in a background daemon's memory. Commands that open that same vault reuse the session when no explicit passphrase source was provided. `lock` forgets the in-memory passphrase, and `stop` shuts down the daemon.
+
+The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `$XDG_RUNTIME_DIR/kimen`, or the user cache directory. Treat an active session as a deliberate grant to local processes running as your user for the TTL window.
 
 ## JSON Contract
 
