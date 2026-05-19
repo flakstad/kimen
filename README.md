@@ -223,20 +223,6 @@ kimen session status --json
 
 The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `$XDG_RUNTIME_DIR/kimen`, or the user cache directory with strict local permissions. Treat an active session as a deliberate grant: any local process running as your OS user can use Kimen commands against the unlocked vault until the session is locked, stopped, or expires. This is not a sandbox boundary between processes running as the same user.
 
-## Release
-
-Kimen uses CalVer tags in the form `vYYYY.M.PATCH`.
-
-Homebrew publishing is handled by GoReleaser and pushes the formula to
-`flakstad/homebrew-kimen`. The source repo needs a
-`GORELEASER_GITHUB_TOKEN` secret with permission to push to that tap repo.
-
-Cut a release:
-
-```bash
-scripts/release-calver.sh v2026.5.0 --push
-```
-
 ## JSON Contract
 
 Kimen is designed to be scriptable.
@@ -361,17 +347,3 @@ Run sync E2E smoke tests:
 make sync-e2e
 make sync-e2e-git
 ```
-
-## Release
-
-Releases use CalVer tags: `vYYYY.M.PATCH`.
-
-Cut a release with:
-
-```bash
-make release-check
-git tag -a v2026.2.1 -m "Release v2026.2.1"
-git push origin v2026.2.1
-```
-
-The release workflow in [.github/workflows/release.yml](.github/workflows/release.yml) publishes GoReleaser artifacts for matching tags.
