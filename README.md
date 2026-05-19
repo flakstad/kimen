@@ -14,6 +14,12 @@ brew install flakstad/kimen/kimen
 
 Or:
 
+Download the latest release binaries for your platform from:
+
+https://github.com/flakstad/kimen/releases/latest
+
+Or:
+
 ```bash
 make install
 ```
