@@ -9,7 +9,7 @@ app starts.
 ## Install
 
 ```bash
-brew install flakstad/tap/kimen
+brew install flakstad/kimen/kimen
 ```
 
 Or:
@@ -222,7 +222,7 @@ The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `
 Kimen uses CalVer tags in the form `vYYYY.M.PATCH`.
 
 Homebrew publishing is handled by GoReleaser and pushes the formula to
-`flakstad/homebrew-tap`. The source repo needs a
+`flakstad/homebrew-kimen`. The source repo needs a
 `GORELEASER_GITHUB_TOKEN` secret with permission to push to that tap repo.
 
 Cut a release:

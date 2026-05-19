@@ -62,7 +62,7 @@ brews:
       - unix
     repository:
       owner: flakstad
-      name: homebrew-tap
+      name: homebrew-kimen
       branch: main
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     directory: Formula
