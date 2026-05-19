@@ -9,6 +9,12 @@ app starts.
 ## Install
 
 ```bash
+brew install flakstad/tap/kimen
+```
+
+Or:
+
+```bash
 make install
 ```
 
@@ -159,7 +165,6 @@ Bundles, remotes, and sync:
 Other:
 
 - `kimen init ci-pr-safety|ci-deploy|ci-sync-gate`
-- `kimen completion <bash|zsh|fish|powershell>`
 
 Common conventions:
 
@@ -211,6 +216,20 @@ kimen session status --json
 `session lock` forgets the in-memory passphrase but leaves the daemon running. `session stop` forgets the passphrase and shuts down the daemon.
 
 The session socket is local to the user and stored under `$KIMEN_SESSION_DIR`, `$XDG_RUNTIME_DIR/kimen`, or the user cache directory with strict local permissions. Treat an active session as a deliberate grant: any local process running as your OS user can use Kimen commands against the unlocked vault until the session is locked, stopped, or expires. This is not a sandbox boundary between processes running as the same user.
+
+## Release
+
+Kimen uses CalVer tags in the form `vYYYY.M.PATCH`.
+
+Homebrew publishing is handled by GoReleaser and pushes the formula to
+`flakstad/homebrew-tap`. The source repo needs a
+`GORELEASER_GITHUB_TOKEN` secret with permission to push to that tap repo.
+
+Cut a release:
+
+```bash
+scripts/release-calver.sh v2026.5.0 --push
+```
 
 ## JSON Contract
 

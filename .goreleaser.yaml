@@ -56,5 +56,23 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - name: kimen
+    ids:
+      - unix
+    repository:
+      owner: flakstad
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/flakstad/kimen
+    description: Local-first secrets tool
+    test: |
+      system "#{bin}/kimen", "version"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+
 release:
   prerelease: auto
