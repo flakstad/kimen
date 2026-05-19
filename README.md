@@ -2,44 +2,24 @@
 
 Kimen is a local-first secrets tool.
 
-It keeps secrets encrypted at rest in a local vault and projects them into runtime form only when you explicitly ask: env vars, files, envfiles, or a single scoped command execution.
-
-The design goal is simple:
-
-> keep secrets inert by default, and only make them usable for a specific command, file, or runtime context.
-
-## What It Does
-
-- Local encrypted vault
-- Secret lifecycle commands: `set`, `list`, `get`, `rm`, `mv`
-- Projection commands:
-  - `kimen run`
-  - `kimen render`
-  - `kimen envfile`
-  - `kimen plan`
-  - `kimen project run|render|plan`
-- Reusable projection specs via maps and profiles
-- JSON output and typed exit codes for automation
-- Short-lived local unlock sessions for trusted same-user tools and agents
-- Optional Team Sync over `fs` and `git` remotes
-- Bundle transport via `age`
+Apps can keep reading normal env vars and files. No need for complex config
+libraries and precedence hierarchies. Kimen prepares the environment before the
+app starts.
 
 ## Install
-
-Build and install:
 
 ```bash
 make install
 ```
 
-Or build without installing:
+Or:
 
 ```bash
 make build
 ./dist/kimen version
 ```
 
-## Quickstart
+## Basic Use
 
 Initialize a vault:
 
@@ -47,76 +27,89 @@ Initialize a vault:
 kimen vault init
 ```
 
-Store a secret:
+Add a database URL. `prod.database_url` is the key in the vault, not the value.
+Kimen prompts for the value in the terminal. It is not echoed, and it does not
+go through shell history, an env var, or a repo file.
 
 ```bash
-echo -n 'shh' | kimen secret set api_key --stdin
+kimen secret set prod.database_url
 ```
 
-Use it for one command:
+Expose it to one command as a normal environment variable:
 
 ```bash
-kimen run --env API_KEY=api_key -- printenv API_KEY
+kimen run --env DATABASE_URL=prod.database_url -- ./your-app
 ```
 
-Render it to a file:
+The app reads `DATABASE_URL`. It does not need to know about Kimen.
 
-```bash
-OUTDIR="$(mktemp -d)"
-kimen render --dir "$OUTDIR" --file api-key.txt=api_key
-```
+## Profiles
 
-Generate an envfile:
+For repeated commands, commit a profile to the repo.
 
-```bash
-kimen envfile --env API_KEY=api_key --out .env.runtime
-```
-
-Unlock once for a short local session:
-
-```bash
-kimen session start --ttl 15m
-kimen secret list
-kimen session lock
-```
-
-## Mental Model
-
-- Secrets are stored encrypted at rest.
-- A projection is a specific runtime form of a secret.
-- Projections should be explicit, scoped, and short-lived.
-- An unlock session is a temporary local grant to reuse the vault passphrase for the same vault.
-
-In practice, most values come from the local vault by secret name, but mappings can also use:
-
-- bare name: secret lookup
-- `secret:<name>`: explicit secret lookup
-- `const:<literal>`: inline literal
-- `exec:<command...>`: derive value from a local command
-
-## Maps And Profiles
-
-Maps are line-oriented projection specs. Profiles are named map files.
-
-Example `.kmap`:
+Example: `.kimen/profiles/prod.kmap`
 
 ```text
-env API_KEY=api_key
-file credentials.json=gcp_service_account_json
+env DATABASE_URL=prod.database_url
+env SERVICE_API_TOKEN=prod.service_api_token
+env PORT=const:5050
+file credentials.json=prod.gcp_credentials_json
 envpath GOOGLE_APPLICATION_CREDENTIALS=credentials.json
 ```
 
-Run with a map:
+The names on the right are keys in the vault, except `const:5050`, which is a
+literal value.
+
+Run the profile:
 
 ```bash
-kimen run --map .kimen/profiles/dev.kmap -- ./your-app
+kimen run --profile prod -- ./your-app
 ```
 
-Run with a profile:
+Kimen reads `.kimen/profiles/prod.kmap`, loads the referenced vault values, writes
+any requested files into a temporary runtime directory, sets env vars, starts the
+command, and cleans up afterwards.
+
+`envpath` writes a file and sets the environment variable to the path of that
+file. That is useful for tools that expect something like
+`GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json`.
+
+## Envfiles
+
+Some deploy tools want an envfile instead of a wrapped command:
 
 ```bash
-kimen run --profile dev -- ./your-app
+kimen envfile --profile prod --out .env.runtime
 ```
+
+The envfile is generated from the vault and profile. It does not need to live in
+the repo.
+
+## Sessions
+
+Unlock once for a short local window:
+
+```bash
+kimen session start --ttl 15m
+```
+
+Then scripts and tools running as the same user can use the vault without
+prompting again until the TTL expires.
+
+Lock it explicitly:
+
+```bash
+kimen session lock
+```
+
+## Notes
+
+- Secrets are encrypted at rest in a local vault.
+- Projections can produce env vars, files, envfiles, or one scoped command
+  execution.
+- Profiles are map files, usually committed under `.kimen/profiles/`.
+- Values can come from `secret:<name>`, bare secret names, `const:<literal>`, or
+  `exec:<command...>`.
 
 Profile lookup order:
 
