@@ -1,0 +1,94 @@
+(package main)
+
+(import fmt "core:fmt")
+(import os "core:os")
+
+(def VERSION: string "0.1.0-dev")
+
+(defn usage []
+  (println "kimen2 " VERSION)
+  (println "")
+  (println "usage:")
+  (println "  kimen2 vault init")
+  (println "  kimen2 secret set <name> --stdin")
+  (println "  kimen2 secret list")
+  (println "  kimen2 run --profile <name> -- <command>...")
+  (println "  kimen2 envfile --profile <name> --out <path>")
+  (println "  kimen2 plan --profile <name>")
+  (println "  kimen2 map lint --profile <name>")
+  (println "  kimen2 doctor --profile <name>")
+  (println "  kimen2 session start|status|lock|stop"))
+
+(defn fail! [message: string]
+  (fmt.eprintln message)
+  (os.exit 1))
+
+(defn command-at [args: []string, index: int] -> string
+  (if (< index (len args))
+    (get args index)
+    ""))
+
+(defn handle-version []
+  (println VERSION))
+
+(defn handle-vault [args: []string]
+  (let [subcmd (command-at args 2)]
+    (if (= subcmd "init")
+      (println "vault init: not implemented yet")
+      (fail! "usage: kimen2 vault init"))))
+
+(defn handle-secret [args: []string]
+  (let [subcmd (command-at args 2)]
+    (cond
+      (= subcmd "list") (println "secret list: not implemented yet")
+      (= subcmd "set") (println "secret set: not implemented yet")
+      (= subcmd "get") (println "secret get: not implemented yet")
+      (= subcmd "rm") (println "secret rm: not implemented yet")
+      (= subcmd "mv") (println "secret mv: not implemented yet")
+      :else (fail! "usage: kimen2 secret set|list|get|rm|mv"))))
+
+(defn handle-run [args: []string]
+  (println "run: not implemented yet"))
+
+(defn handle-render [args: []string]
+  (println "render: not implemented yet"))
+
+(defn handle-envfile [args: []string]
+  (println "envfile: not implemented yet"))
+
+(defn handle-plan [args: []string]
+  (println "plan: not implemented yet"))
+
+(defn handle-map [args: []string]
+  (let [subcmd (command-at args 2)]
+    (if (= subcmd "lint")
+      (println "map lint: not implemented yet")
+      (fail! "usage: kimen2 map lint --profile <name>"))))
+
+(defn handle-doctor [args: []string]
+  (println "doctor: not implemented yet"))
+
+(defn handle-session [args: []string]
+  (let [subcmd (command-at args 2)]
+    (cond
+      (= subcmd "start") (println "session start: not implemented yet")
+      (= subcmd "status") (println "session status: not implemented yet")
+      (= subcmd "lock") (println "session lock: not implemented yet")
+      (= subcmd "stop") (println "session stop: not implemented yet")
+      :else (fail! "usage: kimen2 session start|status|lock|stop"))))
+
+(defn main []
+  (let [cmd (command-at os.args 1)]
+    (cond
+      (or (= cmd "") (= cmd "help") (= cmd "-h") (= cmd "--help")) (usage)
+      (or (= cmd "version") (= cmd "--version")) (handle-version)
+      (= cmd "vault") (handle-vault os.args)
+      (= cmd "secret") (handle-secret os.args)
+      (= cmd "run") (handle-run os.args)
+      (= cmd "render") (handle-render os.args)
+      (= cmd "envfile") (handle-envfile os.args)
+      (= cmd "plan") (handle-plan os.args)
+      (= cmd "map") (handle-map os.args)
+      (= cmd "doctor") (handle-doctor os.args)
+      (= cmd "session") (handle-session os.args)
+      :else (fail! "unknown command"))))
