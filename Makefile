@@ -9,6 +9,7 @@ check:
 
 build:
 	mkdir -p dist
+	rm -rf tmp
 	mkdir -p tmp
 	cd $(KVIST_ROOT) && $(KVIST) build $(SRC) --generated ../kimen2/tmp/main.odin
 	odin build tmp -out:dist/kimen2
