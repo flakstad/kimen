@@ -2,8 +2,14 @@
 
 (import fmt "core:fmt")
 (import os "core:os")
+(import strings "core:strings")
 
 (def VERSION: string "0.1.0-dev")
+(def BYTE-EQUALS: byte 61)
+(def BYTE-SPACE: byte 32)
+(def BYTE-TAB: byte 9)
+(def RUNE-SPACE: rune 32)
+(def RUNE-TAB: rune 9)
 
 (defn usage []
   (println "kimen2 " VERSION)
@@ -27,6 +33,203 @@
   (if (< index (len args))
     (get args index)
     ""))
+
+(defn arg-flag? [args: []string, name: string] -> bool
+  (let [found false]
+    (for [arg args]
+      (when (= arg name)
+        (set! found true)))
+    found))
+
+(defn arg-value [args: []string, name: string] -> [value: string, found: bool]
+  (let [out-value ""
+        out-found false]
+    (for [arg i args]
+      (when (and (= arg name) (< (+ i 1) (len args)))
+        (set! out-value (get args (+ i 1)))
+        (set! out-found true))
+      (when (and (not out-found)
+                 (strings.has_prefix arg name)
+                 (> (len arg) (len name))
+                 (= (get arg (len name)) BYTE-EQUALS))
+        (set! out-value (slice arg (+ (len name) 1)))
+        (set! out-found true)))
+    (return out-value out-found)))
+
+(defn profile-candidate [dir: string, profile: string] -> [path: string, found: bool]
+  (let [candidate (fmt.tprintf "%s/%s.kmap" dir profile)]
+    (return candidate (and (os.exists candidate) (not (os.is_dir candidate))))))
+
+(defn resolve-profile-path [profile: string] -> [path: string, found: bool]
+  (if (= profile "")
+    (return "" false)
+    (do
+      (let [[env-dir env-found] (os.lookup_env "KIMEN_PROFILE_DIR" context.temp_allocator)]
+        (when env-found
+          (let [[candidate ok] (profile-candidate env-dir profile)]
+            (when ok
+              (return candidate true)))))
+      (let [[local-path local-ok] (profile-candidate ".kimen/profiles" profile)]
+        (when local-ok
+          (return local-path true)))
+      (let [[xdg xdg-found] (os.lookup_env "XDG_CONFIG_HOME" context.temp_allocator)]
+        (when xdg-found
+          (let [[candidate ok] (profile-candidate (fmt.tprintf "%s/kimen/profiles" xdg) profile)]
+            (when ok
+              (return candidate true)))))
+      (let [[home home-found] (os.lookup_env "HOME" context.temp_allocator)]
+        (when home-found
+          (let [[candidate ok] (profile-candidate (fmt.tprintf "%s/.config/kimen/profiles" home) profile)]
+            (when ok
+              (return candidate true)))))
+      (return "" false))))
+
+(defn map-path-from-args [args: []string] -> [path: string, ok: bool]
+  (let [[map-path has-map] (arg-value args "--map")]
+    (when (and has-map (!= map-path ""))
+      (return map-path true)))
+  (let [[profile has-profile] (arg-value args "--profile")]
+    (if has-profile
+      (let [[path found] (resolve-profile-path profile)]
+        (if found
+          (return path true)
+          (do
+            (fmt.eprintf "profile not found: %s\n" profile)
+            (return "" false))))
+      (do
+        (fmt.eprintln "missing --profile or --map")
+        (return "" false)))))
+
+(defn first-space [s: string] -> int
+  (let [idx -1]
+    (for [ch i s]
+      (when (and (= idx -1) (or (= ch RUNE-SPACE) (= ch RUNE-TAB)))
+        (set! idx i)))
+    idx))
+
+(defn strip-inline-comment [line: string] -> string
+  (let [idx (strings.index line "#")]
+    (if (> idx 0)
+      (if (or (= (get line (- idx 1)) BYTE-SPACE) (= (get line (- idx 1)) BYTE-TAB))
+        (strings.trim_space (slice line 0 idx))
+        line)
+      line)))
+
+(defn validate-pair [path: string, line-no: int, kind: string, rest: string] -> bool
+  (let [eq (strings.index rest "=")]
+    (if (<= eq 0)
+      (do
+        (fmt.eprintf "%s:%d: invalid %s mapping, expected lhs=value\n" path line-no kind)
+        false)
+      (let [left (strings.trim_space (slice rest 0 eq))
+            right (strings.trim_space (slice rest (+ eq 1)))]
+        (if (or (= left "") (= right ""))
+          (do
+            (fmt.eprintf "%s:%d: invalid %s mapping, empty side\n" path line-no kind)
+            false)
+          true)))))
+
+(defn validate-kmap-line [path: string, line-no: int, raw: string] -> bool
+  (let [line (strip-inline-comment (strings.trim_space (strings.trim_suffix raw "\r")))]
+    (if (or (= line "") (strings.has_prefix line "#"))
+      true
+      (let [space (first-space line)]
+        (if (<= space 0)
+          (do
+            (fmt.eprintf "%s:%d: expected '<kind> <mapping>'\n" path line-no)
+            false)
+          (let [kind (slice line 0 space)
+                rest (strings.trim_space (slice line space))]
+            (cond
+              (= kind "env") (validate-pair path line-no kind rest)
+              (= kind "file") (validate-pair path line-no kind rest)
+              (= kind "envpath") (validate-pair path line-no kind rest)
+              (= kind "stdin") (!= rest "")
+              :else (do
+                      (fmt.eprintf "%s:%d: unknown kind %q\n" path line-no kind)
+                      false))))))))
+
+(defn print-plan-line [path: string, line-no: int, raw: string] -> bool
+  (let [line (strip-inline-comment (strings.trim_space (strings.trim_suffix raw "\r")))]
+    (if (or (= line "") (strings.has_prefix line "#"))
+      true
+      (let [space (first-space line)]
+        (if (<= space 0)
+          (do
+            (fmt.eprintf "%s:%d: expected '<kind> <mapping>'\n" path line-no)
+            false)
+          (let [kind (slice line 0 space)
+                rest (strings.trim_space (slice line space))]
+            (cond
+              (= kind "env") (let [eq (strings.index rest "=")]
+                               (if (> eq 0)
+                                 (do
+                                   (fmt.printf "  env %s <= %s\n"
+                                               (strings.trim_space (slice rest 0 eq))
+                                               (strings.trim_space (slice rest (+ eq 1))))
+                                   true)
+                                 false))
+              (= kind "file") (let [eq (strings.index rest "=")]
+                                (if (> eq 0)
+                                  (do
+                                    (fmt.printf "  file %s <= %s\n"
+                                                (strings.trim_space (slice rest 0 eq))
+                                                (strings.trim_space (slice rest (+ eq 1))))
+                                    true)
+                                  false))
+              (= kind "envpath") (let [eq (strings.index rest "=")]
+                                   (if (> eq 0)
+                                     (do
+                                       (fmt.printf "  envpath %s <= %s\n"
+                                                   (strings.trim_space (slice rest 0 eq))
+                                                   (strings.trim_space (slice rest (+ eq 1))))
+                                       true)
+                                     false))
+              (= kind "stdin") (do
+                                 (fmt.printf "  stdin <= %s\n" rest)
+                                 true)
+              :else (do
+                      (fmt.eprintf "%s:%d: unknown kind %q\n" path line-no kind)
+                      false))))))))
+
+(defn lint-kmap [path: string] -> bool
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (do
+        (fmt.eprintf "could not read map: %s\n" path)
+        false)
+      (do
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (if (!= split-err nil)
+            false
+            (do
+              (defer (delete lines))
+              (let [ok true]
+                (for [line i lines]
+                  (when (not (validate-kmap-line path (+ i 1) line))
+                    (set! ok false)))
+                ok))))))))
+
+(defn plan-kmap [path: string] -> bool
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (do
+        (fmt.eprintf "could not read map: %s\n" path)
+        false)
+      (do
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (if (!= split-err nil)
+            false
+            (do
+              (defer (delete lines))
+              (fmt.println "mode: run")
+              (let [ok true]
+                (for [line i lines]
+                  (when (not (print-plan-line path (+ i 1) line))
+                    (set! ok false)))
+                ok))))))))
 
 (defn handle-version []
   (println VERSION))
@@ -57,16 +260,24 @@
   (println "envfile: not implemented yet"))
 
 (defn handle-plan [args: []string]
-  (println "plan: not implemented yet"))
+  (let [[path ok] (map-path-from-args args)]
+    (when (not (and ok (plan-kmap path)))
+      (os.exit 1))))
 
 (defn handle-map [args: []string]
   (let [subcmd (command-at args 2)]
     (if (= subcmd "lint")
-      (println "map lint: not implemented yet")
+      (let [[path ok] (map-path-from-args args)]
+        (if (and ok (lint-kmap path))
+          (fmt.printf "map ok: %s\n" path)
+          (os.exit 1)))
       (fail! "usage: kimen2 map lint --profile <name>"))))
 
 (defn handle-doctor [args: []string]
-  (println "doctor: not implemented yet"))
+  (let [[path ok] (map-path-from-args args)]
+    (if (and ok (lint-kmap path))
+      (fmt.printf "doctor ok: %s\n" path)
+      (os.exit 1))))
 
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
