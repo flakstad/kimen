@@ -237,17 +237,17 @@
 (defn handle-vault [args: []string]
   (let [subcmd (command-at args 2)]
     (if (= subcmd "init")
-      (println "vault init: not implemented yet")
+      (vault-init! args)
       (fail! "usage: kimen2 vault init"))))
 
 (defn handle-secret [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
-      (= subcmd "list") (println "secret list: not implemented yet")
-      (= subcmd "set") (println "secret set: not implemented yet")
-      (= subcmd "get") (println "secret get: not implemented yet")
-      (= subcmd "rm") (println "secret rm: not implemented yet")
-      (= subcmd "mv") (println "secret mv: not implemented yet")
+      (= subcmd "list") (secret-list! args)
+      (= subcmd "set") (secret-set! args)
+      (= subcmd "get") (secret-get! args)
+      (= subcmd "rm") (secret-rm! args)
+      (= subcmd "mv") (secret-mv! args)
       :else (fail! "usage: kimen2 secret set|list|get|rm|mv"))))
 
 (defn handle-run [args: []string]

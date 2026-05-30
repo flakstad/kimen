@@ -1,0 +1,336 @@
+(package main)
+
+(import argon2id "core:crypto/argon2id")
+(import arr "kvist:arr")
+(import base64 "core:encoding/base64")
+(import chacha "core:crypto/chacha20poly1305")
+(import crypto "core:crypto")
+
+(def VAULT-FORMAT: string "kimen2-vault/v1")
+(def KDF-MEMORY-KIB: u32 65536)
+(def KDF-PASSES: u32 3)
+(def KDF-PARALLELISM: u32 4)
+
+(defstruct Secret {
+  name: string
+  name-bytes: []byte
+  value: []byte
+})
+
+(defstruct Vault {
+  path: string
+  salt: [16]byte
+  nonce: [24]byte
+  secrets: [dynamic]Secret
+})
+
+(defn vault-path [args: []string] -> string
+  (let [[flag-path has-flag] (arg-value args "--vault")]
+    (when (and has-flag (!= flag-path ""))
+      (return flag-path)))
+  (let [[env-path has-env] (os.lookup_env "KIMEN_VAULT" context.temp_allocator)]
+    (when (and has-env (!= env-path ""))
+      (return env-path)))
+  (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
+    (if has-home
+      (fmt.tprintf "%s/.config/kimen2/vault.k2v" home)
+      "vault.k2v")))
+
+(defn passphrase-bytes [args: []string] -> []byte
+  (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
+    (when (not has-pass)
+      (fmt.eprintln "missing passphrase: set KIMEN_PASSPHRASE")
+      (os.exit 1))
+    (transmute []byte pass)))
+
+(defn derive-key [passphrase: []byte, salt: []byte] -> [32]byte
+  (let [key ([32]byte [])
+        params (argon2id.Parameters {memory_size: KDF-MEMORY-KIB
+                                     passes: KDF-PASSES
+                                     parallelism: KDF-PARALLELISM})
+        err (argon2id.derive (addr params) passphrase salt (slice key))]
+    (when (!= err nil)
+      (fmt.eprintln "argon2id failed")
+      (os.exit 1))
+    key))
+
+(defn seal-payload [key: []byte, nonce: []byte, plaintext: []byte] -> []byte
+  (let [ctx (chacha.Context {})
+        out (make []byte (+ (len plaintext) chacha.TAG_SIZE))]
+    (chacha.init_xchacha (addr ctx) key)
+    (defer (chacha.reset (addr ctx)))
+    (chacha.seal (addr ctx)
+                 (slice out 0 (len plaintext))
+                 (slice out (len plaintext))
+                 nonce
+                 (transmute []byte VAULT-FORMAT)
+                 plaintext)
+    out))
+
+(defn b64 [data: []byte] -> string
+  (let [[encoded err] (base64.encode data)]
+    (when (!= err nil)
+      (fmt.eprintln "base64 encode failed")
+      (os.exit 1))
+    encoded))
+
+(defn decode-b64 [data: string] -> []byte
+  (let [[decoded err] (base64.decode data)]
+    (when (!= err nil)
+      (fmt.eprintln "base64 decode failed")
+      (os.exit 1))
+    decoded))
+
+(defn clone-bytes [data: []byte] -> []byte
+  (let [out (make []byte (len data))]
+    (copy out data)
+    out))
+
+(defn delete-secret [secret: Secret]
+  (delete secret.name-bytes)
+  (delete secret.value))
+
+(defn delete-vault [vault: Vault]
+  (for [secret vault.secrets]
+    (delete-secret secret))
+  (delete vault.secrets))
+
+(defn open-payload [key: []byte, nonce: []byte, sealed: []byte] -> [payload: []byte, ok: bool]
+  (if (< (len sealed) chacha.TAG_SIZE)
+    (return nil false)
+    (let [cipher-len (- (len sealed) chacha.TAG_SIZE)
+          payload (make []byte cipher-len)
+          ctx (chacha.Context {})]
+      (chacha.init_xchacha (addr ctx) key)
+      (defer (chacha.reset (addr ctx)))
+      (if (chacha.open (addr ctx)
+                       payload
+                       nonce
+                       (transmute []byte VAULT-FORMAT)
+                       (slice sealed 0 cipher-len)
+                       (slice sealed cipher-len))
+        (return payload true)
+        (do
+          (delete payload)
+          (return nil false))))))
+
+(defn write-vault-file [path: string, passphrase: []byte, plaintext: []byte]
+  (let [salt ([16]byte [])
+        nonce ([24]byte [])]
+    (crypto.rand_bytes (slice salt))
+    (crypto.rand_bytes (slice nonce))
+    (let [key (derive-key passphrase (slice salt))
+          sealed (seal-payload (slice key) (slice nonce) plaintext)
+          salt64 (b64 (slice salt))
+          nonce64 (b64 (slice nonce))
+          sealed64 (b64 sealed)
+          body (fmt.tprintf "%s\nargon2id %d %d %d\n%s\n%s\n%s\n"
+                            VAULT-FORMAT
+                            KDF-MEMORY-KIB
+                            KDF-PASSES
+                            KDF-PARALLELISM
+                            salt64
+                            nonce64
+                            sealed64)]
+      (defer (delete sealed))
+      (defer (delete salt64))
+      (defer (delete nonce64))
+      (defer (delete sealed64))
+      (let [[dir _] (os.split_path path)]
+        (when (!= dir "")
+          (discard (os.make_directory_all dir))))
+      (when (!= (os.write_entire_file path body) nil)
+        (fmt.eprintf "could not write vault: %s\n" path)
+        (os.exit 1))
+      (discard (os.chmod path (os.perm 0o600))))))
+
+(defn vault-payload [vault: Vault] -> string
+  (let [builder (strings.builder_make)]
+    (for [secret vault.secrets]
+      (let [name64 (b64 (transmute []byte secret.name))
+            value64 (b64 secret.value)]
+        (defer (delete name64))
+        (defer (delete value64))
+        (strings.write_string (addr builder) name64)
+        (strings.write_string (addr builder) "\t")
+        (strings.write_string (addr builder) value64)
+        (strings.write_string (addr builder) "\n")))
+    (strings.to_string builder)))
+
+(defn parse-payload [payload: []byte] -> [secrets: [dynamic]Secret, ok: bool]
+  (let [out (arr.empty Secret)
+        [lines split-err] (strings.split (transmute string payload) "\n")]
+    (when (!= split-err nil)
+      (return out false))
+    (defer (delete lines))
+    (for [raw-line lines]
+      (let [line (strings.trim_space raw-line)]
+        (when (!= line "")
+          (let [tab (strings.index line "\t")]
+            (when (<= tab 0)
+              (return out false))
+            (let [name-bytes (decode-b64 (slice line 0 tab))
+                  value (decode-b64 (slice line (+ tab 1)))]
+              (arr.push! out (Secret {name: (transmute string name-bytes)
+                                      name-bytes: name-bytes
+                                      value: value})))))))
+    (return out true)))
+
+(defn parse-vault-file [path: string, passphrase: []byte] -> [vault: Vault, ok: bool]
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (when (!= err nil)
+      (fmt.eprintf "vault not found: %s\n" path)
+      (return vault false))
+    (defer (delete data))
+    (let [[lines split-err] (strings.split (transmute string data) "\n")]
+      (when (!= split-err nil)
+        (return vault false))
+      (defer (delete lines))
+      (when (or (< (len lines) 5) (!= (strings.trim_space (get lines 0)) VAULT-FORMAT))
+        (fmt.eprintln "invalid vault file")
+        (return vault false))
+      (let [salt-bytes (decode-b64 (strings.trim_space (get lines 2)))
+            nonce-bytes (decode-b64 (strings.trim_space (get lines 3)))
+            sealed (decode-b64 (strings.trim_space (get lines 4)))]
+        (defer (delete salt-bytes))
+        (defer (delete nonce-bytes))
+        (defer (delete sealed))
+        (when (or (!= (len salt-bytes) 16) (!= (len nonce-bytes) 24))
+          (fmt.eprintln "invalid vault metadata")
+          (return vault false))
+        (let [salt ([16]byte [])
+              nonce ([24]byte [])]
+          (copy (slice salt) salt-bytes)
+          (copy (slice nonce) nonce-bytes)
+          (let [key (derive-key passphrase (slice salt))
+                [payload opened] (open-payload (slice key) (slice nonce) sealed)]
+            (when (not opened)
+              (fmt.eprintln "wrong passphrase or corrupted vault")
+              (return vault false))
+            (defer (delete payload))
+            (let [[secrets parsed] (parse-payload payload)]
+              (when (not parsed)
+                (fmt.eprintln "invalid vault payload")
+                (return vault false))
+              (return (Vault {path: path salt: salt nonce: nonce secrets: secrets}) true))))))))
+
+(defn save-vault [vault: Vault, passphrase: []byte]
+  (let [payload (vault-payload vault)]
+    (defer (delete payload))
+    (write-vault-file vault.path passphrase (transmute []byte payload))))
+
+(defn vault-init! [args: []string]
+  (let [path (vault-path args)]
+    (when (os.exists path)
+      (fmt.eprintf "vault already exists: %s\n" path)
+      (os.exit 1))
+    (let [empty-payload: string ""]
+      (write-vault-file path (passphrase-bytes args) (transmute []byte empty-payload)))
+    (fmt.printf "initialized vault: %s\n" path)))
+
+(defn secret-index [vault: Vault, name: string] -> int
+  (let [idx -1]
+    (for [secret i vault.secrets]
+      (when (and (= idx -1) (= secret.name name))
+        (set! idx i)))
+    idx))
+
+(defn stdin-bytes [] -> []byte
+  (let [[data err] (os.read_entire_file os.stdin context.allocator)]
+    (when (!= err nil)
+      (fmt.eprintln "could not read stdin")
+      (os.exit 1))
+    data))
+
+(defn secret-set! [args: []string]
+  (let [name (command-at args 3)]
+    (when (= name "")
+      (fail! "usage: kimen2 secret set <name> --stdin"))
+    (when (not (arg-flag? args "--stdin"))
+      (fail! "secret set currently requires --stdin"))
+    (let [path (vault-path args)
+          passphrase (passphrase-bytes args)
+          [vault opened] (parse-vault-file path passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (let [value (stdin-bytes)
+            idx (secret-index vault name)]
+        (if (>= idx 0)
+          (do
+            (delete vault.secrets[idx].value)
+            (set! vault.secrets[idx].value value))
+          (let [name-bytes (clone-bytes (transmute []byte name))]
+            (arr.push! vault.secrets (Secret {name: (transmute string name-bytes)
+                                              name-bytes: name-bytes
+                                              value: value}))))
+        (save-vault vault passphrase)))))
+
+(defn secret-list! [args: []string]
+  (let [path (vault-path args)
+        passphrase (passphrase-bytes args)
+        [vault opened] (parse-vault-file path passphrase)]
+    (when (not opened)
+      (os.exit 1))
+    (defer (delete-vault vault))
+    (for [secret vault.secrets]
+      (fmt.println secret.name))))
+
+(defn secret-get! [args: []string]
+  (let [name (command-at args 3)]
+    (when (= name "")
+      (fail! "usage: kimen2 secret get <name> --unsafe-stdout"))
+    (let [path (vault-path args)
+          passphrase (passphrase-bytes args)
+          [vault opened] (parse-vault-file path passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (let [idx (secret-index vault name)]
+        (when (< idx 0)
+          (fmt.eprintf "secret not found: %s\n" name)
+          (os.exit 1))
+        (fmt.print (transmute string vault.secrets[idx].value))))))
+
+(defn secret-rm! [args: []string]
+  (let [name (command-at args 3)]
+    (when (= name "")
+      (fail! "usage: kimen2 secret rm <name>"))
+    (let [path (vault-path args)
+          passphrase (passphrase-bytes args)
+          [vault opened] (parse-vault-file path passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (let [idx (secret-index vault name)]
+        (when (< idx 0)
+          (fmt.eprintf "secret not found: %s\n" name)
+          (os.exit 1))
+        (delete-secret vault.secrets[idx])
+        (arr.remove-ordered-at! vault.secrets idx)
+        (save-vault vault passphrase)))))
+
+(defn secret-mv! [args: []string]
+  (let [old-name (command-at args 3)
+        new-name (command-at args 4)]
+    (when (or (= old-name "") (= new-name ""))
+      (fail! "usage: kimen2 secret mv <old> <new>"))
+    (let [path (vault-path args)
+          passphrase (passphrase-bytes args)
+          [vault opened] (parse-vault-file path passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (let [old-idx (secret-index vault old-name)
+            new-idx (secret-index vault new-name)]
+        (when (< old-idx 0)
+          (fmt.eprintf "secret not found: %s\n" old-name)
+          (os.exit 1))
+        (when (and (>= new-idx 0) (!= new-idx old-idx))
+          (fmt.eprintf "destination secret already exists: %s\n" new-name)
+          (os.exit 1))
+        (delete vault.secrets[old-idx].name-bytes)
+        (let [name-bytes (clone-bytes (transmute []byte new-name))]
+          (set! vault.secrets[old-idx].name (transmute string name-bytes))
+          (set! vault.secrets[old-idx].name-bytes name-bytes))
+        (save-vault vault passphrase)))))
