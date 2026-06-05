@@ -251,13 +251,13 @@
       :else (fail! "usage: kimen2 secret set|list|get|rm|mv"))))
 
 (defn handle-run [args: []string]
-  (println "run: not implemented yet"))
+  (run-profile-command args))
 
 (defn handle-render [args: []string]
-  (println "render: not implemented yet"))
+  (render-profile-files args))
 
 (defn handle-envfile [args: []string]
-  (println "envfile: not implemented yet"))
+  (write-profile-envfile args))
 
 (defn handle-plan [args: []string]
   (let [[path ok] (map-path-from-args args)]
