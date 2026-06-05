@@ -1,0 +1,338 @@
+(package main)
+
+(defn find-arg [args: []string, name: string] -> int
+  (let [idx -1]
+    (for [arg i args]
+      (when (and (= idx -1) (= arg name))
+        (set! idx i)))
+    idx))
+
+(defn map-entry [path: string, line-no: int, raw: string] -> [kind: string, target: string, source: string, ok: bool, skip: bool]
+  (let [line (strip-inline-comment (strings.trim_space (strings.trim_suffix raw "\r")))]
+    (when (or (= line "") (strings.has_prefix line "#"))
+      (return "" "" "" true true))
+    (let [space (first-space line)]
+      (when (<= space 0)
+        (fmt.eprintf "%s:%d: expected '<kind> <mapping>'\n" path line-no)
+        (return "" "" "" false false))
+      (let [entry-kind (slice line 0 space)
+            rest (strings.trim_space (slice line space))]
+        (if (= entry-kind "stdin")
+          (return entry-kind "" rest true false)
+          (let [eq (strings.index rest "=")]
+            (when (<= eq 0)
+              (fmt.eprintf "%s:%d: invalid %s mapping, expected lhs=value\n" path line-no entry-kind)
+              (return "" "" "" false false))
+            (let [lhs (strings.trim_space (slice rest 0 eq))
+                  rhs (strings.trim_space (slice rest (+ eq 1)))]
+              (when (or (= lhs "") (= rhs ""))
+                (fmt.eprintf "%s:%d: invalid %s mapping, empty side\n" path line-no entry-kind)
+                (return "" "" "" false false))
+              (return entry-kind lhs rhs true false))))))))
+
+(defn resolve-secret-value [vault: Vault, name: string] -> []byte
+  (let [idx (secret-index vault name)]
+    (when (< idx 0)
+      (fmt.eprintf "secret not found: %s\n" name)
+      (os.exit 1))
+    (clone-bytes vault.secrets[idx].value)))
+
+(defn resolve-exec-value [spec: string] -> []byte
+  (let [cmd-spec (strings.trim_space (slice spec 5))
+        [fields err] (strings.fields cmd-spec context.allocator)]
+    (when (!= err nil)
+      (fmt.eprintln "could not parse exec source")
+      (os.exit 1))
+    (defer (delete fields))
+    (when (= (len fields) 0)
+      (fmt.eprintln "empty exec source")
+      (os.exit 1))
+    (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc {command: fields})
+                                                          context.allocator)]
+      (defer (delete stderr))
+      (when (!= exec-err nil)
+        (fmt.eprintln "exec source failed")
+        (os.exit 1))
+      (when (or (not state.exited) (!= state.exit_code 0))
+        (fmt.eprintf "exec source exited with %d\n" state.exit_code)
+        (os.exit 1))
+      stdout)))
+
+(defn resolve-value [vault: Vault, spec: string] -> []byte
+  (let [trimmed (strings.trim_space spec)]
+    (when (= trimmed "")
+      (fmt.eprintln "empty value source")
+      (os.exit 1))
+    (cond
+      (strings.has_prefix trimmed "const:") (clone-bytes (transmute []byte (slice trimmed 6)))
+      (strings.has_prefix trimmed "secret:") (resolve-secret-value vault (strings.trim_space (slice trimmed 7)))
+      (strings.has_prefix trimmed "exec:") (resolve-exec-value trimmed)
+      :else (resolve-secret-value vault trimmed))))
+
+(defn env-key [entry: string] -> string
+  (let [eq (strings.index entry "=")]
+    (if (> eq 0)
+      (slice entry 0 eq)
+      entry)))
+
+(defn env-entry-replaced? [entry: string, key: string] -> bool
+  (= (env-key entry) key))
+
+(defn append-env-override! [env: ^[dynamic]string, key: string, value: []byte]
+  (let [i 0]
+    (while (< i (len env^))
+      (if (env-entry-replaced? (get env^ i) key)
+        (arr.remove-ordered-at! env^ i)
+        (mut! i += 1))))
+  (arr.push! env^ (fmt.tprintf "%s=%s" key (transmute string value))))
+
+(defn write-env-line [builder: ^strings.Builder, key: string, value: []byte]
+  (strings.write_string builder key)
+  (strings.write_string builder "=")
+  (strings.write_string builder (transmute string value))
+  (strings.write_string builder "\n"))
+
+(defn safe-relpath? [path: string] -> bool
+  (and (!= path "")
+       (not (os.is_absolute_path path))
+       (not (= path "."))
+       (not (= path ".."))
+       (not (strings.contains path "../"))
+       (not (strings.contains path "/.."))))
+
+(defn render-file-value [dir: string, relpath: string, value: []byte]
+  (when (not (safe-relpath? relpath))
+    (fmt.eprintf "unsafe file mapping path: %s\n" relpath)
+    (os.exit 1))
+  (let [out-path (fmt.tprintf "%s/%s" dir relpath)
+        [parent _] (os.split_path out-path)]
+    (when (!= parent "")
+      (discard (os.make_directory_all parent)))
+    (when (!= (os.write_entire_file out-path value (os.perm 0o600)) nil)
+      (fmt.eprintf "could not write file: %s\n" out-path)
+      (os.exit 1))
+    (discard (os.chmod out-path (os.perm 0o600)))))
+
+(defn with-open-vault [args: []string] -> [vault: Vault, passphrase: []byte]
+  (let [path (vault-path args)
+        pp (passphrase-bytes args)
+        [opened-vault opened] (parse-vault-file path pp)]
+    (when (not opened)
+      (os.exit 1))
+    (return opened-vault pp)))
+
+(defn write-profile-envfile [args: []string]
+  (let [[path ok] (map-path-from-args args)]
+    (when (not ok)
+      (os.exit 1))
+    (let [[out-path has-out] (arg-value args "--out")]
+      (when (not (and has-out (!= out-path "")))
+        (fail! "usage: kimen2 envfile --profile <name> --out <path>"))
+      (let [[vault _] (with-open-vault args)
+            [data err] (os.read_entire_file path context.allocator)
+            builder (strings.builder_make)]
+        (defer (delete-vault vault))
+        (when (!= err nil)
+          (fmt.eprintf "could not read map: %s\n" path)
+          (os.exit 1))
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (when (!= split-err nil)
+            (os.exit 1))
+          (defer (delete lines))
+          (for [raw-line i lines]
+            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+              (when (not entry-ok)
+                (os.exit 1))
+              (when (and (not skip) (= kind "env"))
+                (let [value (resolve-value vault source)]
+                  (defer (delete value))
+                  (write-env-line (addr builder) target value)))))
+          (let [out (strings.to_string builder)]
+            (when (!= (os.write_entire_file out-path out (os.perm 0o600)) nil)
+              (fmt.eprintf "could not write envfile: %s\n" out-path)
+              (os.exit 1))
+            (discard (os.chmod out-path (os.perm 0o600)))))))))
+
+(defn render-profile-files [args: []string]
+  (let [[path ok] (map-path-from-args args)]
+    (when (not ok)
+      (os.exit 1))
+    (let [[dir has-dir] (arg-value args "--dir")]
+      (when (not (and has-dir (!= dir "")))
+        (fail! "usage: kimen2 render --dir <path> --profile <name>"))
+      (let [[vault _] (with-open-vault args)
+            [data err] (os.read_entire_file path context.allocator)]
+        (defer (delete-vault vault))
+        (when (!= err nil)
+          (fmt.eprintf "could not read map: %s\n" path)
+          (os.exit 1))
+        (defer (delete data))
+        (discard (os.make_directory_all dir))
+        (discard (os.chmod dir (os.perm 0o700)))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (when (!= split-err nil)
+            (os.exit 1))
+          (defer (delete lines))
+          (for [raw-line i lines]
+            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+              (when (not entry-ok)
+                (os.exit 1))
+              (when (and (not skip) (= kind "file"))
+                (let [value (resolve-value vault source)]
+                  (defer (delete value))
+                  (render-file-value dir target value))))))))))
+
+(defn command-after-separator [args: []string] -> []string
+  (let [idx (find-arg args "--")]
+    (if (and (>= idx 0) (< (+ idx 1) (len args)))
+      (slice args (+ idx 1))
+      nil)))
+
+(defn apply-env-mapping! [vault: Vault, env: ^[dynamic]string, mapping: string]
+  (let [eq (strings.index mapping "=")]
+    (when (<= eq 0)
+      (fmt.eprintf "invalid --env mapping: %s\n" mapping)
+      (os.exit 1))
+    (let [key (strings.trim_space (slice mapping 0 eq))
+          source (strings.trim_space (slice mapping (+ eq 1)))]
+      (when (or (= key "") (= source ""))
+        (fmt.eprintf "invalid --env mapping: %s\n" mapping)
+        (os.exit 1))
+      (let [value (resolve-value vault source)]
+        (defer (delete value))
+        (append-env-override! env key value)))))
+
+(defn apply-run-env-flags! [args: []string, vault: Vault, env: ^[dynamic]string]
+  (let [sep (find-arg args "--")
+        limit (if (>= sep 0) sep (len args))
+        i 0]
+    (while (< i limit)
+      (let [arg (get args i)]
+        (if (= arg "--env")
+          (do
+            (when (>= (+ i 1) limit)
+              (fail! "missing value after --env"))
+            (apply-env-mapping! vault env (get args (+ i 1)))
+            (mut! i += 2))
+          (mut! i += 1))))))
+
+(defn run-profile-command [args: []string]
+  (let [[path ok] (map-path-from-args args)]
+    (when (not ok)
+      (os.exit 1))
+    (let [command (command-after-separator args)]
+      (when (= (len command) 0)
+        (fail! "usage: kimen2 run --profile <name> -- <command>..."))
+      (let [[vault _] (with-open-vault args)
+            [data err] (os.read_entire_file path context.allocator)
+            [base-env env-err] (os.environ context.allocator)
+            env (arr.empty string)
+            files-dir ""
+            cleanup-files false
+            stdin-file (^os.File nil)
+            stdin-dir ""
+            cleanup-stdin false
+            stdin-set false]
+        (defer (delete-vault vault))
+        (when (!= err nil)
+          (fmt.eprintf "could not read map: %s\n" path)
+          (os.exit 1))
+        (when (!= env-err nil)
+          (fmt.eprintln "could not read environment")
+          (os.exit 1))
+        (defer (delete data))
+        (defer (delete base-env))
+        (defer (delete env))
+        (for [entry base-env]
+          (arr.push! env entry))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (when (!= split-err nil)
+            (os.exit 1))
+          (defer (delete lines))
+          (for [raw-line i lines]
+            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+              (when (not entry-ok)
+                (os.exit 1))
+              (when (not skip)
+                (cond
+                  (= kind "env") (let [value (resolve-value vault source)]
+                                   (defer (delete value))
+                                   (append-env-override! (addr env) target value))
+                  (= kind "file") (do
+                                    (when (= files-dir "")
+                                      (let [[tmp-dir tmp-err] (os.make_directory_temp "" "kimen2-files-*" context.allocator)]
+                                        (when (!= tmp-err nil)
+                                          (fmt.eprintln "could not create files dir")
+                                          (os.exit 1))
+                                        (set! files-dir tmp-dir)
+                                        (set! cleanup-files true)
+                                        (append-env-override! (addr env) "KIMEN_FILES_DIR" (transmute []byte files-dir))))
+                                    (let [value (resolve-value vault source)]
+                                      (defer (delete value))
+                                      (render-file-value files-dir target value)))
+                  (= kind "envpath") (do
+                                       (when (= files-dir "")
+                                         (let [[tmp-dir tmp-err] (os.make_directory_temp "" "kimen2-files-*" context.allocator)]
+                                           (when (!= tmp-err nil)
+                                             (fmt.eprintln "could not create files dir")
+                                             (os.exit 1))
+                                           (set! files-dir tmp-dir)
+                                           (set! cleanup-files true)
+                                           (append-env-override! (addr env) "KIMEN_FILES_DIR" (transmute []byte files-dir))))
+                                       (append-env-override! (addr env) target (transmute []byte (fmt.tprintf "%s/%s" files-dir source))))
+                  (= kind "stdin") (do
+                                     (when stdin-set
+                                       (fmt.eprintln "stdin mapping specified multiple times")
+                                       (os.exit 1))
+                                     (set! stdin-set true)
+                                     (let [stdin-value (resolve-value vault source)]
+                                       (defer (delete stdin-value))
+                                       (let [[tmp-dir tmp-err] (os.make_directory_temp "" "kimen2-stdin-*" context.allocator)]
+                                         (when (!= tmp-err nil)
+                                           (fmt.eprintln "could not create stdin temp dir")
+                                           (os.exit 1))
+                                         (set! stdin-dir tmp-dir)
+                                         (set! cleanup-stdin true)
+                                         (let [stdin-path (fmt.tprintf "%s/stdin" stdin-dir)]
+                                           (when (!= (os.write_entire_file stdin-path stdin-value (os.perm 0o600)) nil)
+                                             (fmt.eprintln "could not write stdin temp file")
+                                             (os.exit 1))
+                                           (discard (os.chmod stdin-path (os.perm 0o600)))
+                                           (let [[opened open-err] (os.open stdin-path os.O_RDONLY (os.perm 0))]
+                                             (when (!= open-err nil)
+                                               (fmt.eprintln "could not open stdin temp file")
+                                               (os.exit 1))
+                                             (set! stdin-file opened))))))
+                  :else (do
+                          (fmt.eprintf "%s:%d: unknown kind %q\n" path (+ i 1) kind)
+                          (os.exit 1)))))))
+        (apply-run-env-flags! args vault (addr env))
+        (let [[process start-err] (os.process_start (os.Process_Desc {command: command
+                                                                       env: env
+                                                                       stdin: stdin-file
+                                                                       stdout: os.stdout
+                                                                       stderr: os.stderr}))]
+          (when (!= start-err nil)
+            (when (!= stdin-file nil)
+              (os.close stdin-file))
+            (when cleanup-stdin
+              (discard (os.remove_all stdin-dir)))
+            (when cleanup-files
+              (discard (os.remove_all files-dir)))
+            (fmt.eprintln "command failed to start")
+            (os.exit 1))
+          (let [[state wait-err] (os.process_wait process)]
+            (when (!= wait-err nil)
+              (fmt.eprintln "command wait failed"))
+            (when (!= stdin-file nil)
+              (os.close stdin-file))
+            (when cleanup-stdin
+              (discard (os.remove_all stdin-dir)))
+            (when cleanup-files
+              (discard (os.remove_all files-dir)))
+            (when (!= wait-err nil)
+              (os.exit 1))
+            (if state.exited
+              (os.exit state.exit_code)
+              (os.exit 1))))))))

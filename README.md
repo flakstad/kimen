@@ -9,6 +9,7 @@ drops the old automation-heavy CLI contract.
 ## Required Surface
 
 - `vault init`
+- `vault migrate --from <old-vault> [--to <new-vault>] [--old-bin <path>]`
 - `secret set <name> --stdin`
 - `secret list`
 - `secret get <name> --unsafe-stdout`
@@ -58,6 +59,19 @@ Manual use requires:
 
 ## Vault Direction
 
-Use a new single-file v2 vault format implemented in Kvist/Odin. Existing
-Kimen v1 bbolt vaults will be migrated by a small Go helper or export command
-that uses the old implementation to read v1 and writes/imports v2.
+Kimen2 uses a new single-file v2 vault format implemented in Kvist. Existing
+Kimen v1 bbolt vaults are migrated with `vault migrate`, which shells out to
+the existing Kimen v1 binary for the bbolt read path and writes the results into
+the Kvist vault format.
+
+Vault commands resolve passphrases from `KIMEN_PASSPHRASE`, then the local
+session file, then an interactive no-echo terminal prompt.
+
+Example:
+
+```sh
+KIMEN_PASSPHRASE=... kimen2 vault migrate \
+  --from ~/.config/kimen/vault.db \
+  --to ~/.config/kimen2/vault.k2v \
+  --old-bin ../kimen/dist/kimen
+```
