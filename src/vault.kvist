@@ -38,10 +38,17 @@
 
 (defn passphrase-bytes [args: []string] -> []byte
   (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
-    (when (not has-pass)
-      (fmt.eprintln "missing passphrase: set KIMEN_PASSPHRASE")
-      (os.exit 1))
-    (transmute []byte pass)))
+    (when has-pass
+      (return (transmute []byte pass))))
+  (let [[session-pass session-ok] (session-read)]
+    (when session-ok
+      (return session-pass)))
+  (let [[prompt-pass prompt-ok] (prompt-passphrase)]
+    (when prompt-ok
+      (return prompt-pass)))
+  (fail! "missing passphrase: set KIMEN_PASSPHRASE, run kimen2 session start, or use an interactive terminal")
+  (let [empty: string ""]
+    (transmute []byte empty)))
 
 (defn derive-key [passphrase: []byte, salt: []byte] -> [32]byte
   (let [key ([32]byte [])

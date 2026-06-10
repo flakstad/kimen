@@ -1,0 +1,67 @@
+(package main)
+
+(defn session-path [] -> string
+  (let [[flag-path has-flag] (os.lookup_env "KIMEN_SESSION" context.temp_allocator)]
+    (when (and has-flag (!= flag-path ""))
+      (return flag-path)))
+  (let [[runtime-dir has-runtime] (os.lookup_env "XDG_RUNTIME_DIR" context.temp_allocator)]
+    (when (and has-runtime (!= runtime-dir ""))
+      (return (fmt.tprintf "%s/kimen2/session" runtime-dir))))
+  (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
+    (if has-home
+      (fmt.tprintf "%s/.cache/kimen2/session" home)
+      "kimen2-session")))
+
+(defn session-read [] -> [passphrase: []byte, ok: bool]
+  (let [path (session-path)
+        [data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (return nil false)
+      (return data true))))
+
+(defn passphrase-line [data: []byte] -> []byte
+  (let [end (len data)]
+    (while (and (> end 0)
+                (or (= (get data (- end 1)) BYTE-LF)
+                    (= (get data (- end 1)) BYTE-CR)))
+      (mut! end -= 1))
+    (slice data 0 end)))
+
+(defn session-write [passphrase: []byte]
+  (let [path (session-path)
+        [dir _] (os.split_path path)]
+    (when (!= dir "")
+      (discard (os.make_directory_all dir))
+      (discard (os.chmod dir (os.perm 0o700))))
+    (when (!= (os.write_entire_file path passphrase (os.perm 0o600)) nil)
+      (fmt.eprintf "could not write session: %s\n" path)
+      (os.exit 1))
+    (discard (os.chmod path (os.perm 0o600)))))
+
+(defn session-start! [args: []string]
+  (let [[env-pass has-env] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
+    (if has-env
+      (session-write (transmute []byte env-pass))
+      (if (arg-flag? args "--stdin")
+        (let [data (stdin-bytes)]
+          (defer (delete data))
+          (session-write (passphrase-line data)))
+        (let [[prompt-pass prompt-ok] (prompt-passphrase)]
+          (if prompt-ok
+            (do
+              (defer (delete prompt-pass))
+              (session-write prompt-pass))
+            (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal"))))))
+  (fmt.printf "session started: %s\n" (session-path)))
+
+(defn session-status! []
+  (let [path (session-path)]
+    (if (os.exists path)
+      (fmt.printf "session active: %s\n" path)
+      (fmt.printf "session inactive: %s\n" path))))
+
+(defn session-lock! []
+  (let [path (session-path)]
+    (when (os.exists path)
+      (discard (os.remove path)))
+    (fmt.println "session locked")))

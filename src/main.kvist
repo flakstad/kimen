@@ -282,10 +282,10 @@
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
-      (= subcmd "start") (println "session start: not implemented yet")
-      (= subcmd "status") (println "session status: not implemented yet")
-      (= subcmd "lock") (println "session lock: not implemented yet")
-      (= subcmd "stop") (println "session stop: not implemented yet")
+      (= subcmd "start") (session-start! args)
+      (= subcmd "status") (session-status!)
+      (= subcmd "lock") (session-lock!)
+      (= subcmd "stop") (session-lock!)
       :else (fail! "usage: kimen2 session start|status|lock|stop"))))
 
 (defn main []

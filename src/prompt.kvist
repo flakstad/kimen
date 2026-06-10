@@ -1,0 +1,53 @@
+(package main)
+
+(import posix "core:sys/posix")
+(import terminal "core:terminal")
+
+(def BYTE-LF: byte 10)
+(def BYTE-CR: byte 13)
+
+(defn read-line-from-file [file: ^os.File] -> []byte
+  (let [out (arr.empty byte)
+        buf ([1]byte [])]
+    (while true
+      (let [[n err] (os.read file (slice buf))]
+        (when (and (!= err nil) (= n 0))
+          (break))
+        (when (> n 0)
+          (let [b (get buf 0)]
+            (when (or (= b BYTE-LF) (= b BYTE-CR))
+              (break))
+            (arr.push! out b)))))
+    out))
+
+(defn prompt-file-passphrase [input: ^os.File, output: ^os.File] -> [passphrase: []byte, ok: bool]
+  (os.write_string output "Passphrase: ")
+  (let [fd (posix.FD (os.fd input))
+        original (posix.termios {})
+        raw (posix.termios {})]
+    (when (!= (posix.tcgetattr fd (addr original)) (posix.result 0))
+      (os.write_string output "\n")
+      (return nil false))
+    (set! raw original)
+    (mut! raw.c_lflag -= (posix.CLocal_Flags [.ECHO]))
+    (when (!= (posix.tcsetattr fd posix.TC_Optional_Action.TCSAFLUSH (addr raw)) (posix.result 0))
+      (os.write_string output "\n")
+      (return nil false))
+    (let [line (read-line-from-file input)]
+      (discard (posix.tcsetattr fd posix.TC_Optional_Action.TCSAFLUSH (addr original)))
+      (os.write_string output "\n")
+      (if (= (len line) 0)
+        (do
+          (delete line)
+          (return nil false))
+        (return line true)))))
+
+(defn prompt-passphrase [] -> [passphrase: []byte, ok: bool]
+  (when (terminal.is_terminal os.stdin)
+    (return (prompt-file-passphrase os.stdin os.stderr)))
+  (let [[tty err] (os.open "/dev/tty" os.O_RDWR (os.perm 0))]
+    (when (= err nil)
+      (defer (os.close tty))
+      (when (terminal.is_terminal tty)
+        (return (prompt-file-passphrase tty tty)))))
+  (return nil false))
