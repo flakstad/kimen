@@ -64,9 +64,6 @@ Kimen v1 bbolt vaults are migrated with `vault migrate`, which shells out to
 the existing Kimen v1 binary for the bbolt read path and writes the results into
 the Kvist vault format.
 
-Vault commands resolve passphrases from `KIMEN_PASSPHRASE`, then the local
-session file, then an interactive no-echo terminal prompt.
-
 Example:
 
 ```sh
@@ -75,3 +72,10 @@ KIMEN_PASSPHRASE=... kimen2 vault migrate \
   --to ~/.config/kimen2/vault.k2v \
   --old-bin ../kimen/dist/kimen
 ```
+
+## Current Limitations
+
+- `run` uses `os.process_exec`, so child stdout/stderr are captured and replayed
+  after the command exits rather than streamed live.
+- `stdin` profile mappings are parsed and planned, but not yet projected into
+  `run`.

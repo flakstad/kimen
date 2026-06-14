@@ -164,23 +164,56 @@
         (strings.write_string (addr builder) "\n")))
     (strings.to_string builder)))
 
+(defn append-string-bytes! [out: ^[dynamic]byte, text: string]
+  (let [[_ err] (append out text)]
+    (when (!= err nil)
+      (fmt.eprintln "could not append payload data")
+      (os.exit 1))))
+
+(defn push-payload-entry! [out: ^[dynamic]Secret, name64: string, value64: []byte] -> bool
+  (when (= name64 "")
+    (return false))
+  (let [name-bytes (decode-b64 name64)
+        value (decode-b64 (transmute string value64))]
+    (arr.push! out^ (Secret {name: (transmute string name-bytes)
+                             name-bytes: name-bytes
+                             value: value}))
+    true))
+
 (defn parse-payload [payload: []byte] -> [secrets: [dynamic]Secret, ok: bool]
   (let [out (arr.empty Secret)
-        [lines split-err] (strings.split (transmute string payload) "\n")]
+        [lines split-err] (strings.split (transmute string payload) "\n")
+        current-name64 ""
+        current-value64 (arr.empty byte)
+        has-current false]
     (when (!= split-err nil)
       (return out false))
     (defer (delete lines))
     (for [raw-line lines]
-      (let [line (strings.trim_space raw-line)]
+      (let [line (strings.trim_suffix raw-line "\r")]
         (when (!= line "")
           (let [tab (strings.index line "\t")]
-            (when (<= tab 0)
-              (return out false))
-            (let [name-bytes (decode-b64 (slice line 0 tab))
-                  value (decode-b64 (slice line (+ tab 1)))]
-              (arr.push! out (Secret {name: (transmute string name-bytes)
-                                      name-bytes: name-bytes
-                                      value: value})))))))
+            (if (> tab 0)
+              (do
+                (when has-current
+                  (when (not (push-payload-entry! (addr out) current-name64 (slice current-value64)))
+                    (delete current-value64)
+                    (return out false))
+                  (delete current-value64)
+                  (set! current-value64 (arr.empty byte)))
+                (set! current-name64 (slice line 0 tab))
+                (append-string-bytes! (addr current-value64) (slice line (+ tab 1)))
+                (set! has-current true))
+              (do
+                (when (not has-current)
+                  (delete current-value64)
+                  (return out false))
+                (append-string-bytes! (addr current-value64) line)))))))
+    (when has-current
+      (when (not (push-payload-entry! (addr out) current-name64 (slice current-value64)))
+        (delete current-value64)
+        (return out false)))
+    (delete current-value64)
     (return out true)))
 
 (defn parse-vault-file [path: string, passphrase: []byte] -> [vault: Vault, ok: bool]
