@@ -229,11 +229,7 @@
             [base-env env-err] (os.environ context.allocator)
             env (arr.empty string)
             files-dir ""
-            cleanup-files false
-            stdin-file (^os.File nil)
-            stdin-dir ""
-            cleanup-stdin false
-            stdin-set false]
+            cleanup-files false]
         (defer (delete-vault vault))
         (when (!= err nil)
           (fmt.eprintf "could not read map: %s\n" path)
@@ -281,58 +277,28 @@
                                            (set! cleanup-files true)
                                            (append-env-override! (addr env) "KIMEN_FILES_DIR" (transmute []byte files-dir))))
                                        (append-env-override! (addr env) target (transmute []byte (fmt.tprintf "%s/%s" files-dir source))))
-                  (= kind "stdin") (do
-                                     (when stdin-set
-                                       (fmt.eprintln "stdin mapping specified multiple times")
-                                       (os.exit 1))
-                                     (set! stdin-set true)
-                                     (let [stdin-value (resolve-value vault source)]
-                                       (defer (delete stdin-value))
-                                       (let [[tmp-dir tmp-err] (os.make_directory_temp "" "kimen2-stdin-*" context.allocator)]
-                                         (when (!= tmp-err nil)
-                                           (fmt.eprintln "could not create stdin temp dir")
-                                           (os.exit 1))
-                                         (set! stdin-dir tmp-dir)
-                                         (set! cleanup-stdin true)
-                                         (let [stdin-path (fmt.tprintf "%s/stdin" stdin-dir)]
-                                           (when (!= (os.write_entire_file stdin-path stdin-value (os.perm 0o600)) nil)
-                                             (fmt.eprintln "could not write stdin temp file")
-                                             (os.exit 1))
-                                           (discard (os.chmod stdin-path (os.perm 0o600)))
-                                           (let [[opened open-err] (os.open stdin-path os.O_RDONLY (os.perm 0))]
-                                             (when (!= open-err nil)
-                                               (fmt.eprintln "could not open stdin temp file")
-                                               (os.exit 1))
-                                             (set! stdin-file opened))))))
+                  (= kind "stdin") (fmt.eprintln "stdin mapping is not supported by process_exec run yet")
                   :else (do
                           (fmt.eprintf "%s:%d: unknown kind %q\n" path (+ i 1) kind)
                           (os.exit 1)))))))
         (apply-run-env-flags! args vault (addr env))
-        (let [[process start-err] (os.process_start (os.Process_Desc {command: command
-                                                                       env: env
-                                                                       stdin: stdin-file
-                                                                       stdout: os.stdout
-                                                                       stderr: os.stderr}))]
-          (when (!= start-err nil)
-            (when (!= stdin-file nil)
-              (os.close stdin-file))
-            (when cleanup-stdin
-              (discard (os.remove_all stdin-dir)))
-            (when cleanup-files
-              (discard (os.remove_all files-dir)))
+        (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc {command: command env: env})
+                                                              context.allocator)]
+          (defer (delete stdout))
+          (defer (delete stderr))
+          (when cleanup-files
+            (discard (os.remove_all files-dir)))
+          (when (> (len stdout) 0)
+            (let [[stdout-written stdout-write-err] (os.write os.stdout stdout)]
+              (discard stdout-written)
+              (discard stdout-write-err)))
+          (when (> (len stderr) 0)
+            (let [[stderr-written stderr-write-err] (os.write os.stderr stderr)]
+              (discard stderr-written)
+              (discard stderr-write-err)))
+          (when (!= exec-err nil)
             (fmt.eprintln "command failed to start")
             (os.exit 1))
-          (let [[state wait-err] (os.process_wait process)]
-            (when (!= wait-err nil)
-              (fmt.eprintln "command wait failed"))
-            (when (!= stdin-file nil)
-              (os.close stdin-file))
-            (when cleanup-stdin
-              (discard (os.remove_all stdin-dir)))
-            (when cleanup-files
-              (discard (os.remove_all files-dir)))
-            (when (!= wait-err nil)
-              (os.exit 1))
-            (if state.exited
-              (os.exit state.exit_code)
-              (os.exit 1))))))))
+          (if state.exited
+            (os.exit state.exit_code)
+            (os.exit 1)))))))
