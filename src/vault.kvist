@@ -6,7 +6,7 @@
 (import chacha "core:crypto/chacha20poly1305")
 (import crypto "core:crypto")
 
-(def VAULT-FORMAT: string "kimen2-vault/v1")
+(def VAULT-FORMAT: string "kimen-vault/v2")
 (def KDF-MEMORY-KIB: u32 65536)
 (def KDF-PASSES: u32 3)
 (def KDF-PARALLELISM: u32 4)
@@ -33,8 +33,8 @@
       (return env-path)))
   (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
     (if has-home
-      (fmt.tprintf "%s/.config/kimen2/vault.k2v" home)
-      "vault.k2v")))
+      (fmt.tprintf "%s/.config/kimen/vault.kv" home)
+      "vault.kv")))
 
 (defn passphrase-bytes [args: []string] -> []byte
   (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
@@ -46,7 +46,7 @@
   (let [[prompt-pass prompt-ok] (prompt-passphrase)]
     (when prompt-ok
       (return prompt-pass)))
-  (fail! "missing passphrase: set KIMEN_PASSPHRASE, run kimen2 session start, or use an interactive terminal")
+  (fail! "missing passphrase: set KIMEN_PASSPHRASE, run kimen session start, or use an interactive terminal")
   (let [empty: string ""]
     (transmute []byte empty)))
 
@@ -285,7 +285,7 @@
 (defn secret-set! [args: []string]
   (let [name (command-at args 3)]
     (when (= name "")
-      (fail! "usage: kimen2 secret set <name> --stdin"))
+      (fail! "usage: kimen secret set <name> --stdin"))
     (when (not (arg-flag? args "--stdin"))
       (fail! "secret set currently requires --stdin"))
     (let [path (vault-path args)
@@ -319,7 +319,7 @@
 (defn secret-get! [args: []string]
   (let [name (command-at args 3)]
     (when (= name "")
-      (fail! "usage: kimen2 secret get <name> --unsafe-stdout"))
+      (fail! "usage: kimen secret get <name>"))
     (let [path (vault-path args)
           passphrase (passphrase-bytes args)
           [vault opened] (parse-vault-file path passphrase)]
@@ -335,7 +335,7 @@
 (defn secret-rm! [args: []string]
   (let [name (command-at args 3)]
     (when (= name "")
-      (fail! "usage: kimen2 secret rm <name>"))
+      (fail! "usage: kimen secret rm <name>"))
     (let [path (vault-path args)
           passphrase (passphrase-bytes args)
           [vault opened] (parse-vault-file path passphrase)]
@@ -354,7 +354,7 @@
   (let [old-name (command-at args 3)
         new-name (command-at args 4)]
     (when (or (= old-name "") (= new-name ""))
-      (fail! "usage: kimen2 secret mv <old> <new>"))
+      (fail! "usage: kimen secret mv <old> <new>"))
     (let [path (vault-path args)
           passphrase (passphrase-bytes args)
           [vault opened] (parse-vault-file path passphrase)]

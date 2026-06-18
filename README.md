@@ -1,81 +1,89 @@
-# kimen2
+# Kimen
 
-Kimen2 is a simplified Kvist rewrite of Kimen for personal local-first secret
-projection.
+Kimen is a local secret vault and projection tool.
 
-The rewrite intentionally preserves the commands used by current projects and
-drops the old automation-heavy CLI contract.
+Store secrets once, then project them into commands, envfiles, rendered files,
+or command stdin from small profile files.
 
-## Required Surface
-
-- `vault init`
-- `vault migrate --from <old-vault> [--to <new-vault>] [--old-bin <path>]`
-- `secret set <name> --stdin`
-- `secret list`
-- `secret get <name> --unsafe-stdout`
-- `secret rm <name>`
-- `secret mv <old> <new>`
-- `run --profile <name> [--env VAR=<value>...] -- <command>...`
-- `render --dir <path> --profile <name>`
-- `envfile --profile <name> --out <path>`
-- `plan --profile <name>`
-- `map lint --profile <name> [--strict]`
-- `doctor --profile <name> [--strict]`
-- `session start/status/lock/stop`
-
-## Observed Existing Usage
-
-Kari and Linje scripts use:
-
-- `vault init`
-- `secret set <name> --stdin`
-- `secret list`
-- `run --profile ... -- ...`
-- `run --profile ... --env NAME=const:value -- ...`
-- `envfile --profile ... --out ...`
-- `map lint --profile ... --strict`
-- `doctor --profile ...` and `doctor --profile ... --strict --json`
-
-Gransk uses:
-
-- `kimen run --profile <name> --env GRANSK_KIMEN_ACTIVE=const:1 -- ...`
-
-Manual use requires:
-
-- `session start`
-- `session status`
-- `session lock`
-- `session stop`
-- automatic session reuse by vault-opening commands
-
-## Defer Or Drop
-
-- sync/remotes/git remotes
-- bundle/age support
-- full JSON contracts
-- old reason-specific exit codes
-- CI scaffold generation
-- config unlock methods beyond env/stdin/prompt/session
-
-## Vault Direction
-
-Kimen2 uses a new single-file v2 vault format implemented in Kvist. Existing
-Kimen v1 bbolt vaults are migrated with `vault migrate`, which shells out to
-the existing Kimen v1 binary for the bbolt read path and writes the results into
-the Kvist vault format.
-
-Example:
+## Build
 
 ```sh
-KIMEN_PASSPHRASE=... kimen2 vault migrate \
-  --from ~/.config/kimen/vault.db \
-  --to ~/.config/kimen2/vault.k2v \
-  --old-bin ../kimen/dist/kimen
+mkdir -p dist tmp
+cd ../kvist
+./kvist build ../kimen/src/main.kvist --generated ../kimen/tmp/main.odin
+cd ../kimen
+odin build tmp -out:dist/kimen
 ```
 
-## Current Limitations
+## Vault
 
-- `run` uses `os.process_exec`, so child stdout/stderr are captured and replayed
-  after the command exits rather than streamed live.
-- `stdin` profile mappings are parsed and planned, but not yet projected into
-  `run`.
+Default vault:
+
+```sh
+~/.config/kimen/vault.kv
+```
+
+Passphrase lookup order:
+
+```text
+KIMEN_PASSPHRASE
+session
+terminal prompt
+```
+
+## Commands
+
+```sh
+kimen vault init
+
+kimen secret set <name> --stdin
+kimen secret list
+kimen secret get <name>
+kimen secret rm <name>
+kimen secret mv <from> <to>
+
+kimen session start
+kimen session status
+kimen session lock
+kimen session stop
+
+kimen run --profile <name> [--env NAME=value] -- <command>...
+kimen render --dir <path> --profile <name>
+kimen envfile --profile <name> --out <path>
+kimen plan --profile <name>
+kimen map lint --profile <name>
+kimen doctor --profile <name>
+```
+
+## Profiles
+
+Profiles are `.kmap` files:
+
+```text
+env NAME=secret:name
+env DATABASE_URL=prod.database_url
+env MODE=const:dev
+file token.txt=secret:api_token
+envpath TOKEN_FILE=token.txt
+stdin secret:request_body
+```
+
+Mapping values are vault keys by default. Prefix a value with `const:` for a
+literal value, `secret:` for an explicit vault key, or `exec:` to read a value
+from a command.
+
+Profile lookup:
+
+```text
+.kimen/profiles/<name>.kmap
+$XDG_CONFIG_HOME/kimen/profiles/<name>.kmap
+~/.config/kimen/profiles/<name>.kmap
+```
+
+Use `--map <path>` to pass a map file directly.
+
+## Check
+
+```sh
+scripts/smoke.sh
+```

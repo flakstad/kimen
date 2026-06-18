@@ -7,8 +7,8 @@
   (let [[env-bin has-env] (os.lookup_env "KIMEN1_BIN" context.temp_allocator)]
     (when (and has-env (!= env-bin ""))
       (return env-bin)))
-  (if (os.exists "../kimen/dist/kimen")
-    "../kimen/dist/kimen"
+  (if (os.exists "../kimen-go/dist/kimen")
+    "../kimen-go/dist/kimen"
     "kimen"))
 
 (defn migration-target-path [args: []string] -> string
@@ -65,7 +65,7 @@
 (defn vault-migrate! [args: []string]
   (let [[old-vault has-from] (arg-value args "--from")]
     (when (not (and has-from (!= old-vault "")))
-      (fail! "usage: kimen2 vault migrate --from <old-vault> [--to <new-vault>] [--old-bin <path>]"))
+      (fail! "usage: kimen vault migrate --from <old-vault> [--to <new-vault>] [--old-bin <path>]"))
     (let [target-path (migration-target-path args)
           old-bin (migration-old-bin args)
           passphrase (passphrase-bytes args)
