@@ -12,19 +12,19 @@
 (def RUNE-TAB: rune 9)
 
 (defn usage []
-  (println "kimen2 " VERSION)
+  (println "kimen " VERSION)
   (println "")
   (println "usage:")
-  (println "  kimen2 vault init")
-  (println "  kimen2 vault migrate --from <old-vault> [--to <new-vault>]")
-  (println "  kimen2 secret set <name> --stdin")
-  (println "  kimen2 secret list")
-  (println "  kimen2 run --profile <name> -- <command>...")
-  (println "  kimen2 envfile --profile <name> --out <path>")
-  (println "  kimen2 plan --profile <name>")
-  (println "  kimen2 map lint --profile <name>")
-  (println "  kimen2 doctor --profile <name>")
-  (println "  kimen2 session start|status|lock|stop"))
+  (println "  kimen vault init")
+  (println "  kimen vault migrate --from <old-vault> [--to <new-vault>]")
+  (println "  kimen secret set <name> --stdin")
+  (println "  kimen secret list")
+  (println "  kimen run --profile <name> -- <command>...")
+  (println "  kimen envfile --profile <name> --out <path>")
+  (println "  kimen plan --profile <name>")
+  (println "  kimen map lint --profile <name>")
+  (println "  kimen doctor --profile <name>")
+  (println "  kimen session start|status|lock|stop"))
 
 (defn fail! [message: string]
   (fmt.eprintln message)
@@ -240,7 +240,7 @@
     (cond
       (= subcmd "init") (vault-init! args)
       (= subcmd "migrate") (vault-migrate! args)
-      :else (fail! "usage: kimen2 vault init|migrate"))))
+      :else (fail! "usage: kimen vault init|migrate"))))
 
 (defn handle-secret [args: []string]
   (let [subcmd (command-at args 2)]
@@ -250,7 +250,7 @@
       (= subcmd "get") (secret-get! args)
       (= subcmd "rm") (secret-rm! args)
       (= subcmd "mv") (secret-mv! args)
-      :else (fail! "usage: kimen2 secret set|list|get|rm|mv"))))
+      :else (fail! "usage: kimen secret set|list|get|rm|mv"))))
 
 (defn handle-run [args: []string]
   (run-profile-command args))
@@ -273,7 +273,7 @@
         (if (and ok (lint-kmap path))
           (fmt.printf "map ok: %s\n" path)
           (os.exit 1)))
-      (fail! "usage: kimen2 map lint --profile <name>"))))
+      (fail! "usage: kimen map lint --profile <name>"))))
 
 (defn handle-doctor [args: []string]
   (let [[path ok] (map-path-from-args args)]
@@ -288,7 +288,7 @@
       (= subcmd "status") (session-status!)
       (= subcmd "lock") (session-lock!)
       (= subcmd "stop") (session-lock!)
-      :else (fail! "usage: kimen2 session start|status|lock|stop"))))
+      :else (fail! "usage: kimen session start|status|lock|stop"))))
 
 (defn main []
   (let [cmd (command-at os.args 1)]

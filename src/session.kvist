@@ -6,11 +6,11 @@
       (return flag-path)))
   (let [[runtime-dir has-runtime] (os.lookup_env "XDG_RUNTIME_DIR" context.temp_allocator)]
     (when (and has-runtime (!= runtime-dir ""))
-      (return (fmt.tprintf "%s/kimen2/session" runtime-dir))))
+      (return (fmt.tprintf "%s/kimen/session" runtime-dir))))
   (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
     (if has-home
-      (fmt.tprintf "%s/.cache/kimen2/session" home)
-      "kimen2-session")))
+      (fmt.tprintf "%s/.cache/kimen/session" home)
+      "kimen-session")))
 
 (defn session-read [] -> [passphrase: []byte, ok: bool]
   (let [path (session-path)
