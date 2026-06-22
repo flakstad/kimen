@@ -60,7 +60,6 @@ kimen render --dir <path> [--profile <name>] [--file path=value]
 kimen render --systemd-service <name> [--runtime-dir <path>] [--print-systemd-hints] [--profile <name>] [--file path=value]
 kimen envfile --out <path> [--profile <name>] [--env NAME=value]
 kimen plan [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value]
-kimen project run|render|plan ...
 kimen map lint --profile <name>
 kimen map lint --strict --profile <name>
 kimen doctor --profile <name>
