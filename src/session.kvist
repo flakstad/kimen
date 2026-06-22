@@ -117,23 +117,35 @@
         (os.exit 1))
       (discard (os.chmod path (os.perm 0o600))))))
 
+(defn verify-session-passphrase! [args: []string, passphrase: []byte]
+  (let [path (vault-path args)
+        [vault opened] (parse-vault-file path passphrase)]
+    (when (not opened)
+      (discard (os.remove (session-path)))
+      (os.exit 1))
+    (delete-vault vault)))
+
+(defn session-start-with-passphrase! [args: []string, passphrase: []byte, expires-nanos: i64]
+  (verify-session-passphrase! args passphrase)
+  (session-write passphrase expires-nanos))
+
 (defn session-start! [args: []string]
   (let [[ttl has-ttl] (arg-value args "--ttl")
         [expires-nanos ttl-ok] (parse-ttl (if has-ttl ttl ""))
         [env-pass has-env] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
     (when (not ttl-ok)
       (fail! "invalid --ttl, use seconds or a suffix like 30m, 8h, 7d"))
-    (if has-env
-      (session-write (transmute []byte env-pass) expires-nanos)
-      (if (arg-flag? args "--stdin")
-        (let [data (stdin-bytes)]
-          (defer (delete data))
-          (session-write (passphrase-line data) expires-nanos))
+    (if (arg-flag? args "--stdin")
+      (let [data (stdin-bytes)]
+        (defer (delete data))
+        (session-start-with-passphrase! args (passphrase-line data) expires-nanos))
+      (if has-env
+        (session-start-with-passphrase! args (transmute []byte env-pass) expires-nanos)
         (let [[prompt-pass prompt-ok] (prompt-passphrase)]
           (if prompt-ok
             (do
               (defer (delete prompt-pass))
-              (session-write prompt-pass expires-nanos))
+              (session-start-with-passphrase! args prompt-pass expires-nanos))
             (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal"))))))
   (fmt.printf "session started: %s\n" (session-path)))
 

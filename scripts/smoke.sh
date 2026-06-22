@@ -54,6 +54,16 @@ printf 'secret-value' | "$BIN" secret set api_key --stdin
 got="$("$BIN" secret get api_key)"
 test "$got" = "secret-value"
 
+printf 'new-smoke-pass\n' | "$BIN" vault rekey --new-passphrase-stdin --no-backup >/dev/null
+export KIMEN_PASSPHRASE="new-smoke-pass"
+test "$("$BIN" secret get api_key)" = "secret-value"
+unset KIMEN_PASSPHRASE
+if printf 'smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null 2>&1; then
+  echo "session accepted old passphrase after rekey" >&2
+  exit 1
+fi
+export KIMEN_PASSPHRASE="new-smoke-pass"
+
 if [[ "$EXE_SUFFIX" == ".exe" ]]; then
   "$BIN" version >/dev/null
   printf 'smoke ok\n'
@@ -78,7 +88,7 @@ test "$run_out" = "secret-value|ok|secret-value|stdin-value"
 inline_out="$("$BIN" run --env API_KEY=secret:api_key -- sh -c 'printf "%s" "$API_KEY"')"
 test "$inline_out" = "secret-value"
 
-printf 'smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
+printf 'new-smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
 unset KIMEN_PASSPHRASE
 test "$("$BIN" secret get api_key)" = "secret-value"
 "$BIN" session lock >/dev/null
