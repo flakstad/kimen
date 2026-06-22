@@ -89,6 +89,15 @@ if "$BIN" map lint --strict --map "$tmp/duplicate-stdin.kmap" >/dev/null 2>&1; t
   echo "strict lint accepted duplicate stdin mappings" >&2
   exit 1
 fi
+if "$BIN" doctor --strict --map "$tmp/duplicate-stdin.kmap" >/dev/null 2>&1; then
+  echo "strict doctor accepted duplicate stdin mappings" >&2
+  exit 1
+fi
+printf 'env MISSING=secret:missing\n' > "$tmp/missing-secret.kmap"
+if "$BIN" doctor --map "$tmp/missing-secret.kmap" >/dev/null 2>&1; then
+  echo "doctor accepted missing secret reference" >&2
+  exit 1
+fi
 
 "$BIN" envfile --map "$tmp/map.kmap" --out "$tmp/out.env"
 grep -qx 'API_KEY=secret-value' "$tmp/out.env"

@@ -93,6 +93,9 @@ $XDG_CONFIG_HOME/kimen/profiles/<name>.kmap
 
 Use `--map <path>` to pass a map file directly.
 
+`kimen doctor` checks that the map is valid, the vault can be opened, and every
+secret referenced by the map exists.
+
 ## Examples
 
 ```sh
