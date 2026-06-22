@@ -34,6 +34,9 @@ if [[ "$EXE_SUFFIX" == ".exe" ]] && command -v cygpath >/dev/null 2>&1; then
   BIN_OUT="$(cygpath -w "$BIN_OUT")"
 fi
 cd "$KVIST_ROOT"
+if [[ "$EXE_SUFFIX" == ".exe" && -x "./kvist.exe" && ! -e "./kvist" ]]; then
+  cp ./kvist.exe ./kvist
+fi
 "$KVIST" build "$SOURCE_PATH" --generated "$GENERATED_PATH"
 cd "$ROOT"
 odin build "$BUILD_DIR" -out:"$BIN_OUT"
