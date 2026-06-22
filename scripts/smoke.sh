@@ -24,7 +24,7 @@ fi
 cd "$ROOT"
 mkdir -p dist tmp
 cd "$KVIST_ROOT"
-"$KVIST" build "$ROOT/src/main.kvist" --generated "$ROOT/tmp/main.odin" >/dev/null
+"$KVIST" build "$ROOT/src/main.kvist" --generated "$ROOT/tmp/main.odin"
 cd "$ROOT"
 odin build "$ROOT/tmp" -out:"$BIN"
 
