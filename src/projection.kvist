@@ -122,37 +122,31 @@
     (return opened-vault pp)))
 
 (defn write-profile-envfile [args: []string]
-  (let [[path ok] (map-path-from-args args)]
-    (when (not ok)
-      (os.exit 1))
-    (let [[out-path has-out] (arg-value args "--out")]
-      (when (not (and has-out (!= out-path "")))
-        (fail! "usage: kimen envfile --profile <name> --out <path>"))
-      (let [[vault _] (with-open-vault args)
-            [data err] (os.read_entire_file path context.allocator)
-            builder (strings.builder_make)]
-        (defer (delete-vault vault))
-        (when (!= err nil)
-          (fmt.eprintf "could not read map: %s\n" path)
+  (let [[out-path has-out] (arg-value args "--out")]
+    (when (not (and has-out (!= out-path "")))
+      (fail! "usage: kimen envfile --out <path> [--profile <name>] [--env NAME=value]"))
+    (let [[vault _] (with-open-vault args)
+          [data label] (projection-data-from-args args false true false false false)
+          builder (strings.builder_make)]
+      (defer (delete-vault vault))
+      (defer (delete data))
+      (let [[lines split-err] (strings.split (transmute string data) "\n")]
+        (when (!= split-err nil)
           (os.exit 1))
-        (defer (delete data))
-        (let [[lines split-err] (strings.split (transmute string data) "\n")]
-          (when (!= split-err nil)
-            (os.exit 1))
-          (defer (delete lines))
-          (for [raw-line i lines]
-            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
-              (when (not entry-ok)
-                (os.exit 1))
-              (when (and (not skip) (= kind "env"))
-                (let [value (resolve-value vault source)]
-                  (defer (delete value))
-                  (write-env-line (addr builder) target value)))))
-          (let [out (strings.to_string builder)]
-            (when (!= (os.write_entire_file out-path out (os.perm 0o600)) nil)
-              (fmt.eprintf "could not write envfile: %s\n" out-path)
+        (defer (delete lines))
+        (for [raw-line i lines]
+          (let [[kind target source entry-ok skip] (map-entry label (+ i 1) raw-line)]
+            (when (not entry-ok)
               (os.exit 1))
-            (discard (os.chmod out-path (os.perm 0o600)))))))))
+            (when (and (not skip) (= kind "env"))
+              (let [value (resolve-value vault source)]
+                (defer (delete value))
+                (write-env-line (addr builder) target value)))))
+        (let [out (strings.to_string builder)]
+          (when (!= (os.write_entire_file out-path out (os.perm 0o600)) nil)
+            (fmt.eprintf "could not write envfile: %s\n" out-path)
+            (os.exit 1))
+          (discard (os.chmod out-path (os.perm 0o600))))))))
 
 (defn run-map-path-from-args [args: []string] -> [path: string, ok: bool]
   (let [[map-path has-map] (arg-value args "--map")]
@@ -178,34 +172,105 @@
       (os.exit 1))
     data))
 
-(defn render-profile-files [args: []string]
-  (let [[path ok] (map-path-from-args args)]
+(defn arg-scan-limit [args: []string] -> int
+  (let [sep (find-arg args "--")]
+    (if (>= sep 0) sep (len args))))
+
+(defn append-projection-line! [builder: ^strings.Builder, kind: string, value: string]
+  (strings.write_string builder kind)
+  (strings.write_string builder " ")
+  (strings.write_string builder value)
+  (strings.write_string builder "\n"))
+
+(defn append-inline-projections! [builder: ^strings.Builder, args: []string, include-env: bool, include-file: bool, include-envpath: bool, include-stdin: bool]
+  (let [limit (arg-scan-limit args)
+        i 0]
+    (while (< i limit)
+      (let [arg (get args i)]
+        (cond
+          (and include-env (= arg "--env")) (do
+                                             (when (>= (+ i 1) limit)
+                                               (fail! "missing value after --env"))
+                                             (append-projection-line! builder "env" (get args (+ i 1)))
+                                             (mut! i += 2))
+          (and include-file (= arg "--file")) (do
+                                               (when (>= (+ i 1) limit)
+                                                 (fail! "missing value after --file"))
+                                               (append-projection-line! builder "file" (get args (+ i 1)))
+                                               (mut! i += 2))
+          (and include-envpath (= arg "--envpath")) (do
+                                                     (when (>= (+ i 1) limit)
+                                                       (fail! "missing value after --envpath"))
+                                                     (append-projection-line! builder "envpath" (get args (+ i 1)))
+                                                     (mut! i += 2))
+          (and include-stdin (= arg "--stdin")) (do
+                                                 (when (>= (+ i 1) limit)
+                                                   (fail! "missing value after --stdin"))
+                                                 (append-projection-line! builder "stdin" (get args (+ i 1)))
+                                                 (mut! i += 2))
+          :else (mut! i += 1))))))
+
+(defn projection-data-from-args [args: []string, require-map: bool, include-env: bool, include-file: bool, include-envpath: bool, include-stdin: bool] -> [data: []byte, label: string]
+  (let [path ""
+        ok false]
+    (if require-map
+      (let [[required-path required-ok] (map-path-from-args args)]
+        (set! path required-path)
+        (set! ok required-ok))
+      (let [[optional-path optional-ok] (run-map-path-from-args args)]
+        (set! path optional-path)
+        (set! ok optional-ok)))
     (when (not ok)
       (os.exit 1))
-    (let [[dir has-dir] (arg-value args "--dir")]
-      (when (not (and has-dir (!= dir "")))
-        (fail! "usage: kimen render --dir <path> --profile <name>"))
-      (let [[vault _] (with-open-vault args)
-            [data err] (os.read_entire_file path context.allocator)]
-        (defer (delete-vault vault))
-        (when (!= err nil)
-          (fmt.eprintf "could not read map: %s\n" path)
+    (let [builder (strings.builder_make)]
+      (when (!= path "")
+        (let [map-data (read-run-map-data path)]
+          (defer (delete map-data))
+          (strings.write_string (addr builder) (transmute string map-data))
+          (when (not (strings.has_suffix (transmute string map-data) "\n"))
+            (strings.write_string (addr builder) "\n"))))
+      (append-inline-projections! (addr builder) args include-env include-file include-envpath include-stdin)
+      (return (transmute []byte (strings.to_string builder))
+              (if (= path "") "<inline>" path)))))
+
+(defn render-profile-files [args: []string]
+  (let [[dir has-dir] (arg-value args "--dir")]
+    (when (not (and has-dir (!= dir "")))
+      (fail! "usage: kimen render --dir <path> [--profile <name>] [--file path=value]"))
+    (let [[vault _] (with-open-vault args)
+          [data label] (projection-data-from-args args false false true false false)]
+      (defer (delete-vault vault))
+      (defer (delete data))
+      (discard (os.make_directory_all dir))
+      (discard (os.chmod dir (os.perm 0o700)))
+      (let [[lines split-err] (strings.split (transmute string data) "\n")]
+        (when (!= split-err nil)
           (os.exit 1))
-        (defer (delete data))
-        (discard (os.make_directory_all dir))
-        (discard (os.chmod dir (os.perm 0o700)))
-        (let [[lines split-err] (strings.split (transmute string data) "\n")]
-          (when (!= split-err nil)
-            (os.exit 1))
+        (defer (delete lines))
+        (for [raw-line i lines]
+          (let [[kind target source entry-ok skip] (map-entry label (+ i 1) raw-line)]
+            (when (not entry-ok)
+              (os.exit 1))
+            (when (and (not skip) (= kind "file"))
+              (let [value (resolve-value vault source)]
+                (defer (delete value))
+                (render-file-value dir target value)))))))))
+
+(defn plan-projections [args: []string] -> bool
+  (let [[mode has-mode] (arg-value args "--mode")
+        [data label] (projection-data-from-args args false true true true true)]
+    (defer (delete data))
+    (let [[lines split-err] (strings.split (transmute string data) "\n")]
+      (if (!= split-err nil)
+        false
+        (do
           (defer (delete lines))
-          (for [raw-line i lines]
-            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
-              (when (not entry-ok)
-                (os.exit 1))
-              (when (and (not skip) (= kind "file"))
-                (let [value (resolve-value vault source)]
-                  (defer (delete value))
-                  (render-file-value dir target value))))))))))
+          (fmt.printf "mode: %s\n" (if has-mode mode "run"))
+          (let [ok true]
+            (for [line i lines]
+              (when (not (print-plan-line label (+ i 1) line))
+                (set! ok false)))
+            ok))))))
 
 (defn command-after-separator [args: []string] -> []string
   (let [idx (find-arg args "--")]
@@ -242,14 +307,11 @@
           (mut! i += 1))))))
 
 (defn run-profile-command [args: []string]
-  (let [[path ok] (run-map-path-from-args args)]
-    (when (not ok)
-      (os.exit 1))
-    (let [command (command-after-separator args)]
+  (let [command (command-after-separator args)]
       (when (= (len command) 0)
-        (fail! "usage: kimen run [--profile <name>] [--env NAME=value] -- <command>..."))
+        (fail! "usage: kimen run [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>..."))
       (let [[vault _] (with-open-vault args)
-            data (read-run-map-data path)
+            [data label] (projection-data-from-args args false true true true true)
             [base-env env-err] (os.environ context.allocator)
             env (arr.empty string)
             files-dir ""
@@ -271,8 +333,15 @@
           (when (!= split-err nil)
             (os.exit 1))
           (defer (delete lines))
+          (let [[explicit-files-dir has-files-dir] (arg-value args "--files-dir")]
+            (when (and has-files-dir (!= explicit-files-dir ""))
+              (set! files-dir explicit-files-dir)
+              (set! cleanup-files false)
+              (discard (os.make_directory_all files-dir))
+              (discard (os.chmod files-dir (os.perm 0o700)))
+              (append-env-override! (addr env) "KIMEN_FILES_DIR" (transmute []byte files-dir))))
           (for [raw-line i lines]
-            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+            (let [[kind target source entry-ok skip] (map-entry label (+ i 1) raw-line)]
               (when (not entry-ok)
                 (os.exit 1))
               (when (not skip)
@@ -326,9 +395,8 @@
                                                (os.exit 1))
                                              (set! stdin-file opened))))))
                   :else (do
-                          (fmt.eprintf "%s:%d: unknown kind %q\n" path (+ i 1) kind)
+                          (fmt.eprintf "%s:%d: unknown kind %q\n" label (+ i 1) kind)
                           (os.exit 1)))))))
-        (apply-run-env-flags! args vault (addr env))
         (let [[process start-err] (os.process_start (os.Process_Desc {command: command
                                                                        env: env
                                                                        stdin: stdin-file
@@ -356,4 +424,4 @@
               (os.exit 1))
             (if state.exited
               (os.exit state.exit_code)
-              (os.exit 1))))))))
+              (os.exit 1)))))))

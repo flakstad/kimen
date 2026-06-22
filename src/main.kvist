@@ -22,9 +22,10 @@
   (println "  kimen secret set <name> [--stdin]")
   (println "  kimen secret list")
   (println "  kimen secret get <name> --unsafe-stdout")
-  (println "  kimen run [--profile <name>] [--env NAME=value] -- <command>...")
-  (println "  kimen envfile --profile <name> --out <path>")
-  (println "  kimen plan --profile <name>")
+  (println "  kimen run [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>...")
+  (println "  kimen render --dir <path> [--profile <name>] [--file path=value]")
+  (println "  kimen envfile --out <path> [--profile <name>] [--env NAME=value]")
+  (println "  kimen plan [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value]")
   (println "  kimen map lint --profile <name>")
   (println "  kimen doctor --profile <name>")
   (println "  kimen session start [--ttl 8h]|status|lock|stop"))
@@ -196,7 +197,7 @@
                       (fmt.eprintf "%s:%d: unknown kind %q\n" path line-no kind)
                       false))))))))
 
-(defn lint-kmap [path: string] -> bool
+(defn lint-kmap [path: string, strict: bool] -> bool
   (let [[data err] (os.read_entire_file path context.allocator)]
     (if (!= err nil)
       (do
@@ -209,11 +210,19 @@
             false
             (do
               (defer (delete lines))
-              (let [ok true]
+              (let [ok true
+                    warnings 0
+                    stdin-count 0]
                 (for [line i lines]
                   (when (not (validate-kmap-line path (+ i 1) line))
-                    (set! ok false)))
-                ok))))))))
+                    (set! ok false))
+                  (let [clean (strip-inline-comment (strings.trim_space (strings.trim_suffix line "\r")))]
+                    (when (strings.has_prefix clean "stdin ")
+                      (mut! stdin-count += 1)
+                      (when (> stdin-count 1)
+                        (fmt.eprintf "%s:%d: warning: duplicate stdin mapping\n" path (+ i 1))
+                        (mut! warnings += 1)))))
+                (and ok (or (not strict) (= warnings 0)))))))))))
 
 (defn plan-kmap [path: string] -> bool
   (let [[data err] (os.read_entire_file path context.allocator)]
@@ -267,24 +276,31 @@
   (write-profile-envfile args))
 
 (defn handle-plan [args: []string]
-  (let [[path ok] (map-path-from-args args)]
-    (when (not (and ok (plan-kmap path)))
-      (os.exit 1))))
+  (when (not (plan-projections args))
+    (os.exit 1)))
 
 (defn handle-map [args: []string]
   (let [subcmd (command-at args 2)]
     (if (= subcmd "lint")
       (let [[path ok] (map-path-from-args args)]
-        (if (and ok (lint-kmap path))
+        (if (and ok (lint-kmap path (arg-flag? args "--strict")))
           (fmt.printf "map ok: %s\n" path)
           (os.exit 1)))
       (fail! "usage: kimen map lint --profile <name>"))))
 
 (defn handle-doctor [args: []string]
   (let [[path ok] (map-path-from-args args)]
-    (if (and ok (lint-kmap path))
+    (if (and ok (lint-kmap path (arg-flag? args "--strict")))
       (fmt.printf "doctor ok: %s\n" path)
       (os.exit 1))))
+
+(defn handle-project [args: []string]
+  (let [subcmd (command-at args 2)]
+    (cond
+      (= subcmd "run") (run-profile-command args)
+      (= subcmd "render") (render-profile-files args)
+      (= subcmd "plan") (handle-plan args)
+      :else (fail! "usage: kimen project run|render|plan"))))
 
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
@@ -306,6 +322,7 @@
       (= cmd "render") (handle-render os.args)
       (= cmd "envfile") (handle-envfile os.args)
       (= cmd "plan") (handle-plan os.args)
+      (= cmd "project") (handle-project os.args)
       (= cmd "map") (handle-map os.args)
       (= cmd "doctor") (handle-doctor os.args)
       (= cmd "session") (handle-session os.args)
