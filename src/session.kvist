@@ -1,5 +1,15 @@
 (package main)
 
+(import strconv "core:strconv")
+(import time "core:time")
+
+(def SESSION-FORMAT: string "kimen-session/v1")
+(def SESSION-NEVER-EXPIRES: i64 0)
+(def BYTE-S: byte 115)
+(def BYTE-M: byte 109)
+(def BYTE-H: byte 104)
+(def BYTE-D: byte 100)
+
 (defn session-path [] -> string
   (let [[flag-path has-flag] (os.lookup_env "KIMEN_SESSION" context.temp_allocator)]
     (when (and has-flag (!= flag-path ""))
@@ -12,12 +22,52 @@
       (fmt.tprintf "%s/.cache/kimen/session" home)
       "kimen-session")))
 
+(defn now-nanos [] -> i64
+  (time.time_to_unix_nano (time.now)))
+
+(defn session-expired? [expires-nanos: i64] -> bool
+  (and (!= expires-nanos SESSION-NEVER-EXPIRES)
+       (> (now-nanos) expires-nanos)))
+
+(defn parse-session-file [data: []byte] -> [passphrase: []byte, expires-nanos: i64, owns-passphrase: bool, ok: bool]
+  (let [text (transmute string data)]
+    (when (not (strings.has_prefix text SESSION-FORMAT))
+      (return data SESSION-NEVER-EXPIRES false true))
+    (let [[lines split-err] (strings.split text "\n")]
+      (when (!= split-err nil)
+        (return nil 0 false false))
+      (defer (delete lines))
+      (when (< (len lines) 3)
+        (return nil 0 false false))
+      (let [expires-line (get lines 1)
+            pass-line (get lines 2)]
+        (when (or (not (strings.has_prefix expires-line "expires="))
+                  (not (strings.has_prefix pass-line "passphrase=")))
+          (return nil 0 false false))
+        (let [[expires-int expires-ok] (strconv.parse_int (slice expires-line 8))]
+          (when (not expires-ok)
+            (return nil 0 false false))
+          (return (decode-b64 (slice pass-line 11)) (i64 expires-int) true true))))))
+
 (defn session-read [] -> [passphrase: []byte, ok: bool]
   (let [path (session-path)
         [data err] (os.read_entire_file path context.allocator)]
     (if (!= err nil)
       (return nil false)
-      (return data true))))
+      (let [[passphrase expires-nanos owns-passphrase parsed] (parse-session-file data)]
+        (when (not parsed)
+          (delete data)
+          (return nil false))
+        (when (session-expired? expires-nanos)
+          (when owns-passphrase
+            (delete passphrase))
+          (when (not owns-passphrase)
+            (delete data))
+          (discard (os.remove path))
+          (return nil false))
+        (when owns-passphrase
+          (delete data))
+        (return passphrase true)))))
 
 (defn passphrase-line [data: []byte] -> []byte
   (let [end (len data)]
@@ -27,36 +77,70 @@
       (mut! end -= 1))
     (slice data 0 end)))
 
-(defn session-write [passphrase: []byte]
+(defn parse-ttl [ttl: string] -> [nanos: i64, ok: bool]
+  (let [trimmed (strings.trim_space ttl)]
+    (when (= trimmed "")
+      (return SESSION-NEVER-EXPIRES true))
+    (let [unit (get trimmed (- (len trimmed) 1))
+          number-text trimmed
+          multiplier: i64 1000000000]
+      (cond
+        (= unit BYTE-S) (do
+                          (set! number-text (slice trimmed 0 (- (len trimmed) 1)))
+                          (set! multiplier 1000000000))
+        (= unit BYTE-M) (do
+                          (set! number-text (slice trimmed 0 (- (len trimmed) 1)))
+                          (set! multiplier (* 60 1000000000)))
+        (= unit BYTE-H) (do
+                          (set! number-text (slice trimmed 0 (- (len trimmed) 1)))
+                          (set! multiplier (* 60 60 1000000000)))
+        (= unit BYTE-D) (do
+                          (set! number-text (slice trimmed 0 (- (len trimmed) 1)))
+                          (set! multiplier (* 24 60 60 1000000000))))
+      (let [[amount parsed] (strconv.parse_int number-text)]
+        (when (or (not parsed) (< amount 0))
+          (return 0 false))
+        (if (= amount 0)
+          (return SESSION-NEVER-EXPIRES true)
+          (return (+ (now-nanos) (* (i64 amount) multiplier)) true))))))
+
+(defn session-write [passphrase: []byte, expires-nanos: i64]
   (let [path (session-path)
         [dir _] (os.split_path path)]
     (when (!= dir "")
       (discard (os.make_directory_all dir))
       (discard (os.chmod dir (os.perm 0o700))))
-    (when (!= (os.write_entire_file path passphrase (os.perm 0o600)) nil)
-      (fmt.eprintf "could not write session: %s\n" path)
-      (os.exit 1))
-    (discard (os.chmod path (os.perm 0o600)))))
+    (let [encoded (b64 passphrase)
+          body (fmt.tprintf "%s\nexpires=%d\npassphrase=%s\n" SESSION-FORMAT expires-nanos encoded)]
+      (when (!= (os.write_entire_file path body (os.perm 0o600)) nil)
+        (fmt.eprintf "could not write session: %s\n" path)
+        (os.exit 1))
+      (discard (os.chmod path (os.perm 0o600))))))
 
 (defn session-start! [args: []string]
-  (let [[env-pass has-env] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
+  (let [[ttl has-ttl] (arg-value args "--ttl")
+        [expires-nanos ttl-ok] (parse-ttl (if has-ttl ttl ""))
+        [env-pass has-env] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
+    (when (not ttl-ok)
+      (fail! "invalid --ttl, use seconds or a suffix like 30m, 8h, 7d"))
     (if has-env
-      (session-write (transmute []byte env-pass))
+      (session-write (transmute []byte env-pass) expires-nanos)
       (if (arg-flag? args "--stdin")
         (let [data (stdin-bytes)]
           (defer (delete data))
-          (session-write (passphrase-line data)))
+          (session-write (passphrase-line data) expires-nanos))
         (let [[prompt-pass prompt-ok] (prompt-passphrase)]
           (if prompt-ok
             (do
               (defer (delete prompt-pass))
-              (session-write prompt-pass))
+              (session-write prompt-pass expires-nanos))
             (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal"))))))
   (fmt.printf "session started: %s\n" (session-path)))
 
 (defn session-status! []
-  (let [path (session-path)]
-    (if (os.exists path)
+  (let [path (session-path)
+        [_ ok] (session-read)]
+    (if ok
       (fmt.printf "session active: %s\n" path)
       (fmt.printf "session inactive: %s\n" path))))
 

@@ -42,7 +42,10 @@ test "$(cat "$tmp/rendered/token.txt")" = "secret-value"
 run_out="$("$BIN" run --map "$tmp/map.kmap" --env EXTRA=const:ok -- sh -c 'printf "%s|%s|%s|%s" "$API_KEY" "$EXTRA" "$(cat "$TOKEN_FILE")" "$(cat)"')"
 test "$run_out" = "secret-value|ok|secret-value|stdin-value"
 
-printf 'smoke-pass\n' | "$BIN" session start --stdin >/dev/null
+inline_out="$("$BIN" run --env API_KEY=secret:api_key -- sh -c 'printf "%s" "$API_KEY"')"
+test "$inline_out" = "secret-value"
+
+printf 'smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
 unset KIMEN_PASSPHRASE
 test "$("$BIN" secret get api_key)" = "secret-value"
 "$BIN" session lock >/dev/null

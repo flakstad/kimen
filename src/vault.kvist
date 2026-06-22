@@ -282,20 +282,25 @@
       (os.exit 1))
     data))
 
+(defn secret-set-input [args: []string] -> [value: []byte, ok: bool]
+  (if (arg-flag? args "--stdin")
+    (return (stdin-bytes) true)
+    (return (prompt-secret-value))))
+
 (defn secret-set! [args: []string]
   (let [name (command-at args 3)]
     (when (= name "")
-      (fail! "usage: kimen secret set <name> --stdin"))
-    (when (not (arg-flag? args "--stdin"))
-      (fail! "secret set currently requires --stdin"))
+      (fail! "usage: kimen secret set <name> [--stdin]"))
     (let [path (vault-path args)
           passphrase (passphrase-bytes args)
           [vault opened] (parse-vault-file path passphrase)]
       (when (not opened)
         (os.exit 1))
       (defer (delete-vault vault))
-      (let [value (stdin-bytes)
+      (let [[value value-ok] (secret-set-input args)
             idx (secret-index vault name)]
+        (when (not value-ok)
+          (fail! "secret set requires --stdin or an interactive terminal"))
         (if (>= idx 0)
           (do
             (delete vault.secrets[idx].value)

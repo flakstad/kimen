@@ -20,8 +20,8 @@
             (arr.push! out b)))))
     out))
 
-(defn prompt-file-passphrase [input: ^os.File, output: ^os.File] -> [passphrase: []byte, ok: bool]
-  (os.write_string output "Passphrase: ")
+(defn prompt-file-hidden [input: ^os.File, output: ^os.File, label: string] -> [value: []byte, ok: bool]
+  (os.write_string output label)
   (let [fd (posix.FD (os.fd input))
         original (posix.termios {})
         raw (posix.termios {})]
@@ -44,10 +44,20 @@
 
 (defn prompt-passphrase [] -> [passphrase: []byte, ok: bool]
   (when (terminal.is_terminal os.stdin)
-    (return (prompt-file-passphrase os.stdin os.stderr)))
+    (return (prompt-file-hidden os.stdin os.stderr "Passphrase: ")))
   (let [[tty err] (os.open "/dev/tty" os.O_RDWR (os.perm 0))]
     (when (= err nil)
       (defer (os.close tty))
       (when (terminal.is_terminal tty)
-        (return (prompt-file-passphrase tty tty)))))
+        (return (prompt-file-hidden tty tty "Passphrase: ")))))
+  (return nil false))
+
+(defn prompt-secret-value [] -> [value: []byte, ok: bool]
+  (when (terminal.is_terminal os.stdin)
+    (return (prompt-file-hidden os.stdin os.stderr "Secret: ")))
+  (let [[tty err] (os.open "/dev/tty" os.O_RDWR (os.perm 0))]
+    (when (= err nil)
+      (defer (os.close tty))
+      (when (terminal.is_terminal tty)
+        (return (prompt-file-hidden tty tty "Secret: ")))))
   (return nil false))
