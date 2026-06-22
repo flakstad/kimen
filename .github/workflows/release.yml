@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: flakstad/homebrew-kimen
-          token: ${{ secrets.TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
+          token: ${{ secrets.TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN || github.token }}
           path: tap
 
       - name: Download release artifacts
