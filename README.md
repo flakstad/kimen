@@ -5,9 +5,10 @@ Kimen is a local secret vault and projection tool.
 Store secrets once, then project them into commands, envfiles, rendered files,
 or command stdin from small profile files.
 
-Kimen requires [Kvist](https://github.com/kvist-lang/kvist).
-
 ## Install
+
+Download [latest release](https://github.com/flakstad/kimen/releases), or
+install via brew.
 
 ```sh
 brew install flakstad/kimen/kimen
@@ -15,20 +16,11 @@ brew install flakstad/kimen/kimen
 
 ## Build
 
+Kimen requires [Kvist](https://github.com/kvist-lang/kvist) to build from source.
+
 ```sh
 kvist build src/main.kvist
 ```
-
-## Release
-
-```sh
-git tag v2026.6.22
-git push origin v2026.6.22
-```
-
-Release CI builds macOS, Linux, and Windows archives, publishes checksums, and
-updates `flakstad/homebrew-kimen`. The workflow needs `TAP_GITHUB_TOKEN` or
-`GORELEASER_GITHUB_TOKEN` with access to that tap.
 
 ## Vault
 
@@ -36,14 +28,6 @@ Default vault:
 
 ```sh
 ~/.config/kimen/vault.kv
-```
-
-Passphrase lookup order:
-
-```text
-KIMEN_PASSPHRASE
-session
-terminal prompt
 ```
 
 ## Commands
@@ -106,10 +90,4 @@ Use `--map <path>` to pass a map file directly.
 printf '%s' "$API_KEY" | kimen secret set api_key --stdin
 kimen session start --ttl 8h
 kimen run --env API_KEY=secret:api_key -- sh -c 'curl -H "Authorization: Bearer $API_KEY" https://example.com'
-```
-
-## Check
-
-```sh
-scripts/smoke.sh
 ```
