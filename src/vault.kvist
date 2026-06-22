@@ -268,6 +268,97 @@
       (write-vault-file path (passphrase-bytes args) (transmute []byte empty-payload)))
     (fmt.printf "initialized vault: %s\n" path)))
 
+(defn bytes-equal? [a: []byte, b: []byte] -> bool
+  (if (!= (len a) (len b))
+    false
+    (do
+      (let [same true]
+        (for [byte i a]
+          (when (!= byte (get b i))
+            (set! same false)))
+        same))))
+
+(defn prompt-new-passphrase [] -> [passphrase: []byte, ok: bool]
+  (when (terminal.is_terminal os.stdin)
+    (let [[first first-ok] (prompt-file-hidden os.stdin os.stderr "New passphrase: ")]
+      (when (not first-ok)
+        (return nil false))
+      (let [[confirm confirm-ok] (prompt-file-hidden os.stdin os.stderr "Confirm new passphrase: ")]
+        (when (not confirm-ok)
+          (delete first)
+          (return nil false))
+        (defer (delete confirm))
+        (when (not (bytes-equal? first confirm))
+          (delete first)
+          (fail! "new passphrase confirmation does not match"))
+        (return first true))))
+  (let [[tty err] (os.open "/dev/tty" os.O_RDWR (os.perm 0))]
+    (when (= err nil)
+      (defer (os.close tty))
+      (when (terminal.is_terminal tty)
+        (let [[first first-ok] (prompt-file-hidden tty tty "New passphrase: ")]
+          (when (not first-ok)
+            (return nil false))
+          (let [[confirm confirm-ok] (prompt-file-hidden tty tty "Confirm new passphrase: ")]
+            (when (not confirm-ok)
+              (delete first)
+              (return nil false))
+            (defer (delete confirm))
+            (when (not (bytes-equal? first confirm))
+              (delete first)
+              (fail! "new passphrase confirmation does not match"))
+            (return first true))))))
+  (return nil false))
+
+(defn new-passphrase-bytes [args: []string] -> []byte
+  (let [[env-pass has-env] (os.lookup_env "KIMEN_NEW_PASSPHRASE" context.temp_allocator)]
+    (when has-env
+      (return (transmute []byte env-pass))))
+  (if (arg-flag? args "--new-passphrase-stdin")
+    (let [data (stdin-bytes)]
+      (defer (delete data))
+      (return (clone-bytes (passphrase-line data))))
+    (let [[prompt-pass prompt-ok] (prompt-new-passphrase)]
+      (when prompt-ok
+        (return prompt-pass))))
+  (fail! "missing new passphrase: set KIMEN_NEW_PASSPHRASE, use --new-passphrase-stdin, or use an interactive terminal")
+  (let [empty: string ""]
+    (transmute []byte empty)))
+
+(defn backup-vault-file [path: string] -> string
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (when (!= err nil)
+      (fmt.eprintf "could not read vault for backup: %s\n" path)
+      (os.exit 1))
+    (defer (delete data))
+    (let [backup-path (fmt.tprintf "%s.bak.%d" path (now-nanos))]
+      (when (!= (os.write_entire_file backup-path data (os.perm 0o600)) nil)
+        (fmt.eprintf "could not write vault backup: %s\n" backup-path)
+        (os.exit 1))
+      (discard (os.chmod backup-path (os.perm 0o600)))
+      backup-path)))
+
+(defn vault-rekey! [args: []string]
+  (let [path (vault-path args)
+        old-passphrase (passphrase-bytes args)
+        new-passphrase (new-passphrase-bytes args)]
+    (when (= (len new-passphrase) 0)
+      (fail! "empty new passphrase"))
+    (when (bytes-equal? old-passphrase new-passphrase)
+      (fail! "new passphrase must differ from old passphrase"))
+    (let [[vault opened] (parse-vault-file path old-passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (let [backup-path ""]
+        (when (not (arg-flag? args "--no-backup"))
+          (set! backup-path (backup-vault-file path)))
+        (save-vault vault new-passphrase)
+        (discard (os.remove (session-path)))
+        (fmt.printf "rekeyed vault: %s\n" path)
+        (when (!= backup-path "")
+          (fmt.printf "backup: %s\n" backup-path))))))
+
 (defn secret-index [vault: Vault, name: string] -> int
   (let [idx -1]
     (for [secret i vault.secrets]
@@ -324,7 +415,10 @@
 (defn secret-get! [args: []string]
   (let [name (command-at args 3)]
     (when (= name "")
-      (fail! "usage: kimen secret get <name>"))
+      (fail! "usage: kimen secret get <name> --unsafe-stdout"))
+    (when (and (terminal.is_terminal os.stdout)
+               (not (arg-flag? args "--unsafe-stdout")))
+      (fail! "refusing to print secrets; use --unsafe-stdout if you really want this"))
     (let [path (vault-path args)
           passphrase (passphrase-bytes args)
           [vault opened] (parse-vault-file path passphrase)]

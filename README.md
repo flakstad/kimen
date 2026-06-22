@@ -34,11 +34,12 @@ Default vault:
 
 ```sh
 kimen vault init
+kimen vault rekey
 
 kimen secret set <name>
 kimen secret set <name> --stdin
 kimen secret list
-kimen secret get <name>
+kimen secret get <name> --unsafe-stdout
 kimen secret rm <name>
 kimen secret mv <from> <to>
 
