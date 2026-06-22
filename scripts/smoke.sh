@@ -63,6 +63,9 @@ printf 'new-smoke-pass\n' | "$BIN" vault rekey --new-passphrase-stdin --no-backu
 export KIMEN_PASSPHRASE="new-smoke-pass"
 test "$("$BIN" secret get api_key)" = "secret-value"
 unset KIMEN_PASSPHRASE
+test "$("$BIN" secret get api_key --passphrase-cmd "printf new-smoke-pass")" = "secret-value"
+export KIMEN_PASSPHRASE="new-smoke-pass"
+unset KIMEN_PASSPHRASE
 if printf 'smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null 2>&1; then
   echo "session accepted old passphrase after rekey" >&2
   exit 1
@@ -96,6 +99,9 @@ grep -qx 'API_KEY=secret-value' "$tmp/inline.env"
 test "$(cat "$tmp/rendered/token.txt")" = "secret-value"
 "$BIN" render --file inline-token.txt=secret:api_key --dir "$tmp/inline-rendered"
 test "$(cat "$tmp/inline-rendered/inline-token.txt")" = "secret-value"
+systemd_hints="$("$BIN" render --file systemd-token.txt=secret:api_key --systemd-service kari --runtime-dir "$tmp/run" --print-systemd-hints)"
+test "$(cat "$tmp/run/kimen/kari/systemd-token.txt")" = "secret-value"
+printf '%s\n' "$systemd_hints" | grep -qx "Environment=KIMEN_FILES_DIR=$tmp/run/kimen/kari"
 
 run_out="$("$BIN" run --map "$tmp/map.kmap" --env EXTRA=const:ok -- sh -c 'printf "%s|%s|%s|%s" "$API_KEY" "$EXTRA" "$(cat "$TOKEN_FILE")" "$(cat)"')"
 test "$run_out" = "secret-value|ok|secret-value|stdin-value"
@@ -115,6 +121,9 @@ test "$(cat "$tmp/project-rendered/project-token.txt")" = "secret-value"
 
 printf 'new-smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
 unset KIMEN_PASSPHRASE
+test "$("$BIN" secret get api_key)" = "secret-value"
+"$BIN" session lock >/dev/null
+"$BIN" session start --passphrase-cmd "printf new-smoke-pass" --ttl 1h >/dev/null
 test "$("$BIN" secret get api_key)" = "secret-value"
 "$BIN" session lock >/dev/null
 

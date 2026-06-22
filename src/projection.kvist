@@ -172,6 +172,58 @@
       (os.exit 1))
     data))
 
+(def BYTE_DOT: byte 46)
+(def BYTE_DASH: byte 45)
+(def BYTE_UNDERSCORE: byte 95)
+(def BYTE_AT: byte 64)
+(def BYTE_ZERO: byte 48)
+(def BYTE_NINE: byte 57)
+(def BYTE_A_UPPER: byte 65)
+(def BYTE_Z_UPPER: byte 90)
+(def BYTE_A_LOWER: byte 97)
+(def BYTE_Z_LOWER: byte 122)
+
+(defn systemd-service-char? [b: byte] -> bool
+  (or (and (>= b BYTE_ZERO) (<= b BYTE_NINE))
+      (and (>= b BYTE_A_UPPER) (<= b BYTE_Z_UPPER))
+      (and (>= b BYTE_A_LOWER) (<= b BYTE_Z_LOWER))
+      (= b BYTE_DOT)
+      (= b BYTE_DASH)
+      (= b BYTE_UNDERSCORE)
+      (= b BYTE_AT)))
+
+(defn systemd-service-name? [service: string] -> bool
+  (when (= service "")
+    (return false))
+  (let [ok true
+        i 0]
+    (while (< i (len service))
+      (when (not (systemd-service-char? (get service i)))
+        (set! ok false))
+      (mut! i += 1))
+    ok))
+
+(defn render-output-dir [args: []string] -> string
+  (let [[dir has-dir] (arg-value args "--dir")
+        [service has-service] (arg-value args "--systemd-service")]
+    (when (and has-dir has-service (!= dir "") (!= service ""))
+      (fail! "use only one of --dir or --systemd-service"))
+    (when (and has-service (!= service ""))
+      (when (not (systemd-service-name? service))
+        (fmt.eprintf "invalid --systemd-service %s\n" service)
+        (os.exit 1))
+      (let [[runtime-dir has-runtime-dir] (arg-value args "--runtime-dir")
+            base (if (and has-runtime-dir (!= runtime-dir "")) runtime-dir "/run")]
+        (return (fmt.tprintf "%s/kimen/%s" base service))))
+    (when (and has-dir (!= dir ""))
+      (return dir))
+    (fail! "--dir is required (or use --systemd-service)")
+    ""))
+
+(defn print-systemd-render-hints [out-dir: string]
+  (fmt.printf "Environment=KIMEN_FILES_DIR=%s\n" out-dir)
+  (fmt.printf "# files rendered under %s (dir 0700, files 0600)\n" out-dir))
+
 (defn arg-scan-limit [args: []string] -> int
   (let [sep (find-arg args "--")]
     (if (>= sep 0) sep (len args))))
@@ -234,9 +286,11 @@
               (if (= path "") "<inline>" path)))))
 
 (defn render-profile-files [args: []string]
-  (let [[dir has-dir] (arg-value args "--dir")]
-    (when (not (and has-dir (!= dir "")))
-      (fail! "usage: kimen render --dir <path> [--profile <name>] [--file path=value]"))
+  (let [dir (render-output-dir args)]
+    (let [[_ has-service] (arg-value args "--systemd-service")]
+      (when (and (arg-flag? args "--print-systemd-hints")
+                 (not has-service))
+        (fail! "--print-systemd-hints requires --systemd-service")))
     (let [[vault _] (with-open-vault args)
           [data label] (projection-data-from-args args false false true false false)]
       (defer (delete-vault vault))
@@ -254,7 +308,9 @@
             (when (and (not skip) (= kind "file"))
               (let [value (resolve-value vault source)]
                 (defer (delete value))
-                (render-file-value dir target value)))))))))
+                (render-file-value dir target value)))))
+        (when (arg-flag? args "--print-systemd-hints")
+          (print-systemd-render-hints dir))))))
 
 (defn plan-projections [args: []string] -> bool
   (let [[mode has-mode] (arg-value args "--mode")

@@ -37,6 +37,13 @@
       "vault.kv")))
 
 (defn passphrase-bytes [args: []string] -> []byte
+  (let [[cmd has-cmd] (arg-value args "--passphrase-cmd")]
+    (when has-cmd
+      (return (passphrase-command-bytes cmd))))
+  (when (arg-flag? args "--passphrase-stdin")
+    (let [data (stdin-bytes)]
+      (defer (delete data))
+      (return (clone-bytes (passphrase-line data)))))
   (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
     (when has-pass
       (return (transmute []byte pass))))
@@ -92,6 +99,31 @@
   (let [out (make []byte (len data))]
     (copy out data)
     out))
+
+(defn passphrase-command-bytes [cmd-spec: string] -> []byte
+  (let [trimmed (strings.trim_space cmd-spec)]
+    (when (= trimmed "")
+      (fail! "empty --passphrase-cmd"))
+    (let [[fields err] (strings.fields trimmed context.allocator)]
+      (when (!= err nil)
+        (fail! "could not parse --passphrase-cmd"))
+      (defer (delete fields))
+      (when (= (len fields) 0)
+        (fail! "empty --passphrase-cmd"))
+      (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc {command: fields})
+                                                            context.allocator)]
+        (defer (delete stderr))
+        (when (!= exec-err nil)
+          (fail! "--passphrase-cmd failed"))
+        (when (or (not state.exited) (!= state.exit_code 0))
+          (fmt.eprintf "--passphrase-cmd exited with %d\n" state.exit_code)
+          (os.exit 1))
+        (let [line (clone-bytes (passphrase-line stdout))]
+          (delete stdout)
+          (when (= (len line) 0)
+            (delete line)
+            (fail! "--passphrase-cmd produced an empty passphrase"))
+          line)))))
 
 (defn delete-secret [secret: Secret]
   (delete secret.name-bytes)
