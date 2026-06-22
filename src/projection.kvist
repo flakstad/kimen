@@ -124,7 +124,7 @@
 (defn write-profile-envfile [args: []string]
   (let [[out-path has-out] (arg-value args "--out")]
     (when (not (and has-out (!= out-path "")))
-      (fail! "usage: kimen envfile --out <path> [--profile <name>] [--env NAME=value]"))
+      (fail! "usage: kimen envfile --out <path> [--profile <name>|--map <path>] [--env NAME=value]"))
     (let [[vault _] (with-open-vault args)
           [data label] (projection-data-from-args args false true false false false)
           builder (strings.builder_make)]
@@ -365,7 +365,7 @@
 (defn run-profile-command [args: []string]
   (let [command (command-after-separator args)]
       (when (= (len command) 0)
-        (fail! "usage: kimen run [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>..."))
+        (fail! "usage: kimen run [--profile <name>|--map <path>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>..."))
       (let [[vault _] (with-open-vault args)
             [data label] (projection-data-from-args args false true true true true)
             [base-env env-err] (os.environ context.allocator)
