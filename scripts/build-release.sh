@@ -10,6 +10,7 @@ EXE_SUFFIX="${EXE_SUFFIX:-}"
 ARCHIVE_FORMAT="${ARCHIVE_FORMAT:-tar.gz}"
 KVIST_ROOT="${KVIST_ROOT:-$ROOT/../kvist}"
 KVIST="${KVIST:-./kvist$EXE_SUFFIX}"
+ODIN_TARGET="${ODIN_TARGET:-}"
 
 case "$GOARCH" in
   x86_64) GOARCH="amd64" ;;
@@ -31,8 +32,14 @@ mkdir -p "$build_dir" "$package_dir" "$dist_dir"
 )
 
 VERSION="$VERSION" perl -0pi -e 's/VERSION: string : "0\.1\.0-dev"/VERSION: string : "$ENV{VERSION}"/' "$build_dir/main.odin"
-odin build "$build_dir" -out:"$build_dir/$binary_name"
-"$build_dir/$binary_name" version | grep -qx "$VERSION"
+odin_args=(build "$build_dir" "-out:$build_dir/$binary_name")
+if [[ -n "$ODIN_TARGET" ]]; then
+  odin_args+=("-target:$ODIN_TARGET")
+fi
+odin "${odin_args[@]}"
+if [[ -z "$ODIN_TARGET" ]]; then
+  "$build_dir/$binary_name" version | grep -qx "$VERSION"
+fi
 
 cp "$build_dir/$binary_name" "$package_dir/$binary_name"
 
