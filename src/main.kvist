@@ -294,14 +294,6 @@
       (fmt.printf "doctor ok: %s\n" path)
       (os.exit 1))))
 
-(defn handle-project [args: []string]
-  (let [subcmd (command-at args 2)]
-    (cond
-      (= subcmd "run") (run-profile-command args)
-      (= subcmd "render") (render-profile-files args)
-      (= subcmd "plan") (handle-plan args)
-      :else (fail! "usage: kimen project run|render|plan"))))
-
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
@@ -322,7 +314,6 @@
       (= cmd "render") (handle-render os.args)
       (= cmd "envfile") (handle-envfile os.args)
       (= cmd "plan") (handle-plan os.args)
-      (= cmd "project") (handle-project os.args)
       (= cmd "map") (handle-map os.args)
       (= cmd "doctor") (handle-doctor os.args)
       (= cmd "session") (handle-session os.args)

@@ -113,12 +113,6 @@ inline_all_dir="$tmp/inline-files"
 inline_all="$("$BIN" run --files-dir "$inline_all_dir" --file token.txt=secret:api_key --envpath TOKEN_FILE=token.txt --stdin const:stdin-value -- sh -c 'printf "%s|%s|%s" "$KIMEN_FILES_DIR" "$(cat "$TOKEN_FILE")" "$(cat)"')"
 test "$inline_all" = "$inline_all_dir|secret-value|stdin-value"
 
-project_out="$("$BIN" project run --env API_KEY=secret:api_key -- sh -c 'printf "%s" "$API_KEY"')"
-test "$project_out" = "secret-value"
-"$BIN" project render --file project-token.txt=secret:api_key --dir "$tmp/project-rendered"
-test "$(cat "$tmp/project-rendered/project-token.txt")" = "secret-value"
-"$BIN" project plan --env API_KEY=secret:api_key >/dev/null
-
 printf 'new-smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
 unset KIMEN_PASSPHRASE
 test "$("$BIN" secret get api_key)" = "secret-value"
