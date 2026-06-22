@@ -34,7 +34,11 @@ Default vault:
 
 ```sh
 kimen vault init
+kimen vault path
+kimen vault info
 kimen vault rekey
+kimen vault rekey --dry-run
+kimen vault rekey --backup-dir <path>
 
 kimen secret set <name>
 kimen secret set <name> --stdin
@@ -49,13 +53,15 @@ kimen session status
 kimen session lock
 kimen session stop
 
-kimen run --env NAME=secret:name -- <command>...
-kimen run --profile <name> [--env NAME=value] -- <command>...
-kimen render --dir <path> --profile <name>
-kimen envfile --profile <name> --out <path>
-kimen plan --profile <name>
+kimen run [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>...
+kimen render --dir <path> [--profile <name>] [--file path=value]
+kimen envfile --out <path> [--profile <name>] [--env NAME=value]
+kimen plan [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value]
+kimen project run|render|plan ...
 kimen map lint --profile <name>
+kimen map lint --strict --profile <name>
 kimen doctor --profile <name>
+kimen doctor --strict --profile <name>
 ```
 
 ## Profiles
