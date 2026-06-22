@@ -154,6 +154,30 @@
               (os.exit 1))
             (discard (os.chmod out-path (os.perm 0o600)))))))))
 
+(defn run-map-path-from-args [args: []string] -> [path: string, ok: bool]
+  (let [[map-path has-map] (arg-value args "--map")]
+    (when (and has-map (!= map-path ""))
+      (return map-path true)))
+  (let [[profile has-profile] (arg-value args "--profile")]
+    (when has-profile
+      (let [[path found] (resolve-profile-path profile)]
+        (if found
+          (return path true)
+          (do
+            (fmt.eprintf "profile not found: %s\n" profile)
+            (return "" false))))))
+  (return "" true))
+
+(defn read-run-map-data [path: string] -> []byte
+  (when (= path "")
+    (let [empty: string ""]
+      (return (clone-bytes (transmute []byte empty)))))
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (when (!= err nil)
+      (fmt.eprintf "could not read map: %s\n" path)
+      (os.exit 1))
+    data))
+
 (defn render-profile-files [args: []string]
   (let [[path ok] (map-path-from-args args)]
     (when (not ok)
@@ -218,14 +242,14 @@
           (mut! i += 1))))))
 
 (defn run-profile-command [args: []string]
-  (let [[path ok] (map-path-from-args args)]
+  (let [[path ok] (run-map-path-from-args args)]
     (when (not ok)
       (os.exit 1))
     (let [command (command-after-separator args)]
       (when (= (len command) 0)
-        (fail! "usage: kimen run --profile <name> -- <command>..."))
+        (fail! "usage: kimen run [--profile <name>] [--env NAME=value] -- <command>..."))
       (let [[vault _] (with-open-vault args)
-            [data err] (os.read_entire_file path context.allocator)
+            data (read-run-map-data path)
             [base-env env-err] (os.environ context.allocator)
             env (arr.empty string)
             files-dir ""
@@ -235,9 +259,6 @@
             cleanup-stdin false
             stdin-set false]
         (defer (delete-vault vault))
-        (when (!= err nil)
-          (fmt.eprintf "could not read map: %s\n" path)
-          (os.exit 1))
         (when (!= env-err nil)
           (fmt.eprintln "could not read environment")
           (os.exit 1))

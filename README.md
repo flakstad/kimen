@@ -36,6 +36,7 @@ terminal prompt
 ```sh
 kimen vault init
 
+kimen secret set <name>
 kimen secret set <name> --stdin
 kimen secret list
 kimen secret get <name>
@@ -43,10 +44,12 @@ kimen secret rm <name>
 kimen secret mv <from> <to>
 
 kimen session start
+kimen session start --ttl 8h
 kimen session status
 kimen session lock
 kimen session stop
 
+kimen run --env NAME=secret:name -- <command>...
 kimen run --profile <name> [--env NAME=value] -- <command>...
 kimen render --dir <path> --profile <name>
 kimen envfile --profile <name> --out <path>
@@ -81,6 +84,14 @@ $XDG_CONFIG_HOME/kimen/profiles/<name>.kmap
 ```
 
 Use `--map <path>` to pass a map file directly.
+
+## Examples
+
+```sh
+printf '%s' "$API_KEY" | kimen secret set api_key --stdin
+kimen session start --ttl 8h
+kimen run --env API_KEY=secret:api_key -- sh -c 'curl -H "Authorization: Bearer $API_KEY" https://example.com'
+```
 
 ## Check
 
