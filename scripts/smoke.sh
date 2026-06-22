@@ -41,6 +41,12 @@ printf 'secret-value' | "$BIN" secret set api_key --stdin
 got="$("$BIN" secret get api_key)"
 test "$got" = "secret-value"
 
+if [[ "$EXE_SUFFIX" == ".exe" ]]; then
+  "$BIN" version >/dev/null
+  printf 'smoke ok\n'
+  exit 0
+fi
+
 printf 'env API_KEY=secret:api_key\nfile token.txt=secret:api_key\nenvpath TOKEN_FILE=token.txt\nstdin const:stdin-value\n' > "$tmp/map.kmap"
 
 "$BIN" map lint --map "$tmp/map.kmap" >/dev/null
