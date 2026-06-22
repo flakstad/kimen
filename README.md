@@ -7,11 +7,28 @@ or command stdin from small profile files.
 
 Kimen requires [Kvist](https://github.com/kvist-lang/kvist).
 
+## Install
+
+```sh
+brew install flakstad/kimen/kimen
+```
+
 ## Build
 
 ```sh
 kvist build src/main.kvist
 ```
+
+## Release
+
+```sh
+git tag v2026.6.22
+git push origin v2026.6.22
+```
+
+Release CI builds macOS, Linux, and Windows archives, publishes checksums, and
+updates `flakstad/homebrew-kimen`. The workflow needs `TAP_GITHUB_TOKEN` or
+`GORELEASER_GITHUB_TOKEN` with access to that tap.
 
 ## Vault
 
