@@ -23,10 +23,20 @@ fi
 
 cd "$ROOT"
 mkdir -p dist tmp
+SOURCE_PATH="$ROOT/src/main.kvist"
+GENERATED_PATH="$ROOT/tmp/main.odin"
+BUILD_DIR="$ROOT/tmp"
+BIN_OUT="$BIN"
+if [[ "$EXE_SUFFIX" == ".exe" ]] && command -v cygpath >/dev/null 2>&1; then
+  SOURCE_PATH="$(cygpath -w "$SOURCE_PATH")"
+  GENERATED_PATH="$(cygpath -w "$GENERATED_PATH")"
+  BUILD_DIR="$(cygpath -w "$BUILD_DIR")"
+  BIN_OUT="$(cygpath -w "$BIN_OUT")"
+fi
 cd "$KVIST_ROOT"
-"$KVIST" build "$ROOT/src/main.kvist" --generated "$ROOT/tmp/main.odin"
+"$KVIST" build "$SOURCE_PATH" --generated "$GENERATED_PATH"
 cd "$ROOT"
-odin build "$ROOT/tmp" -out:"$BIN"
+odin build "$BUILD_DIR" -out:"$BIN_OUT"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
