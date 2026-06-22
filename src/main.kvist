@@ -224,6 +224,62 @@
                         (mut! warnings += 1)))))
                 (and ok (or (not strict) (= warnings 0)))))))))))
 
+(defn secret-source-name [source: string] -> [name: string, is-secret: bool]
+  (let [trimmed (strings.trim_space source)]
+    (cond
+      (= trimmed "") (return "" false)
+      (strings.has_prefix trimmed "const:") (return "" false)
+      (strings.has_prefix trimmed "exec:") (return "" false)
+      (strings.has_prefix trimmed "secret:") (return (strings.trim_space (slice trimmed 7)) true)
+      :else (return trimmed true))))
+
+(defn doctor-secret-exists? [vault: Vault, name: string] -> bool
+  (>= (secret-index vault name) 0))
+
+(defn doctor-check-map [path: string, vault: Vault, strict: bool] -> bool
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (do
+        (fmt.eprintf "could not read map: %s\n" path)
+        false)
+      (do
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (if (!= split-err nil)
+            false
+            (do
+              (defer (delete lines))
+              (let [ok true
+                    warnings 0
+                    stdin-count 0]
+                (for [line i lines]
+                  (let [[kind target source entry-ok skip] (map-entry path (+ i 1) line)]
+                    (when (not entry-ok)
+                      (set! ok false))
+                    (when (and entry-ok (not skip))
+                      (when (= kind "stdin")
+                        (mut! stdin-count += 1)
+                        (when (> stdin-count 1)
+                          (fmt.eprintf "%s:%d: warning: duplicate stdin mapping\n" path (+ i 1))
+                          (mut! warnings += 1)))
+                      (when (!= kind "envpath")
+                        (let [[secret-name is-secret] (secret-source-name source)]
+                          (when (and is-secret (= secret-name ""))
+                            (fmt.eprintf "%s:%d: empty secret reference\n" path (+ i 1))
+                            (set! ok false))
+                          (when (and is-secret (!= secret-name "") (not (doctor-secret-exists? vault secret-name)))
+                            (fmt.eprintf "%s:%d: missing secret: %s\n" path (+ i 1) secret-name)
+                            (set! ok false)))))))
+                (and ok (or (not strict) (= warnings 0)))))))))))
+
+(defn doctor-profile [args: []string] -> bool
+  (let [[path ok] (map-path-from-args args)]
+    (when (not ok)
+      (return false))
+    (let [[vault _] (with-open-vault args)]
+      (defer (delete-vault vault))
+      (doctor-check-map path vault (arg-flag? args "--strict")))))
+
 (defn plan-kmap [path: string] -> bool
   (let [[data err] (os.read_entire_file path context.allocator)]
     (if (!= err nil)
@@ -289,10 +345,9 @@
       (fail! "usage: kimen map lint --profile <name>"))))
 
 (defn handle-doctor [args: []string]
-  (let [[path ok] (map-path-from-args args)]
-    (if (and ok (lint-kmap path (arg-flag? args "--strict")))
-      (fmt.printf "doctor ok: %s\n" path)
-      (os.exit 1))))
+  (if (doctor-profile args)
+    (fmt.println "doctor ok")
+    (os.exit 1)))
 
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
