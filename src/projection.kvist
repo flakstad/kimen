@@ -129,43 +129,41 @@
       (when (not (and has-out (!= out-path "")))
         (fail! "usage: kimen envfile --profile <name> --out <path>"))
       (let [[vault _] (with-open-vault args)
-            [data err] (os.read_entire_file path context.allocator)
             builder (strings.builder_make)]
         (defer (delete-vault vault))
-        (when (!= err nil)
-          (fmt.eprintf "could not read map: %s\n" path)
-          (os.exit 1))
-        (defer (delete data))
-        (let [[lines split-err] (strings.split (transmute string data) "\n")]
-          (when (!= split-err nil)
-            (os.exit 1))
-          (defer (delete lines))
-          (for [raw-line i lines]
-            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
-              (when (not entry-ok)
-                (os.exit 1))
-              (when (and (not skip) (= kind "env"))
-                (let [value (resolve-value vault source)]
-                  (defer (delete value))
-                  (write-env-line (addr builder) target value)))))
-          (let [out (strings.to_string builder)]
-            (when (!= (os.write_entire_file out-path out (os.perm 0o600)) nil)
-              (fmt.eprintf "could not write envfile: %s\n" out-path)
-              (os.exit 1))
-            (discard (os.chmod out-path (os.perm 0o600)))))))))
+        (if-ok [[data err] (os.read_entire_file path context.allocator)]
+          (do
+            (defer (delete data))
+            (if-ok [[lines split-err] (strings.split (transmute string data) "\n")]
+              (do
+                (defer (delete lines))
+                (for [raw-line i lines]
+                  (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+                    (when (not entry-ok)
+                      (os.exit 1))
+                    (when (and (not skip) (= kind "env"))
+                      (let [value (resolve-value vault source) :defer]
+                        (write-env-line (addr builder) target value)))))
+                (let [out (strings.to_string builder)]
+                  (when (!= (os.write_entire_file out-path out (os.perm 0o600)) nil)
+                    (fmt.eprintf "could not write envfile: %s\n" out-path)
+                    (os.exit 1))
+                  (discard (os.chmod out-path (os.perm 0o600)))))
+              (os.exit 1)))
+          (do
+            (fmt.eprintf "could not read map: %s\n" path)
+            (os.exit 1)))))))
 
 (defn run-map-path-from-args [args: []string] -> [path: string, ok: bool]
-  (let [[map-path has-map] (arg-value args "--map")]
-    (when (and has-map (!= map-path ""))
+  (when-let [[map-path has-map] (arg-value args "--map")]
+    (when (!= map-path "")
       (return map-path true)))
-  (let [[profile has-profile] (arg-value args "--profile")]
-    (when has-profile
-      (let [[path found] (resolve-profile-path profile)]
-        (if found
-          (return path true)
-          (do
-            (fmt.eprintf "profile not found: %s\n" profile)
-            (return "" false))))))
+  (when-let [[profile has-profile] (arg-value args "--profile")]
+    (if-let [[path found] (resolve-profile-path profile)]
+      (return path true)
+      (do
+        (fmt.eprintf "profile not found: %s\n" profile)
+        (return "" false))))
   (return "" true))
 
 (defn read-run-map-data [path: string] -> []byte
@@ -185,27 +183,27 @@
     (let [[dir has-dir] (arg-value args "--dir")]
       (when (not (and has-dir (!= dir "")))
         (fail! "usage: kimen render --dir <path> --profile <name>"))
-      (let [[vault _] (with-open-vault args)
-            [data err] (os.read_entire_file path context.allocator)]
+      (let [[vault _] (with-open-vault args)]
         (defer (delete-vault vault))
-        (when (!= err nil)
-          (fmt.eprintf "could not read map: %s\n" path)
-          (os.exit 1))
-        (defer (delete data))
-        (discard (os.make_directory_all dir))
-        (discard (os.chmod dir (os.perm 0o700)))
-        (let [[lines split-err] (strings.split (transmute string data) "\n")]
-          (when (!= split-err nil)
-            (os.exit 1))
-          (defer (delete lines))
-          (for [raw-line i lines]
-            (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
-              (when (not entry-ok)
-                (os.exit 1))
-              (when (and (not skip) (= kind "file"))
-                (let [value (resolve-value vault source)]
-                  (defer (delete value))
-                  (render-file-value dir target value))))))))))
+        (if-ok [[data err] (os.read_entire_file path context.allocator)]
+          (do
+            (defer (delete data))
+            (discard (os.make_directory_all dir))
+            (discard (os.chmod dir (os.perm 0o700)))
+            (if-ok [[lines split-err] (strings.split (transmute string data) "\n")]
+              (do
+                (defer (delete lines))
+                (for [raw-line i lines]
+                  (let [[kind target source entry-ok skip] (map-entry path (+ i 1) raw-line)]
+                    (when (not entry-ok)
+                      (os.exit 1))
+                    (when (and (not skip) (= kind "file"))
+                      (let [value (resolve-value vault source) :defer]
+                        (render-file-value dir target value))))))
+              (os.exit 1)))
+          (do
+            (fmt.eprintf "could not read map: %s\n" path)
+            (os.exit 1)))))))
 
 (defn command-after-separator [args: []string] -> []string
   (let [idx (find-arg args "--")]
@@ -223,8 +221,7 @@
       (when (or (= key "") (= source ""))
         (fmt.eprintf "invalid --env mapping: %s\n" mapping)
         (os.exit 1))
-      (let [value (resolve-value vault source)]
-        (defer (delete value))
+      (let [value (resolve-value vault source) :defer]
         (append-env-override! env key value)))))
 
 (defn apply-run-env-flags! [args: []string, vault: Vault, env: ^[dynamic]string]
@@ -249,9 +246,9 @@
       (when (= (len command) 0)
         (fail! "usage: kimen run [--profile <name>] [--env NAME=value] -- <command>..."))
       (let [[vault _] (with-open-vault args)
-            data (read-run-map-data path)
+            data (read-run-map-data path) :defer
             [base-env env-err] (os.environ context.allocator)
-            env (arr.empty string)
+            env (arr.empty string) :defer
             files-dir ""
             cleanup-files false
             stdin-file (^os.File nil)
@@ -262,9 +259,7 @@
         (when (!= env-err nil)
           (fmt.eprintln "could not read environment")
           (os.exit 1))
-        (defer (delete data))
         (defer (delete base-env))
-        (defer (delete env))
         (for [entry base-env]
           (arr.push! env entry))
         (let [[lines split-err] (strings.split (transmute string data) "\n")]
@@ -277,8 +272,7 @@
                 (os.exit 1))
               (when (not skip)
                 (cond
-                  (= kind "env") (let [value (resolve-value vault source)]
-                                   (defer (delete value))
+                  (= kind "env") (let [value (resolve-value vault source) :defer]
                                    (append-env-override! (addr env) target value))
                   (= kind "file") (do
                                     (when (= files-dir "")
@@ -289,8 +283,7 @@
                                         (set! files-dir tmp-dir)
                                         (set! cleanup-files true)
                                         (append-env-override! (addr env) "KIMEN_FILES_DIR" (transmute []byte files-dir))))
-                                    (let [value (resolve-value vault source)]
-                                      (defer (delete value))
+                                    (let [value (resolve-value vault source) :defer]
                                       (render-file-value files-dir target value)))
                   (= kind "envpath") (do
                                        (when (= files-dir "")
@@ -307,8 +300,7 @@
                                        (fmt.eprintln "stdin mapping specified multiple times")
                                        (os.exit 1))
                                      (set! stdin-set true)
-                                     (let [stdin-value (resolve-value vault source)]
-                                       (defer (delete stdin-value))
+                                     (let [stdin-value (resolve-value vault source) :defer]
                                        (let [[tmp-dir tmp-err] (os.make_directory_temp "" "kimen-stdin-*" context.allocator)]
                                          (when (!= tmp-err nil)
                                            (fmt.eprintln "could not create stdin temp dir")
