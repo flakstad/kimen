@@ -25,23 +25,27 @@
 })
 
 (defn vault-path [args: []string] -> string
-  (when-let [[flag-path has-flag] (arg-value args "--vault")]
-    (when (!= flag-path "")
+  (let [[flag-path has-flag] (arg-value args "--vault")]
+    (when (and has-flag (!= flag-path ""))
       (return flag-path)))
-  (when-let [[env-path has-env] (os.lookup_env "KIMEN_VAULT" context.temp_allocator)]
-    (when (!= env-path "")
+  (let [[env-path has-env] (os.lookup_env "KIMEN_VAULT" context.temp_allocator)]
+    (when (and has-env (!= env-path ""))
       (return env-path)))
-  (if-let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
-    (fmt.tprintf "%s/.config/kimen/vault.kv" home)
-    "vault.kv"))
+  (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
+    (if has-home
+      (fmt.tprintf "%s/.config/kimen/vault.kv" home)
+      "vault.kv")))
 
 (defn passphrase-bytes [args: []string] -> []byte
-  (when-let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
-    (return (transmute []byte pass)))
-  (when-let [[session-pass session-ok] (session-read)]
-    (return session-pass))
-  (when-let [[prompt-pass prompt-ok] (prompt-passphrase)]
-    (return prompt-pass))
+  (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
+    (when has-pass
+      (return (transmute []byte pass))))
+  (let [[session-pass session-ok] (session-read)]
+    (when session-ok
+      (return session-pass)))
+  (let [[prompt-pass prompt-ok] (prompt-passphrase)]
+    (when prompt-ok
+      (return prompt-pass)))
   (fail! "missing passphrase: set KIMEN_PASSPHRASE, run kimen session start, or use an interactive terminal")
   (let [empty: string ""]
     (transmute []byte empty)))
@@ -123,10 +127,10 @@
     (crypto.rand_bytes (slice salt))
     (crypto.rand_bytes (slice nonce))
     (let [key (derive-key passphrase (slice salt))
-          sealed (seal-payload (slice key) (slice nonce) plaintext) :defer
-          salt64 (b64 (slice salt)) :defer
-          nonce64 (b64 (slice nonce)) :defer
-          sealed64 (b64 sealed) :defer
+          sealed (seal-payload (slice key) (slice nonce) plaintext)
+          salt64 (b64 (slice salt))
+          nonce64 (b64 (slice nonce))
+          sealed64 (b64 sealed)
           body (fmt.tprintf "%s\nargon2id %d %d %d\n%s\n%s\n%s\n"
                             VAULT-FORMAT
                             KDF-MEMORY-KIB
@@ -135,6 +139,10 @@
                             salt64
                             nonce64
                             sealed64)]
+      (defer (delete sealed))
+      (defer (delete salt64))
+      (defer (delete nonce64))
+      (defer (delete sealed64))
       (let [[dir _] (os.split_path path)]
         (when (!= dir "")
           (discard (os.make_directory_all dir))))
@@ -146,8 +154,10 @@
 (defn vault-payload [vault: Vault] -> string
   (let [builder (strings.builder_make)]
     (for [secret vault.secrets]
-      (let [name64 (b64 (transmute []byte secret.name)) :defer
-            value64 (b64 secret.value) :defer]
+      (let [name64 (b64 (transmute []byte secret.name))
+            value64 (b64 secret.value)]
+        (defer (delete name64))
+        (defer (delete value64))
         (strings.write_string (addr builder) name64)
         (strings.write_string (addr builder) "\t")
         (strings.write_string (addr builder) value64)
@@ -207,44 +217,46 @@
     (return out true)))
 
 (defn parse-vault-file [path: string, passphrase: []byte] -> [vault: Vault, ok: bool]
-  (if-ok [[data err] (os.read_entire_file path context.allocator)]
-    (do
-      (defer (delete data))
-      (if-ok [[lines split-err] (strings.split (transmute string data) "\n")]
-        (do
-          (defer (delete lines))
-          (when (or (< (len lines) 5) (!= (strings.trim_space (get lines 0)) VAULT-FORMAT))
-            (fmt.eprintln "invalid vault file")
-            (return vault false))
-          (let [salt-bytes (decode-b64 (strings.trim_space (get lines 2))) :defer
-                nonce-bytes (decode-b64 (strings.trim_space (get lines 3))) :defer
-                sealed (decode-b64 (strings.trim_space (get lines 4))) :defer]
-            (when (or (!= (len salt-bytes) 16) (!= (len nonce-bytes) 24))
-              (fmt.eprintln "invalid vault metadata")
-              (return vault false))
-            (let [salt ([16]byte [])
-                  nonce ([24]byte [])]
-              (copy (slice salt) salt-bytes)
-              (copy (slice nonce) nonce-bytes)
-              (let [key (derive-key passphrase (slice salt))]
-                (if-let [[payload opened] (open-payload (slice key) (slice nonce) sealed)]
-                  (do
-                    (defer (delete payload))
-                    (if-let [[secrets parsed] (parse-payload payload)]
-                      (return (Vault {path: path salt: salt nonce: nonce secrets: secrets}) true)
-                      (do
-                        (fmt.eprintln "invalid vault payload")
-                        (return vault false))))
-                  (do
-                    (fmt.eprintln "wrong passphrase or corrupted vault")
-                    (return vault false)))))))
-        (return vault false)))
-    (do
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (when (!= err nil)
       (fmt.eprintf "vault not found: %s\n" path)
-      (return vault false))))
+      (return vault false))
+    (defer (delete data))
+    (let [[lines split-err] (strings.split (transmute string data) "\n")]
+      (when (!= split-err nil)
+        (return vault false))
+      (defer (delete lines))
+      (when (or (< (len lines) 5) (!= (strings.trim_space (get lines 0)) VAULT-FORMAT))
+        (fmt.eprintln "invalid vault file")
+        (return vault false))
+      (let [salt-bytes (decode-b64 (strings.trim_space (get lines 2)))
+            nonce-bytes (decode-b64 (strings.trim_space (get lines 3)))
+            sealed (decode-b64 (strings.trim_space (get lines 4)))]
+        (defer (delete salt-bytes))
+        (defer (delete nonce-bytes))
+        (defer (delete sealed))
+        (when (or (!= (len salt-bytes) 16) (!= (len nonce-bytes) 24))
+          (fmt.eprintln "invalid vault metadata")
+          (return vault false))
+        (let [salt ([16]byte [])
+              nonce ([24]byte [])]
+          (copy (slice salt) salt-bytes)
+          (copy (slice nonce) nonce-bytes)
+          (let [key (derive-key passphrase (slice salt))
+                [payload opened] (open-payload (slice key) (slice nonce) sealed)]
+            (when (not opened)
+              (fmt.eprintln "wrong passphrase or corrupted vault")
+              (return vault false))
+            (defer (delete payload))
+            (let [[secrets parsed] (parse-payload payload)]
+              (when (not parsed)
+                (fmt.eprintln "invalid vault payload")
+                (return vault false))
+              (return (Vault {path: path salt: salt nonce: nonce secrets: secrets}) true))))))))
 
 (defn save-vault [vault: Vault, passphrase: []byte]
-  (let [payload (vault-payload vault) :defer]
+  (let [payload (vault-payload vault)]
+    (defer (delete payload))
     (write-vault-file vault.path passphrase (transmute []byte payload))))
 
 (defn vault-init! [args: []string]

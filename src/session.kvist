@@ -11,15 +11,16 @@
 (def BYTE-D: byte 100)
 
 (defn session-path [] -> string
-  (when-let [[flag-path has-flag] (os.lookup_env "KIMEN_SESSION" context.temp_allocator)]
-    (when (!= flag-path "")
+  (let [[flag-path has-flag] (os.lookup_env "KIMEN_SESSION" context.temp_allocator)]
+    (when (and has-flag (!= flag-path ""))
       (return flag-path)))
-  (when-let [[runtime-dir has-runtime] (os.lookup_env "XDG_RUNTIME_DIR" context.temp_allocator)]
-    (when (!= runtime-dir "")
+  (let [[runtime-dir has-runtime] (os.lookup_env "XDG_RUNTIME_DIR" context.temp_allocator)]
+    (when (and has-runtime (!= runtime-dir ""))
       (return (fmt.tprintf "%s/kimen/session" runtime-dir))))
-  (if-let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
-    (fmt.tprintf "%s/.cache/kimen/session" home)
-    "kimen-session"))
+  (let [[home has-home] (os.lookup_env "HOME" context.temp_allocator)]
+    (if has-home
+      (fmt.tprintf "%s/.cache/kimen/session" home)
+      "kimen-session")))
 
 (defn now-nanos [] -> i64
   (time.time_to_unix_nano (time.now)))
@@ -32,20 +33,21 @@
   (let [text (transmute string data)]
     (when (not (strings.has_prefix text SESSION-FORMAT))
       (return data SESSION-NEVER-EXPIRES false true))
-    (if-ok [[lines split-err] (strings.split text "\n")]
-      (do
-        (defer (delete lines))
-        (when (< (len lines) 3)
+    (let [[lines split-err] (strings.split text "\n")]
+      (when (!= split-err nil)
+        (return nil 0 false false))
+      (defer (delete lines))
+      (when (< (len lines) 3)
+        (return nil 0 false false))
+      (let [expires-line (get lines 1)
+            pass-line (get lines 2)]
+        (when (or (not (strings.has_prefix expires-line "expires="))
+                  (not (strings.has_prefix pass-line "passphrase=")))
           (return nil 0 false false))
-        (let [expires-line (get lines 1)
-              pass-line (get lines 2)]
-          (when (or (not (strings.has_prefix expires-line "expires="))
-                    (not (strings.has_prefix pass-line "passphrase=")))
+        (let [[expires-int expires-ok] (strconv.parse_int (slice expires-line 8))]
+          (when (not expires-ok)
             (return nil 0 false false))
-          (if-let [[expires-int expires-ok] (strconv.parse_int (slice expires-line 8))]
-            (return (decode-b64 (slice pass-line 11)) (i64 expires-int) true true)
-            (return nil 0 false false))))
-      (return nil 0 false false))))
+          (return (decode-b64 (slice pass-line 11)) (i64 expires-int) true true))))))
 
 (defn session-read [] -> [passphrase: []byte, ok: bool]
   (let [path (session-path)
@@ -95,13 +97,12 @@
         (= unit BYTE-D) (do
                           (set! number-text (slice trimmed 0 (- (len trimmed) 1)))
                           (set! multiplier (* 24 60 60 1000000000))))
-      (if-let [[amount parsed] (strconv.parse_int number-text)]
-        (if (< amount 0)
-          (return 0 false)
-          (if (= amount 0)
-            (return SESSION-NEVER-EXPIRES true)
-            (return (+ (now-nanos) (* (i64 amount) multiplier)) true)))
-        (return 0 false)))))
+      (let [[amount parsed] (strconv.parse_int number-text)]
+        (when (or (not parsed) (< amount 0))
+          (return 0 false))
+        (if (= amount 0)
+          (return SESSION-NEVER-EXPIRES true)
+          (return (+ (now-nanos) (* (i64 amount) multiplier)) true))))))
 
 (defn session-write [passphrase: []byte, expires-nanos: i64]
   (let [path (session-path)
@@ -125,13 +126,15 @@
     (if has-env
       (session-write (transmute []byte env-pass) expires-nanos)
       (if (arg-flag? args "--stdin")
-        (let [data (stdin-bytes) :defer]
+        (let [data (stdin-bytes)]
+          (defer (delete data))
           (session-write (passphrase-line data) expires-nanos))
-        (if-let [[prompt-pass prompt-ok] (prompt-passphrase)]
-          (do
-            (defer (delete prompt-pass))
-            (session-write prompt-pass expires-nanos))
-          (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal")))))
+        (let [[prompt-pass prompt-ok] (prompt-passphrase)]
+          (if prompt-ok
+            (do
+              (defer (delete prompt-pass))
+              (session-write prompt-pass expires-nanos))
+            (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal"))))))
   (fmt.printf "session started: %s\n" (session-path)))
 
 (defn session-status! []
