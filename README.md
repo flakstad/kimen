@@ -37,6 +37,7 @@ kimen vault init
 kimen vault path
 kimen vault info
 kimen vault rekey
+kimen vault rekey --passphrase-cmd <cmd>
 kimen vault rekey --dry-run
 kimen vault rekey --backup-dir <path>
 
@@ -49,12 +50,14 @@ kimen secret mv <from> <to>
 
 kimen session start
 kimen session start --ttl 8h
+kimen session start --passphrase-cmd <cmd>
 kimen session status
 kimen session lock
 kimen session stop
 
-kimen run [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>...
+kimen run [--passphrase-cmd <cmd>] [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>...
 kimen render --dir <path> [--profile <name>] [--file path=value]
+kimen render --systemd-service <name> [--runtime-dir <path>] [--print-systemd-hints] [--profile <name>] [--file path=value]
 kimen envfile --out <path> [--profile <name>] [--env NAME=value]
 kimen plan [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value]
 kimen project run|render|plan ...
