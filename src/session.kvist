@@ -29,34 +29,51 @@
   (and (!= expires-nanos SESSION-NEVER-EXPIRES)
        (> (now-nanos) expires-nanos)))
 
-(defn parse-session-file [data: []byte] -> [passphrase: []byte, expires-nanos: i64, owns-passphrase: bool, ok: bool]
+(defn parse-session-file [data: []byte] -> [passphrase: []byte, expires-nanos: i64, vault: string, owns-passphrase: bool, ok: bool]
   (let [text (transmute string data)]
     (when (not (strings.has_prefix text SESSION-FORMAT))
-      (return data SESSION-NEVER-EXPIRES false true))
+      (return data SESSION-NEVER-EXPIRES "" false true))
     (let [[lines split-err] (strings.split text "\n")]
       (when (!= split-err nil)
-        (return nil 0 false false))
+        (return nil 0 "" false false))
       (defer (delete lines))
       (when (< (len lines) 3)
-        (return nil 0 false false))
+        (return nil 0 "" false false))
       (let [expires-line (get lines 1)
-            pass-line (get lines 2)]
+            vault-line (get lines 2)
+            pass-line vault-line
+            session-vault ""]
+        (when (and (strings.has_prefix vault-line "vault=") (< (len lines) 4))
+          (return nil 0 "" false false))
+        (when (strings.has_prefix vault-line "vault=")
+          (set! pass-line (get lines 3))
+          (set! session-vault (transmute string (decode-b64 (slice vault-line 6)))))
         (when (or (not (strings.has_prefix expires-line "expires="))
                   (not (strings.has_prefix pass-line "passphrase=")))
-          (return nil 0 false false))
+          (return nil 0 "" false false))
         (let [[expires-int expires-ok] (strconv.parse_int (slice expires-line 8))]
           (when (not expires-ok)
-            (return nil 0 false false))
-          (return (decode-b64 (slice pass-line 11)) (i64 expires-int) true true))))))
+            (return nil 0 "" false false))
+          (return (decode-b64 (slice pass-line 11))
+                  (i64 expires-int)
+                  session-vault
+                  true
+                  true))))))
 
-(defn session-read [] -> [passphrase: []byte, ok: bool]
+(defn session-read [args: []string] -> [passphrase: []byte, ok: bool]
   (let [path (session-path)
         [data err] (os.read_entire_file path context.allocator)]
     (if (!= err nil)
       (return nil false)
-      (let [[passphrase expires-nanos owns-passphrase parsed] (parse-session-file data)]
+      (let [[passphrase expires-nanos session-vault owns-passphrase parsed] (parse-session-file data)]
         (when (not parsed)
           (delete data)
+          (return nil false))
+        (when (and (!= session-vault "") (!= session-vault (vault-path args)))
+          (when owns-passphrase
+            (delete passphrase))
+          (when (not owns-passphrase)
+            (delete data))
           (return nil false))
         (when (session-expired? expires-nanos)
           (when owns-passphrase
@@ -104,14 +121,15 @@
           (return SESSION-NEVER-EXPIRES true)
           (return (+ (now-nanos) (* (i64 amount) multiplier)) true))))))
 
-(defn session-write [passphrase: []byte, expires-nanos: i64]
+(defn session-write [args: []string, passphrase: []byte, expires-nanos: i64]
   (let [path (session-path)
         [dir _] (os.split_path path)]
     (when (!= dir "")
       (discard (os.make_directory_all dir))
       (discard (os.chmod dir (os.perm 0o700))))
     (let [encoded (b64 passphrase)
-          body (fmt.tprintf "%s\nexpires=%d\npassphrase=%s\n" SESSION-FORMAT expires-nanos encoded)]
+          vault64 (b64 (transmute []byte (vault-path args)))
+          body (fmt.tprintf "%s\nexpires=%d\nvault=%s\npassphrase=%s\n" SESSION-FORMAT expires-nanos vault64 encoded)]
       (when (!= (os.write_entire_file path body (os.perm 0o600)) nil)
         (fmt.eprintf "could not write session: %s\n" path)
         (os.exit 1))
@@ -127,7 +145,7 @@
 
 (defn session-start-with-passphrase! [args: []string, passphrase: []byte, expires-nanos: i64]
   (verify-session-passphrase! args passphrase)
-  (session-write passphrase expires-nanos))
+  (session-write args passphrase expires-nanos))
 
 (defn session-start! [args: []string]
   (let [[ttl has-ttl] (arg-value args "--ttl")
@@ -149,9 +167,9 @@
             (fail! "session start requires KIMEN_PASSPHRASE, --stdin, or an interactive terminal"))))))
   (fmt.printf "session started: %s\n" (session-path)))
 
-(defn session-status! []
+(defn session-status! [args: []string]
   (let [path (session-path)
-        [_ ok] (session-read)]
+        [_ ok] (session-read args)]
     (if ok
       (fmt.printf "session active: %s\n" path)
       (fmt.printf "session inactive: %s\n" path))))

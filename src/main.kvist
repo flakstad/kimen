@@ -16,7 +16,9 @@
   (println "")
   (println "usage:")
   (println "  kimen vault init")
-  (println "  kimen vault rekey [--new-passphrase-stdin] [--no-backup]")
+  (println "  kimen vault path")
+  (println "  kimen vault info")
+  (println "  kimen vault rekey [--new-passphrase-stdin] [--dry-run] [--backup-dir <path>] [--no-backup]")
   (println "  kimen secret set <name> [--stdin]")
   (println "  kimen secret list")
   (println "  kimen secret get <name> --unsafe-stdout")
@@ -240,8 +242,10 @@
   (let [subcmd (command-at args 2)]
     (cond
       (= subcmd "init") (vault-init! args)
+      (= subcmd "path") (vault-path! args)
+      (= subcmd "info") (vault-info! args)
       (= subcmd "rekey") (vault-rekey! args)
-      :else (fail! "usage: kimen vault init|rekey"))))
+      :else (fail! "usage: kimen vault init|path|info|rekey"))))
 
 (defn handle-secret [args: []string]
   (let [subcmd (command-at args 2)]
@@ -286,7 +290,7 @@
   (let [subcmd (command-at args 2)]
     (cond
       (= subcmd "start") (session-start! args)
-      (= subcmd "status") (session-status!)
+      (= subcmd "status") (session-status! args)
       (= subcmd "lock") (session-lock!)
       (= subcmd "stop") (session-lock!)
       :else (fail! "usage: kimen session start|status|lock|stop"))))

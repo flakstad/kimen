@@ -40,7 +40,7 @@
   (let [[pass has-pass] (os.lookup_env "KIMEN_PASSPHRASE" context.temp_allocator)]
     (when has-pass
       (return (transmute []byte pass))))
-  (let [[session-pass session-ok] (session-read)]
+  (let [[session-pass session-ok] (session-read args)]
     (when session-ok
       (return session-pass)))
   (let [[prompt-pass prompt-ok] (prompt-passphrase)]
@@ -268,6 +268,23 @@
       (write-vault-file path (passphrase-bytes args) (transmute []byte empty-payload)))
     (fmt.printf "initialized vault: %s\n" path)))
 
+(defn vault-path! [args: []string]
+  (fmt.println (vault-path args)))
+
+(defn vault-info! [args: []string]
+  (let [path (vault-path args)]
+    (fmt.printf "path: %s\n" path)
+    (fmt.printf "exists: %v\n" (os.exists path))
+    (when (not (os.exists path))
+      (os.exit 1))
+    (let [passphrase (passphrase-bytes args)
+          [vault opened] (parse-vault-file path passphrase)]
+      (when (not opened)
+        (os.exit 1))
+      (defer (delete-vault vault))
+      (fmt.printf "format: %s\n" VAULT-FORMAT)
+      (fmt.printf "secrets: %d\n" (len vault.secrets)))))
+
 (defn bytes-equal? [a: []byte, b: []byte] -> bool
   (if (!= (len a) (len b))
     false
@@ -311,7 +328,8 @@
   (return nil false))
 
 (defn new-passphrase-bytes [args: []string] -> []byte
-  (let [[env-pass has-env] (os.lookup_env "KIMEN_NEW_PASSPHRASE" context.temp_allocator)]
+  (let [[env-name has-env-name] (arg-value args "--new-passphrase-env")
+        [env-pass has-env] (os.lookup_env (if (and has-env-name (!= env-name "")) env-name "KIMEN_NEW_PASSPHRASE") context.temp_allocator)]
     (when has-env
       (return (transmute []byte env-pass))))
   (if (arg-flag? args "--new-passphrase-stdin")
@@ -321,17 +339,31 @@
     (let [[prompt-pass prompt-ok] (prompt-new-passphrase)]
       (when prompt-ok
         (return prompt-pass))))
-  (fail! "missing new passphrase: set KIMEN_NEW_PASSPHRASE, use --new-passphrase-stdin, or use an interactive terminal")
+  (fail! "missing new passphrase: set KIMEN_NEW_PASSPHRASE, use --new-passphrase-env, use --new-passphrase-stdin, or use an interactive terminal")
   (let [empty: string ""]
     (transmute []byte empty)))
 
-(defn backup-vault-file [path: string] -> string
+(defn old-passphrase-for-rekey [args: []string] -> []byte
+  (when (and (arg-flag? args "--passphrase-stdin") (arg-flag? args "--new-passphrase-stdin"))
+    (fail! "use only one of --passphrase-stdin and --new-passphrase-stdin"))
+  (if (arg-flag? args "--passphrase-stdin")
+    (let [data (stdin-bytes)]
+      (defer (delete data))
+      (clone-bytes (passphrase-line data)))
+    (passphrase-bytes args)))
+
+(defn backup-vault-file [path: string, backup-dir: string] -> string
   (let [[data err] (os.read_entire_file path context.allocator)]
     (when (!= err nil)
       (fmt.eprintf "could not read vault for backup: %s\n" path)
       (os.exit 1))
     (defer (delete data))
-    (let [backup-path (fmt.tprintf "%s.bak.%d" path (now-nanos))]
+    (let [[_ file] (os.split_path path)
+          backup-path (if (= backup-dir "")
+                        (fmt.tprintf "%s.bak.%d" path (now-nanos))
+                        (fmt.tprintf "%s/%s.bak.%d" backup-dir file (now-nanos)))]
+      (when (!= backup-dir "")
+        (discard (os.make_directory_all backup-dir)))
       (when (!= (os.write_entire_file backup-path data (os.perm 0o600)) nil)
         (fmt.eprintf "could not write vault backup: %s\n" backup-path)
         (os.exit 1))
@@ -340,8 +372,9 @@
 
 (defn vault-rekey! [args: []string]
   (let [path (vault-path args)
-        old-passphrase (passphrase-bytes args)
-        new-passphrase (new-passphrase-bytes args)]
+        old-passphrase (old-passphrase-for-rekey args)
+        new-passphrase (new-passphrase-bytes args)
+        [backup-dir has-backup-dir] (arg-value args "--backup-dir")]
     (when (= (len new-passphrase) 0)
       (fail! "empty new passphrase"))
     (when (bytes-equal? old-passphrase new-passphrase)
@@ -350,9 +383,12 @@
       (when (not opened)
         (os.exit 1))
       (defer (delete-vault vault))
+      (when (arg-flag? args "--dry-run")
+        (fmt.printf "rekey preflight ok: %s\n" path)
+        (return))
       (let [backup-path ""]
         (when (not (arg-flag? args "--no-backup"))
-          (set! backup-path (backup-vault-file path)))
+          (set! backup-path (backup-vault-file path (if has-backup-dir backup-dir ""))))
         (save-vault vault new-passphrase)
         (discard (os.remove (session-path)))
         (fmt.printf "rekeyed vault: %s\n" path)
