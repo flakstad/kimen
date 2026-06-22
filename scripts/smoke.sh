@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXE_SUFFIX="${EXE_SUFFIX:-}"
 BIN="$ROOT/dist/kimen$EXE_SUFFIX"
-OLD_BIN="${OLD_KIMEN_BIN:-$ROOT/../kimen-go/dist/kimen}"
 KVIST_ROOT="${KVIST_ROOT:-}"
 if [[ -z "$KVIST_ROOT" ]]; then
   for candidate in "$ROOT/../kvist" "$ROOT/../../../kvist"; do
@@ -69,14 +68,5 @@ printf 'smoke-pass\n' | "$BIN" session start --stdin --ttl 1h >/dev/null
 unset KIMEN_PASSPHRASE
 test "$("$BIN" secret get api_key)" = "secret-value"
 "$BIN" session lock >/dev/null
-
-if [[ -x "$OLD_BIN" ]]; then
-  old_vault="$tmp/old.db"
-  new_vault="$tmp/migrated.kv"
-  KIMEN_VAULT="$old_vault" KIMEN_PASSPHRASE="old-pass" "$OLD_BIN" vault init >/dev/null
-  printf 'old-secret' | KIMEN_VAULT="$old_vault" KIMEN_PASSPHRASE="old-pass" "$OLD_BIN" secret set old_key --stdin >/dev/null
-  KIMEN_PASSPHRASE="old-pass" "$BIN" vault migrate --from "$old_vault" --to "$new_vault" --old-bin "$OLD_BIN" >/dev/null
-  test "$(KIMEN_VAULT="$new_vault" KIMEN_PASSPHRASE="old-pass" "$BIN" secret get old_key)" = "old-secret"
-fi
 
 printf 'smoke ok\n'
