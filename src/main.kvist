@@ -64,32 +64,41 @@
   (if (= profile "")
     (return "" false)
     (do
-      (when-let [[env-dir env-found] (os.lookup_env "KIMEN_PROFILE_DIR" context.temp_allocator)
-                 [candidate ok] (profile-candidate env-dir profile)]
-        (return candidate true))
-      (when-let [[local-path local-ok] (profile-candidate ".kimen/profiles" profile)]
-        (return local-path true))
-      (when-let [[xdg xdg-found] (os.lookup_env "XDG_CONFIG_HOME" context.temp_allocator)
-                 [candidate ok] (profile-candidate (fmt.tprintf "%s/kimen/profiles" xdg) profile)]
-        (return candidate true))
-      (when-let [[home home-found] (os.lookup_env "HOME" context.temp_allocator)
-                 [candidate ok] (profile-candidate (fmt.tprintf "%s/.config/kimen/profiles" home) profile)]
-        (return candidate true))
+      (let [[env-dir env-found] (os.lookup_env "KIMEN_PROFILE_DIR" context.temp_allocator)]
+        (when env-found
+          (let [[candidate ok] (profile-candidate env-dir profile)]
+            (when ok
+              (return candidate true)))))
+      (let [[local-path local-ok] (profile-candidate ".kimen/profiles" profile)]
+        (when local-ok
+          (return local-path true)))
+      (let [[xdg xdg-found] (os.lookup_env "XDG_CONFIG_HOME" context.temp_allocator)]
+        (when xdg-found
+          (let [[candidate ok] (profile-candidate (fmt.tprintf "%s/kimen/profiles" xdg) profile)]
+            (when ok
+              (return candidate true)))))
+      (let [[home home-found] (os.lookup_env "HOME" context.temp_allocator)]
+        (when home-found
+          (let [[candidate ok] (profile-candidate (fmt.tprintf "%s/.config/kimen/profiles" home) profile)]
+            (when ok
+              (return candidate true)))))
       (return "" false))))
 
 (defn map-path-from-args [args: []string] -> [path: string, ok: bool]
-  (when-let [[map-path has-map] (arg-value args "--map")]
-    (when (!= map-path "")
+  (let [[map-path has-map] (arg-value args "--map")]
+    (when (and has-map (!= map-path ""))
       (return map-path true)))
-  (if-let [[profile has-profile] (arg-value args "--profile")]
-    (if-let [[path found] (resolve-profile-path profile)]
-      (return path true)
+  (let [[profile has-profile] (arg-value args "--profile")]
+    (if has-profile
+      (let [[path found] (resolve-profile-path profile)]
+        (if found
+          (return path true)
+          (do
+            (fmt.eprintf "profile not found: %s\n" profile)
+            (return "" false))))
       (do
-        (fmt.eprintf "profile not found: %s\n" profile)
-        (return "" false)))
-    (do
-      (fmt.eprintln "missing --profile or --map")
-      (return "" false))))
+        (fmt.eprintln "missing --profile or --map")
+        (return "" false)))))
 
 (defn first-space [s: string] -> int
   (let [idx -1]
@@ -184,39 +193,43 @@
                       false))))))))
 
 (defn lint-kmap [path: string] -> bool
-  (if-ok [[data err] (os.read_entire_file path context.allocator)]
-    (do
-      (defer (delete data))
-      (if-ok [[lines split-err] (strings.split (transmute string data) "\n")]
-        (do
-          (defer (delete lines))
-          (let [ok true]
-            (for [line i lines]
-              (when (not (validate-kmap-line path (+ i 1) line))
-                (set! ok false)))
-            ok))
-        false))
-    (do
-      (fmt.eprintf "could not read map: %s\n" path)
-      false)))
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (do
+        (fmt.eprintf "could not read map: %s\n" path)
+        false)
+      (do
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (if (!= split-err nil)
+            false
+            (do
+              (defer (delete lines))
+              (let [ok true]
+                (for [line i lines]
+                  (when (not (validate-kmap-line path (+ i 1) line))
+                    (set! ok false)))
+                ok))))))))
 
 (defn plan-kmap [path: string] -> bool
-  (if-ok [[data err] (os.read_entire_file path context.allocator)]
-    (do
-      (defer (delete data))
-      (if-ok [[lines split-err] (strings.split (transmute string data) "\n")]
-        (do
-          (defer (delete lines))
-          (fmt.println "mode: run")
-          (let [ok true]
-            (for [line i lines]
-              (when (not (print-plan-line path (+ i 1) line))
-                (set! ok false)))
-            ok))
-        false))
-    (do
-      (fmt.eprintf "could not read map: %s\n" path)
-      false)))
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      (do
+        (fmt.eprintf "could not read map: %s\n" path)
+        false)
+      (do
+        (defer (delete data))
+        (let [[lines split-err] (strings.split (transmute string data) "\n")]
+          (if (!= split-err nil)
+            false
+            (do
+              (defer (delete lines))
+              (fmt.println "mode: run")
+              (let [ok true]
+                (for [line i lines]
+                  (when (not (print-plan-line path (+ i 1) line))
+                    (set! ok false)))
+                ok))))))))
 
 (defn handle-version []
   (println VERSION))
