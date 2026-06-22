@@ -135,10 +135,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+          if gh release view "$TAG" --repo flakstad/kimen >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo flakstad/kimen --clobber
           else
-            gh release create "$TAG" dist/* --title "$TAG"
+            gh release create "$TAG" dist/* --repo flakstad/kimen --title "$TAG"
           fi
 
       - name: Upload release artifacts
