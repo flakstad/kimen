@@ -16,7 +16,6 @@
   (println "")
   (println "usage:")
   (println "  kimen vault init")
-  (println "  kimen vault migrate --from <old-vault> [--to <new-vault>]")
   (println "  kimen secret set <name> [--stdin]")
   (println "  kimen secret list")
   (println "  kimen run [--profile <name>] [--env NAME=value] -- <command>...")
@@ -239,8 +238,7 @@
   (let [subcmd (command-at args 2)]
     (cond
       (= subcmd "init") (vault-init! args)
-      (= subcmd "migrate") (vault-migrate! args)
-      :else (fail! "usage: kimen vault init|migrate"))))
+      :else (fail! "usage: kimen vault init"))))
 
 (defn handle-secret [args: []string]
   (let [subcmd (command-at args 2)]
