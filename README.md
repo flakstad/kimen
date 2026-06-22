@@ -55,16 +55,22 @@ kimen session status
 kimen session lock
 kimen session stop
 
-kimen run [--passphrase-cmd <cmd>] [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value] -- <command>...
-kimen render --dir <path> [--profile <name>] [--file path=value]
-kimen render --systemd-service <name> [--runtime-dir <path>] [--print-systemd-hints] [--profile <name>] [--file path=value]
-kimen envfile --out <path> [--profile <name>] [--env NAME=value]
-kimen plan [--profile <name>] [--env NAME=value] [--file path=value] [--envpath NAME=path] [--stdin value]
-kimen map lint --profile <name>
-kimen map lint --strict --profile <name>
-kimen doctor --profile <name>
-kimen doctor --strict --profile <name>
+kimen run [source] [projection...] -- <command>...
+kimen render (--dir <path>|--systemd-service <name>) [source] [--file path=value]
+kimen envfile --out <path> [source] [--env NAME=value]
+kimen plan [source] [projection...]
+kimen map lint (--profile <name>|--map <path>) [--strict]
+kimen doctor (--profile <name>|--map <path>) [--strict]
 ```
+
+`source` is `--profile <name>` or `--map <path>`.
+
+`projection` is `--env NAME=value`, `--file path=value`,
+`--envpath NAME=path`, or `--stdin value`.
+
+Use `--passphrase-cmd <cmd>` when a script should unlock the vault
+non-interactively. `render --systemd-service <name>` writes files under
+`/run/kimen/<name>`; use `--runtime-dir <path>` to choose another base.
 
 ## Profiles
 

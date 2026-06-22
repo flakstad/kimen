@@ -44,6 +44,13 @@ odin build "$BUILD_DIR" -out:"$BIN_OUT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+"$BIN" | grep -qx '  kimen doctor (--profile <name>|--map <path>) \[--strict\]'
+if "$BIN" doctor >/dev/null 2>"$tmp/doctor-no-source.err"; then
+  echo "doctor accepted missing source" >&2
+  exit 1
+fi
+grep -qx 'missing source: use --profile <name> or --map <path>' "$tmp/doctor-no-source.err"
+
 export KIMEN_VAULT="$tmp/vault.kv"
 export KIMEN_SESSION="$tmp/session"
 export KIMEN_PASSPHRASE="smoke-pass"
