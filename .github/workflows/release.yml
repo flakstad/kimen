@@ -241,7 +241,14 @@ jobs:
       - name: Push formula
         shell: bash
         working-directory: tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
         run: |
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "::warning::TAP_GITHUB_TOKEN or GORELEASER_GITHUB_TOKEN is required to update flakstad/homebrew-kimen"
+            exit 0
+          fi
+          git remote set-url origin "https://x-access-token:${TAP_TOKEN}@github.com/flakstad/homebrew-kimen.git"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/kimen.rb
