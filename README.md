@@ -5,14 +5,12 @@ Kimen is a local secret vault and projection tool.
 Store secrets once, then project them into commands, envfiles, rendered files,
 or command stdin from small profile files.
 
+Kimen requires [Kvist](https://github.com/kvist-lang/kvist).
+
 ## Build
 
 ```sh
-mkdir -p dist tmp
-cd ../kvist
-./kvist build ../kimen/src/main.kvist --generated ../kimen/tmp/main.odin
-cd ../kimen
-odin build tmp -out:dist/kimen
+kvist build src/main.kvist
 ```
 
 ## Vault
