@@ -42,7 +42,13 @@ case "$ARCHIVE_FORMAT" in
     ;;
   zip)
     if command -v powershell.exe >/dev/null 2>&1; then
-      powershell.exe -NoProfile -Command "Compress-Archive -Path '$package_dir/$binary_name' -DestinationPath '$dist_dir/$package_name.zip' -Force"
+      src_path="$package_dir/$binary_name"
+      dst_path="$dist_dir/$package_name.zip"
+      if command -v cygpath >/dev/null 2>&1; then
+        src_path="$(cygpath -w "$src_path")"
+        dst_path="$(cygpath -w "$dst_path")"
+      fi
+      powershell.exe -NoProfile -Command "Compress-Archive -LiteralPath '$src_path' -DestinationPath '$dst_path' -Force"
     else
       (cd "$package_dir" && zip -qr "$dist_dir/$package_name.zip" "$binary_name")
     fi
