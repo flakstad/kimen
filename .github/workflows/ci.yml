@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            exe_suffix: ""
+          - os: ubuntu-latest
+            exe_suffix: ""
+          - os: windows-latest
+            exe_suffix: ".exe"
+
+    steps:
+      - name: Checkout Kimen
+        uses: actions/checkout@v4
+        with:
+          path: kimen
+
+      - name: Checkout Kvist
+        uses: actions/checkout@v4
+        with:
+          repository: kvist-lang/kvist
+          path: kvist
+
+      - name: Set up Odin
+        uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Kvist
+        shell: bash
+        run: odin build cmd/kvist -out:./kvist${{ matrix.exe_suffix }}
+        working-directory: kvist
+
+      - name: Smoke test Kimen
+        shell: bash
+        run: scripts/smoke.sh
+        working-directory: kimen
+        env:
+          KVIST_ROOT: ${{ github.workspace }}/kvist
+          KVIST: ./kvist${{ matrix.exe_suffix }}
+          EXE_SUFFIX: ${{ matrix.exe_suffix }}

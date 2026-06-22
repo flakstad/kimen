@@ -1,0 +1,246 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9][0-9][0-9][0-9].[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without leading v
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.asset_os }} ${{ matrix.asset_arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            asset_os: darwin
+            asset_arch: amd64
+            exe_suffix: ""
+            archive_format: tar.gz
+          - runner: macos-14
+            asset_os: darwin
+            asset_arch: arm64
+            exe_suffix: ""
+            archive_format: tar.gz
+          - runner: ubuntu-latest
+            asset_os: linux
+            asset_arch: amd64
+            exe_suffix: ""
+            archive_format: tar.gz
+          - runner: ubuntu-24.04-arm
+            asset_os: linux
+            asset_arch: arm64
+            exe_suffix: ""
+            archive_format: tar.gz
+          - runner: windows-latest
+            asset_os: windows
+            asset_arch: amd64
+            exe_suffix: ".exe"
+            archive_format: zip
+
+    steps:
+      - name: Checkout Kimen
+        uses: actions/checkout@v4
+        with:
+          path: kimen
+
+      - name: Checkout Kvist
+        uses: actions/checkout@v4
+        with:
+          repository: kvist-lang/kvist
+          path: kvist
+
+      - name: Set up Odin
+        uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Kvist
+        shell: bash
+        run: odin build cmd/kvist -out:./kvist${{ matrix.exe_suffix }}
+        working-directory: kvist
+
+      - name: Build archive
+        shell: bash
+        run: scripts/build-release.sh
+        working-directory: kimen
+        env:
+          VERSION: ${{ inputs.version || github.ref_name && startsWith(github.ref_name, 'v') && github.ref_name || '0.1.0-dev' }}
+          GOOS: ${{ matrix.asset_os }}
+          GOARCH: ${{ matrix.asset_arch }}
+          EXE_SUFFIX: ${{ matrix.exe_suffix }}
+          ARCHIVE_FORMAT: ${{ matrix.archive_format }}
+          KVIST_ROOT: ${{ github.workspace }}/kvist
+          KVIST: ./kvist${{ matrix.exe_suffix }}
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: kimen-${{ matrix.asset_os }}-${{ matrix.asset_arch }}
+          path: kimen/dist/*
+          if-no-files-found: error
+
+  publish:
+    name: GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+            tag="v$version"
+          else
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG"
+          fi
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+  homebrew:
+    name: Homebrew formula
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: flakstad/homebrew-kimen
+          token: ${{ secrets.TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Update formula
+        shell: bash
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          checksum() {
+            grep "kimen_${VERSION}_$1_$2.$3" dist/checksums.txt | awk '{print $1}'
+          }
+
+          darwin_amd64="$(checksum darwin amd64 tar.gz)"
+          darwin_arm64="$(checksum darwin arm64 tar.gz)"
+          linux_amd64="$(checksum linux amd64 tar.gz)"
+          linux_arm64="$(checksum linux arm64 tar.gz)"
+
+          mkdir -p tap/Formula
+          cat > tap/Formula/kimen.rb <<EOF
+          # typed: false
+          # frozen_string_literal: true
+
+          # This file was generated by Kimen release CI. DO NOT EDIT.
+          class Kimen < Formula
+            desc "Local-first secrets tool"
+            homepage "https://github.com/flakstad/kimen"
+            version "$VERSION"
+
+            on_macos do
+              if Hardware::CPU.intel?
+                url "https://github.com/flakstad/kimen/releases/download/v$VERSION/kimen_${VERSION}_darwin_amd64.tar.gz"
+                sha256 "$darwin_amd64"
+
+                def install
+                  bin.install "kimen"
+                end
+              end
+
+              if Hardware::CPU.arm?
+                url "https://github.com/flakstad/kimen/releases/download/v$VERSION/kimen_${VERSION}_darwin_arm64.tar.gz"
+                sha256 "$darwin_arm64"
+
+                def install
+                  bin.install "kimen"
+                end
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
+                url "https://github.com/flakstad/kimen/releases/download/v$VERSION/kimen_${VERSION}_linux_amd64.tar.gz"
+                sha256 "$linux_amd64"
+
+                def install
+                  bin.install "kimen"
+                end
+              end
+
+              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+                url "https://github.com/flakstad/kimen/releases/download/v$VERSION/kimen_${VERSION}_linux_arm64.tar.gz"
+                sha256 "$linux_arm64"
+
+                def install
+                  bin.install "kimen"
+                end
+              end
+            end
+
+            test do
+              system "#{bin}/kimen", "version"
+            end
+          end
+          EOF
+          ruby -pi -e 'gsub(/^          /, "")' tap/Formula/kimen.rb
+
+      - name: Push formula
+        shell: bash
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/kimen.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "update kimen to ${{ needs.publish.outputs.version }}"
+          git push

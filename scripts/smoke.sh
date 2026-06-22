@@ -2,10 +2,24 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/dist/kimen"
+EXE_SUFFIX="${EXE_SUFFIX:-}"
+BIN="$ROOT/dist/kimen$EXE_SUFFIX"
 OLD_BIN="${OLD_KIMEN_BIN:-$ROOT/../kimen-go/dist/kimen}"
-KVIST_ROOT="${KVIST_ROOT:-$ROOT/../kvist}"
-KVIST="${KVIST:-./kvist}"
+KVIST_ROOT="${KVIST_ROOT:-}"
+if [[ -z "$KVIST_ROOT" ]]; then
+  for candidate in "$ROOT/../kvist" "$ROOT/../../../kvist"; do
+    if [[ -x "$candidate/kvist" || -x "$candidate/kvist.exe" ]]; then
+      KVIST_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+KVIST="${KVIST:-./kvist$EXE_SUFFIX}"
+
+if [[ -z "$KVIST_ROOT" ]]; then
+  echo "KVIST_ROOT is required" >&2
+  exit 1
+fi
 
 cd "$ROOT"
 mkdir -p dist tmp

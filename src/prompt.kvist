@@ -2,6 +2,7 @@
 
 (import posix "core:sys/posix")
 (import terminal "core:terminal")
+(import windows "core:sys/windows")
 
 (def BYTE-LF: byte 10)
 (def BYTE-CR: byte 13)
@@ -20,27 +21,56 @@
             (arr.push! out b)))))
     out))
 
+(odin "prompt_file_hidden_impl :: proc(input: ^os.File, output: ^os.File, label: string) -> ([]byte, bool) {
+    os.write_string(output, label)
+    when ODIN_OS == .Windows {
+        handle := windows.HANDLE(os.fd(input))
+        original: windows.DWORD
+        if !windows.GetConsoleMode(handle, &original) {
+            os.write_string(output, \"\\n\")
+            return nil, false
+        }
+        raw := original
+        raw &~= windows.ENABLE_ECHO_INPUT
+        if !windows.SetConsoleMode(handle, raw) {
+            os.write_string(output, \"\\n\")
+            return nil, false
+        }
+        line := read_line_from_file(input)
+        _ = windows.SetConsoleMode(handle, original)
+        os.write_string(output, \"\\n\")
+        if len(line) == 0 {
+            delete(line)
+            return nil, false
+        }
+        return line, true
+    } else {
+        fd := posix.FD(os.fd(input))
+        original := posix.termios{}
+        raw := posix.termios{}
+        if (posix.tcgetattr(fd, &original)) != (posix.result(0)) {
+            os.write_string(output, \"\\n\")
+            return nil, false
+        }
+        raw = original
+        raw.c_lflag -= posix.CLocal_Flags{.ECHO}
+        if (posix.tcsetattr(fd, posix.TC_Optional_Action.TCSAFLUSH, &raw)) != (posix.result(0)) {
+            os.write_string(output, \"\\n\")
+            return nil, false
+        }
+        line := read_line_from_file(input)
+        _ = posix.tcsetattr(fd, posix.TC_Optional_Action.TCSAFLUSH, &original)
+        os.write_string(output, \"\\n\")
+        if len(line) == 0 {
+            delete(line)
+            return nil, false
+        }
+        return line, true
+    }
+}")
+
 (defn prompt-file-hidden [input: ^os.File, output: ^os.File, label: string] -> [value: []byte, ok: bool]
-  (os.write_string output label)
-  (let [fd (posix.FD (os.fd input))
-        original (posix.termios {})
-        raw (posix.termios {})]
-    (when (!= (posix.tcgetattr fd (addr original)) (posix.result 0))
-      (os.write_string output "\n")
-      (return nil false))
-    (set! raw original)
-    (mut! raw.c_lflag -= (posix.CLocal_Flags [.ECHO]))
-    (when (!= (posix.tcsetattr fd posix.TC_Optional_Action.TCSAFLUSH (addr raw)) (posix.result 0))
-      (os.write_string output "\n")
-      (return nil false))
-    (let [line (read-line-from-file input)]
-      (discard (posix.tcsetattr fd posix.TC_Optional_Action.TCSAFLUSH (addr original)))
-      (os.write_string output "\n")
-      (if (= (len line) 0)
-        (do
-          (delete line)
-          (return nil false))
-        (return line true)))))
+  (prompt-file-hidden-impl input output label))
 
 (defn prompt-passphrase [] -> [passphrase: []byte, ok: bool]
   (when (terminal.is_terminal os.stdin)
