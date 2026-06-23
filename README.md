@@ -30,6 +30,20 @@ Default vault:
 ~/.config/kimen/vault.kv
 ```
 
+Use another vault with `--vault <path>`:
+
+```sh
+kimen vault init --vault ~/.config/kimen/work.kv
+kimen secret list --vault ~/.config/kimen/work.kv
+```
+
+Or set it for a shell:
+
+```sh
+export KIMEN_VAULT=~/.config/kimen/work.kv
+kimen secret list
+```
+
 ## Commands
 
 ```sh
