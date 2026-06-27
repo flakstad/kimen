@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kimen contributors
+// SPDX-License-Identifier: MIT
+
 (package main)
 
 (import posix "core:sys/posix")

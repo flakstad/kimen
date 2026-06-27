@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) Andreas Flakstad and Kimen contributors
+# SPDX-License-Identifier: MIT
+
 set -euo pipefail
 trap 'echo "smoke failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
