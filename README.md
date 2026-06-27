@@ -123,3 +123,7 @@ printf '%s' "$API_KEY" | kimen secret set api_key --stdin
 kimen session start --ttl 8h
 kimen run --env API_KEY=secret:api_key -- sh -c 'curl -H "Authorization: Bearer $API_KEY" https://example.com'
 ```
+
+## License
+
+Kimen is licensed under the MIT License. See [LICENSE](LICENSE).
