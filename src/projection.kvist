@@ -47,7 +47,7 @@
     (when (= (len fields) 0)
       (fmt.eprintln "empty exec source")
       (os.exit 1))
-    (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc {command: fields})
+    (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc :command fields)
                                                           context.allocator)]
       (defer (delete stderr))
       (when (!= exec-err nil)
@@ -453,11 +453,11 @@
                   :else (do
                           (fmt.eprintf "%s:%d: unknown kind %q\n" label (+ i 1) kind)
                           (os.exit 1)))))))
-        (let [[process start-err] (os.process_start (os.Process_Desc {command: command
-                                                                       env: env
-                                                                       stdin: stdin-file
-                                                                       stdout: os.stdout
-                                                                       stderr: os.stderr}))]
+        (let [[process start-err] (os.process_start (os.Process_Desc :command command
+                                                                       :env env
+                                                                       :stdin stdin-file
+                                                                       :stdout os.stdout
+                                                                       :stderr os.stderr))]
           (when (!= start-err nil)
             (when (!= stdin-file nil)
               (os.close stdin-file))

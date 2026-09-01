@@ -29,7 +29,8 @@ mkdir -p "$build_dir" "$package_dir" "$dist_dir"
 
 (
   cd "$KVIST_ROOT"
-  "$KVIST" compile "$ROOT/src/main.kvist" -o "$build_dir/main.odin"
+  KVIST_ROOT="$KVIST_ROOT/src/kvist" \
+    "$KVIST" compile "$ROOT/src/main.kvist" -o "$build_dir/main.odin"
 )
 
 VERSION="$VERSION" perl -0pi -e 's/VERSION: string : "0\.1\.0-dev"/VERSION: string : "$ENV{VERSION}"/' "$build_dir/main.odin"

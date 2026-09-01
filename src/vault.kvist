@@ -11,18 +11,18 @@
 (def KDF-PASSES: u32 3)
 (def KDF-PARALLELISM: u32 4)
 
-(defstruct Secret {
+(defstruct Secret [
   name: string
   name-bytes: []byte
   value: []byte
-})
+])
 
-(defstruct Vault {
+(defstruct Vault [
   path: string
   salt: [16]byte
   nonce: [24]byte
   secrets: [dynamic]Secret
-})
+])
 
 (defn vault-path [args: []string] -> string
   (let [[flag-path has-flag] (arg-value args "--vault")]
@@ -59,9 +59,9 @@
 
 (defn derive-key [passphrase: []byte, salt: []byte] -> [32]byte
   (let [key ([32]byte [])
-        params (argon2id.Parameters {memory_size: KDF-MEMORY-KIB
-                                     passes: KDF-PASSES
-                                     parallelism: KDF-PARALLELISM})
+        params (argon2id.Parameters :memory_size KDF-MEMORY-KIB
+                                     :passes KDF-PASSES
+                                     :parallelism KDF-PARALLELISM)
         err (argon2id.derive (addr params) passphrase salt (slice key))]
     (when (!= err nil)
       (fmt.eprintln "argon2id failed")
@@ -69,7 +69,7 @@
     key))
 
 (defn seal-payload [key: []byte, nonce: []byte, plaintext: []byte] -> []byte
-  (let [ctx (chacha.Context {})
+  (let [ctx (chacha.Context [])
         out (make []byte (+ (len plaintext) chacha.TAG_SIZE))]
     (chacha.init_xchacha (addr ctx) key)
     (defer (chacha.reset (addr ctx)))
@@ -110,7 +110,7 @@
       (defer (delete fields))
       (when (= (len fields) 0)
         (fail! "empty --passphrase-cmd"))
-      (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc {command: fields})
+      (let [[state stdout stderr exec-err] (os.process_exec (os.Process_Desc :command fields)
                                                             context.allocator)]
         (defer (delete stderr))
         (when (!= exec-err nil)
@@ -139,7 +139,7 @@
     (return nil false)
     (let [cipher-len (- (len sealed) chacha.TAG_SIZE)
           payload (make []byte cipher-len)
-          ctx (chacha.Context {})]
+          ctx (chacha.Context [])]
       (chacha.init_xchacha (addr ctx) key)
       (defer (chacha.reset (addr ctx)))
       (if (chacha.open (addr ctx)
@@ -207,9 +207,9 @@
     (return false))
   (let [name-bytes (decode-b64 name64)
         value (decode-b64 (transmute string value64))]
-    (arr.push! out^ (Secret {name: (transmute string name-bytes)
-                             name-bytes: name-bytes
-                             value: value}))
+    (arr.push! out^ (Secret :name (transmute string name-bytes)
+                             :name-bytes name-bytes
+                             :value value))
     true))
 
 (defn parse-payload [payload: []byte] -> [secrets: [dynamic]Secret, ok: bool]
@@ -284,7 +284,7 @@
               (when (not parsed)
                 (fmt.eprintln "invalid vault payload")
                 (return vault false))
-              (return (Vault {path: path salt: salt nonce: nonce secrets: secrets}) true))))))))
+              (return (Vault :path path :salt salt :nonce nonce :secrets secrets) true))))))))
 
 (defn save-vault [vault: Vault, passphrase: []byte]
   (let [payload (vault-payload vault)]
@@ -465,9 +465,9 @@
             (delete vault.secrets[idx].value)
             (set! vault.secrets[idx].value value))
           (let [name-bytes (clone-bytes (transmute []byte name))]
-            (arr.push! vault.secrets (Secret {name: (transmute string name-bytes)
-                                              name-bytes: name-bytes
-                                              value: value}))))
+            (arr.push! vault.secrets (Secret :name (transmute string name-bytes)
+                                              :name-bytes name-bytes
+                                              :value value))))
         (save-vault vault passphrase)))))
 
 (defn secret-list! [args: []string]

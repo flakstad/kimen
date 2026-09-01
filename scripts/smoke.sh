@@ -38,7 +38,8 @@ cd "$KVIST_ROOT"
 if [[ "$EXE_SUFFIX" == ".exe" && -x "./kvist.exe" && ! -e "./kvist" ]]; then
   cp ./kvist.exe ./kvist
 fi
-"$KVIST" build "$SOURCE_PATH" --generated "$GENERATED_PATH"
+KVIST_ROOT="$KVIST_ROOT/src/kvist" \
+  "$KVIST" build "$SOURCE_PATH" --generated "$GENERATED_PATH"
 cd "$ROOT"
 odin build "$BUILD_DIR" -out:"$BIN_OUT"
 
