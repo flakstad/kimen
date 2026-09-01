@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Copyright (c) Andreas Flakstad and Kimen contributors
-# SPDX-License-Identifier: MIT
 
 set -euo pipefail
 
