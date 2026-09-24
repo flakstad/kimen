@@ -139,4 +139,6 @@ test "$("$BIN" secret get api_key)" = "secret-value"
 test "$("$BIN" secret get api_key)" = "secret-value"
 "$BIN" session lock >/dev/null
 
+"$ROOT/scripts/sync-test.sh" "$BIN"
+
 printf 'smoke ok\n'

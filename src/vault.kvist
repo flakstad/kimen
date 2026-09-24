@@ -69,7 +69,7 @@
     key))
 
 (defn seal-payload [key: []byte, nonce: []byte, plaintext: []byte] -> []byte
-  (let [ctx (chacha.Context [])
+  (let [ctx (chacha.Context)
         out (make []byte (+ (len plaintext) chacha.TAG_SIZE))]
     (chacha.init_xchacha (addr ctx) key)
     (defer (chacha.reset (addr ctx)))
@@ -139,7 +139,7 @@
     (return nil false)
     (let [cipher-len (- (len sealed) chacha.TAG_SIZE)
           payload (make []byte cipher-len)
-          ctx (chacha.Context [])]
+          ctx (chacha.Context)]
       (chacha.init_xchacha (addr ctx) key)
       (defer (chacha.reset (addr ctx)))
       (if (chacha.open (addr ctx)

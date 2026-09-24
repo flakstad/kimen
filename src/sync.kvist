@@ -1,0 +1,457 @@
+(package main)
+
+(import base64 "core:encoding/base64")
+(import hex "core:encoding/hex")
+(import sha2 "core:crypto/sha2")
+(import time "core:time")
+
+(def SYNC-STATE-FORMAT: string "kimen-sync/v1")
+(def SYNC-REMOTE-FILE: string "vault.kv")
+(def SYNC-EXIT-USAGE: int 2)
+(def SYNC-EXIT-REMOTE: int 30)
+(def SYNC-EXIT-CONFLICT: int 31)
+(def SYNC-EXIT-PRECONDITION: int 32)
+
+(defstruct SyncState [
+  valid: bool
+  remote: string
+  branch: string
+  local-hash: string
+  remote-hash: string
+])
+
+(defstruct RemoteSnapshot [
+  temp-dir: string
+  branch-exists: bool
+  vault-exists: bool
+  vault-bytes: []byte
+  vault-hash: string
+  ok: bool
+])
+
+(defn sync-state-path [vault: string] -> string
+  (fmt.tprintf "%s.sync" vault))
+
+(defn sync-hash [data: []byte] -> string
+  (let [ctx (sha2.Context_256)
+        digest ([32]byte [])]
+    (sha2.init_256 (addr ctx))
+    (sha2.update (addr ctx) data)
+    (sha2.final (addr ctx) (slice digest))
+    (let [[encoded err] (hex.encode (slice digest))]
+      (when (!= err nil)
+        (fmt.eprintln "could not encode sync hash")
+        (os.exit SYNC-EXIT-PRECONDITION))
+      (transmute string encoded))))
+
+(defn sync-json-escape [value: string] -> string
+  (let [builder (strings.builder_make)]
+    (for [ch value]
+      (cond
+        (= ch 34) (strings.write_string (addr builder) "\\\"")
+        (= ch 92) (strings.write_string (addr builder) "\\\\")
+        (= ch 10) (strings.write_string (addr builder) "\\n")
+        (= ch 13) (strings.write_string (addr builder) "\\r")
+        (= ch 9) (strings.write_string (addr builder) "\\t")
+        (< ch 32) (strings.write_string (addr builder) (fmt.tprintf "\\u%04x" ch))
+        :else (strings.write_rune (addr builder) ch)))
+    (strings.to_string builder)))
+
+(defn sync-fail! [args: []string, reason: string, message: string, code: int]
+  (if (arg-flag? args "--json")
+    (let [escaped-reason (sync-json-escape reason)
+          escaped-message (sync-json-escape message)]
+      (defer (delete escaped-reason))
+      (defer (delete escaped-message))
+      (fmt.printf "{{\"ok\":false,\"action\":\"sync_error\",\"reason\":\"%s\",\"message\":\"%s\",\"exit_code\":%d}\n"
+                  escaped-reason escaped-message code))
+    (fmt.eprintf "sync: %s\n" message))
+  (os.exit code))
+
+(defn sync-valid-setting? [value: string] -> bool
+  (and (!= (strings.trim_space value) "")
+       (= (strings.index value "\n") -1)
+       (= (strings.index value "\r") -1)))
+
+(defn sync-read-state [path: string] -> SyncState
+  (when (not (os.exists path))
+    (return (SyncState :valid false)))
+  (let [[data read-err] (os.read_entire_file path context.allocator)]
+    (when (!= read-err nil)
+      (return (SyncState :valid false)))
+    (defer (delete data))
+    (let [[lines split-err] (strings.split (transmute string data) "\n")]
+      (when (!= split-err nil)
+        (return (SyncState :valid false)))
+      (defer (delete lines))
+      (when (or (< (len lines) 5) (!= (get lines 0) SYNC-STATE-FORMAT))
+        (return (SyncState :valid false)))
+      (let [[remote-bytes remote-err] (base64.decode (get lines 1))
+            [branch-bytes branch-err] (base64.decode (get lines 2))]
+        (when (!= remote-err nil)
+          (return (SyncState :valid false)))
+        (defer (delete remote-bytes))
+        (when (!= branch-err nil)
+          (return (SyncState :valid false)))
+        (defer (delete branch-bytes))
+        (let [remote (strings.clone (transmute string remote-bytes))
+              branch (strings.clone (transmute string branch-bytes))
+              local-hash (strings.clone (get lines 3))
+              remote-hash (strings.clone (get lines 4))]
+          (if (and (sync-valid-setting? remote)
+                   (sync-valid-setting? branch)
+                   (= (len local-hash) 64)
+                   (= (len remote-hash) 64))
+            (SyncState :valid true
+                       :remote remote
+                       :branch branch
+                       :local-hash local-hash
+                       :remote-hash remote-hash)
+            (do
+              (delete remote)
+              (delete branch)
+              (delete local-hash)
+              (delete remote-hash)
+              (SyncState :valid false))))))))
+
+(defn sync-delete-state [state: SyncState]
+  (when state.valid
+    (delete state.remote)
+    (delete state.branch)
+    (delete state.local-hash)
+    (delete state.remote-hash)))
+
+(defn sync-atomic-write [path: string, data: []byte, permissions: os.Permissions] -> bool
+  (let [[parent _] (os.split_path path)
+        dir (if (= parent "") "." parent)]
+    (when (and (not (os.exists dir)) (!= (os.make_directory_all dir) nil))
+      (return false))
+    (let [[temp-dir temp-err] (os.make_directory_temp dir ".kimen-sync-*" context.allocator)]
+      (when (!= temp-err nil)
+        (return false))
+      (defer (do
+               (discard (os.remove_all temp-dir))
+               (delete temp-dir)))
+      (let [temp-path (fmt.tprintf "%s/data" temp-dir)]
+        (when (!= (os.write_entire_file temp-path data permissions) nil)
+          (return false))
+        (= (os.rename temp-path path) nil)))))
+
+(defn sync-write-state [path: string, remote: string, branch: string, local-hash: string, remote-hash: string] -> bool
+  (let [[remote64 remote-err] (base64.encode (transmute []byte remote))
+        [branch64 branch-err] (base64.encode (transmute []byte branch))]
+    (when (or (!= remote-err nil) (!= branch-err nil))
+      (return false))
+    (defer (delete remote64))
+    (defer (delete branch64))
+    (let [body (fmt.tprintf "%s\n%s\n%s\n%s\n%s\n"
+                            SYNC-STATE-FORMAT remote64 branch64 local-hash remote-hash)]
+      (sync-atomic-write path (transmute []byte body) (os.perm 0o600)))))
+
+(defn sync-run-git [command: []string, working-dir: string] -> [stdout: []byte, stderr: []byte, exit-code: int, ok: bool]
+  (let [[state out-data err-data exec-err] (os.process_exec (os.Process_Desc
+                                                         :command command
+                                                         :working_dir working-dir)
+                                                       context.allocator)]
+    (if (!= exec-err nil)
+      (return out-data err-data -1 false)
+      (if state.exited
+        (return out-data err-data state.exit_code (= state.exit_code 0))
+        (return out-data err-data -1 false)))))
+
+(defn sync-report-git-error! [args: []string, stderr: []byte, fallback: string]
+  (let [detail (strings.trim_space (transmute string stderr))]
+    (if (= detail "")
+      (sync-fail! args "remote_failed" fallback SYNC-EXIT-REMOTE)
+      (sync-fail! args "remote_failed" detail SYNC-EXIT-REMOTE))))
+
+(defn sync-remote-snapshot [args: []string, remote: string, branch: string] -> RemoteSnapshot
+  (let [[temp-dir temp-err] (os.make_directory_temp "" "kimen-sync-*" context.allocator)]
+    (when (!= temp-err nil)
+      (sync-fail! args "temporary_directory_failed" "could not create temporary sync directory" SYNC-EXIT-PRECONDITION))
+    (let [[init-out init-err _ init-ok] (sync-run-git ([]string ["git" "init" "-q"]) temp-dir)]
+      (delete init-out)
+      (when (not init-ok)
+        (defer (delete init-err))
+        (discard (os.remove_all temp-dir))
+        (delete temp-dir)
+        (sync-report-git-error! args init-err "git init failed"))
+      (delete init-err))
+    (let [[add-out add-err _ add-ok] (sync-run-git ([]string ["git" "remote" "add" "origin" remote]) temp-dir)]
+      (delete add-out)
+      (when (not add-ok)
+        (defer (delete add-err))
+        (discard (os.remove_all temp-dir))
+        (delete temp-dir)
+        (sync-report-git-error! args add-err "could not configure git remote"))
+      (delete add-err))
+    (let [ref (fmt.tprintf "refs/heads/%s" branch)
+          [probe-out probe-err probe-code probe-ok] (sync-run-git ([]string ["git" "ls-remote" "--exit-code" "origin" ref]) temp-dir)]
+      (delete probe-out)
+      (if (and (not probe-ok) (!= probe-code 2))
+        (do
+          (defer (delete probe-err))
+          (discard (os.remove_all temp-dir))
+          (delete temp-dir)
+          (sync-report-git-error! args probe-err "could not access git remote"))
+        (delete probe-err))
+      (when (= probe-code 2)
+        (return (RemoteSnapshot :temp-dir temp-dir :branch-exists false :ok true)))
+      (let [[fetch-out fetch-err _ fetch-ok] (sync-run-git ([]string ["git" "fetch" "-q" "--depth=1" "origin" ref]) temp-dir)]
+        (delete fetch-out)
+        (when (not fetch-ok)
+          (defer (delete fetch-err))
+          (discard (os.remove_all temp-dir))
+          (delete temp-dir)
+          (sync-report-git-error! args fetch-err "could not fetch git remote"))
+        (delete fetch-err))
+      (let [[show-out show-err _ show-ok] (sync-run-git ([]string ["git" "show" "FETCH_HEAD:vault.kv"]) temp-dir)]
+        (delete show-err)
+        (if show-ok
+          (let [hash (sync-hash show-out)]
+            (RemoteSnapshot :temp-dir temp-dir
+                            :branch-exists true
+                            :vault-exists true
+                            :vault-bytes show-out
+                            :vault-hash hash
+                            :ok true))
+          (do
+            (delete show-out)
+            (RemoteSnapshot :temp-dir temp-dir :branch-exists true :vault-exists false :ok true)))))))
+
+(defn sync-delete-snapshot [snapshot: RemoteSnapshot]
+  (when snapshot.vault-exists
+    (delete snapshot.vault-bytes)
+    (delete snapshot.vault-hash))
+  (when (!= snapshot.temp-dir "")
+    (discard (os.remove_all snapshot.temp-dir))
+    (delete snapshot.temp-dir)))
+
+(defn sync-resolve-config [args: []string, state: SyncState] -> [remote: string, branch: string]
+  (let [[flag-remote has-flag-remote] (arg-value args "--remote")
+        [env-remote has-env-remote] (os.lookup_env "KIMEN_SYNC_REMOTE" context.temp_allocator)
+        [flag-branch has-flag-branch] (arg-value args "--branch")
+        [env-branch has-env-branch] (os.lookup_env "KIMEN_SYNC_BRANCH" context.temp_allocator)
+        resolved-remote (cond
+                 has-flag-remote flag-remote
+                 has-env-remote env-remote
+                 state.valid state.remote
+                 :else "")
+        explicit-remote (or has-flag-remote has-env-remote)
+        resolved-branch (cond
+                 has-flag-branch flag-branch
+                 has-env-branch env-branch
+                 (and state.valid (not explicit-remote)) state.branch
+                 :else "main")]
+    (when (not (sync-valid-setting? resolved-remote))
+      (sync-fail! args "remote_not_configured" "set --remote <git-url> or KIMEN_SYNC_REMOTE" SYNC-EXIT-USAGE))
+    (when (or (not (sync-valid-setting? resolved-branch)) (strings.has_prefix resolved-branch "-"))
+      (sync-fail! args "invalid_branch" "invalid sync branch" SYNC-EXIT-USAGE))
+    (return resolved-remote resolved-branch)))
+
+(defn sync-state-matches? [state: SyncState, remote: string, branch: string] -> bool
+  (and state.valid (= state.remote remote) (= state.branch branch)))
+
+(defn sync-read-local [args: []string, path: string] -> [data: []byte, hash: string, exists: bool]
+  (when (not (os.exists path))
+    (return nil "" false))
+  (let [[local-data read-err] (os.read_entire_file path context.allocator)]
+    (when (!= read-err nil)
+      (sync-fail! args "local_vault_unreadable" "could not read local vault" SYNC-EXIT-PRECONDITION))
+    (let [local-hash (sync-hash local-data)]
+      (return local-data local-hash true))))
+
+(defn sync-valid-vault-bytes? [data: []byte] -> bool
+  (strings.has_prefix (transmute string data) "kimen-vault/v2\n"))
+
+(defn sync-print-status [args: []string,
+                         status: string,
+                         local-exists: bool,
+                         remote-exists: bool,
+                         has-baseline: bool,
+                         local-changed: bool,
+                         remote-changed: bool,
+                         exit-code: int]
+  (if (arg-flag? args "--json")
+    (fmt.printf "{{\"ok\":%v,\"action\":\"sync_status\",\"status\":\"%s\",\"local_exists\":%v,\"remote_exists\":%v,\"has_baseline\":%v,\"local_changed\":%v,\"remote_changed\":%v,\"exit_code\":%d}\n"
+                (= exit-code 0) status local-exists remote-exists has-baseline local-changed remote-changed exit-code)
+    (do
+      (fmt.printf "status: %s\n" status)
+      (fmt.printf "local: %s\n" (if local-exists (if local-changed "changed" "present") "missing"))
+      (fmt.printf "remote: %s\n" (if remote-exists (if remote-changed "changed" "present") "missing"))
+      (fmt.printf "baseline: %s\n" (if has-baseline "present" "missing"))))
+  (when (!= exit-code 0)
+    (os.exit exit-code)))
+
+(defn sync-status! [args: []string]
+  (let [vault (vault-path args)
+        state-path (sync-state-path vault)
+        state (sync-read-state state-path)]
+    (defer (sync-delete-state state))
+    (let [[remote branch] (sync-resolve-config args state)
+          baseline (sync-state-matches? state remote branch)
+          snapshot (sync-remote-snapshot args remote branch)]
+      (defer (sync-delete-snapshot snapshot))
+      (let [[local-data local-hash local-exists] (sync-read-local args vault)]
+        (defer (when local-exists
+                 (delete local-data)
+                 (delete local-hash)))
+        (let [remote-exists snapshot.vault-exists
+              same (and local-exists remote-exists (= local-hash snapshot.vault-hash))
+              local-changed (and baseline local-exists (!= local-hash state.local-hash))
+              remote-changed (and baseline
+                                  (or (not remote-exists)
+                                      (!= snapshot.vault-hash state.remote-hash)))]
+          (cond
+            same (sync-print-status args "synced" local-exists remote-exists baseline false false 0)
+            (and (not local-exists) (not remote-exists)) (sync-print-status args "empty" false false baseline false remote-changed 0)
+            (not local-exists) (sync-print-status args "remote_ahead" false true baseline false remote-changed 0)
+            (not remote-exists) (if (and baseline remote-changed)
+                                  (sync-print-status args "remote_missing" true false true local-changed true SYNC-EXIT-CONFLICT)
+                                  (sync-print-status args "local_only" true false baseline local-changed false 0))
+            (not baseline) (sync-print-status args "diverged" true true false true true SYNC-EXIT-CONFLICT)
+            (and local-changed remote-changed) (sync-print-status args "diverged" true true true true true SYNC-EXIT-CONFLICT)
+            remote-changed (sync-print-status args "remote_ahead" true true true false true 0)
+            local-changed (sync-print-status args "local_ahead" true true true true false 0)
+            :else (sync-print-status args "diverged" true true true true true SYNC-EXIT-CONFLICT)))))))
+
+(defn sync-print-action [args: []string, action: string, status: string, backup: string]
+  (if (arg-flag? args "--json")
+    (let [escaped-backup (sync-json-escape backup)]
+      (defer (delete escaped-backup))
+      (fmt.printf "{{\"ok\":true,\"action\":\"%s\",\"status\":\"%s\",\"backup_path\":%s,\"exit_code\":0}\n"
+                  action status (if (= backup "") "null" (fmt.tprintf "\"%s\"" escaped-backup))))
+    (do
+      (fmt.printf "%s: %s\n" action status)
+      (when (!= backup "")
+        (fmt.printf "backup: %s\n" backup)))))
+
+(defn sync-push-commit! [args: []string, snapshot: RemoteSnapshot, branch: string, vault-bytes: []byte]
+  (if snapshot.branch-exists
+    (let [[out err _ ok] (sync-run-git ([]string ["git" "checkout" "-q" "--detach" "FETCH_HEAD"]) snapshot.temp-dir)]
+      (delete out)
+      (when (not ok)
+        (defer (delete err))
+        (sync-report-git-error! args err "could not check out remote branch"))
+      (delete err))
+    (let [[out err _ ok] (sync-run-git ([]string ["git" "checkout" "-q" "--orphan" "kimen-sync"]) snapshot.temp-dir)]
+      (delete out)
+      (when (not ok)
+        (defer (delete err))
+        (sync-report-git-error! args err "could not create remote branch"))
+      (delete err)))
+  (let [[rm-out rm-err _ _] (sync-run-git ([]string ["git" "rm" "-q" "-r" "-f" "--ignore-unmatch" "--" SYNC-REMOTE-FILE]) snapshot.temp-dir)]
+    (delete rm-out)
+    (delete rm-err))
+  (let [remote-path (fmt.tprintf "%s/%s" snapshot.temp-dir SYNC-REMOTE-FILE)]
+    (when (os.exists remote-path)
+      (discard (os.remove_all remote-path)))
+    (when (!= (os.write_entire_file remote-path vault-bytes (os.perm 0o600)) nil)
+      (sync-fail! args "remote_worktree_write_failed" "could not stage encrypted vault" SYNC-EXIT-PRECONDITION)))
+  (let [[add-out add-err _ add-ok] (sync-run-git ([]string ["git" "add" "--" SYNC-REMOTE-FILE]) snapshot.temp-dir)]
+    (delete add-out)
+    (when (not add-ok)
+      (defer (delete add-err))
+      (sync-report-git-error! args add-err "could not stage encrypted vault"))
+    (delete add-err))
+  (let [[commit-out commit-err _ commit-ok] (sync-run-git ([]string ["git" "-c" "user.name=Kimen" "-c" "user.email=kimen@localhost" "commit" "-q" "-m" "Sync encrypted Kimen vault"]) snapshot.temp-dir)]
+    (delete commit-out)
+    (when (not commit-ok)
+      (defer (delete commit-err))
+      (sync-report-git-error! args commit-err "could not commit encrypted vault"))
+    (delete commit-err))
+  (let [destination (fmt.tprintf "HEAD:refs/heads/%s" branch)
+        [push-out push-err _ push-ok] (sync-run-git ([]string ["git" "push" "-q" "origin" destination]) snapshot.temp-dir)]
+    (delete push-out)
+    (when (not push-ok)
+      (let [detail (strings.trim_space (transmute string push-err))]
+        (if (or (strings.contains detail "rejected") (strings.contains detail "fetch first") (strings.contains detail "non-fast-forward"))
+          (sync-fail! args "remote_changed" "remote changed during push; pull before retrying" SYNC-EXIT-CONFLICT)
+          (sync-report-git-error! args push-err "git push failed"))))
+    (delete push-err)))
+
+(defn sync-push! [args: []string]
+  (let [vault (vault-path args)
+        state-path (sync-state-path vault)
+        state (sync-read-state state-path)]
+    (defer (sync-delete-state state))
+    (let [[remote branch] (sync-resolve-config args state)
+          baseline (sync-state-matches? state remote branch)
+          [local-data local-hash local-exists] (sync-read-local args vault)]
+      (when (not local-exists)
+        (sync-fail! args "local_vault_missing" "local vault is missing" SYNC-EXIT-PRECONDITION))
+      (defer (do (delete local-data) (delete local-hash)))
+      (when (not (sync-valid-vault-bytes? local-data))
+        (sync-fail! args "invalid_local_vault" "local vault is not a supported encrypted Kimen vault" SYNC-EXIT-PRECONDITION))
+      (let [snapshot (sync-remote-snapshot args remote branch)]
+        (defer (sync-delete-snapshot snapshot))
+        (when (and snapshot.vault-exists (= local-hash snapshot.vault-hash))
+          (when (not (arg-flag? args "--dry-run"))
+            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash))
+              (sync-fail! args "state_write_failed" "vault matches remote, but baseline could not be saved" SYNC-EXIT-PRECONDITION)))
+          (sync-print-action args (if (arg-flag? args "--dry-run") "sync_push_dry_run" "sync_push") "unchanged" "")
+          (return))
+        (when (and snapshot.vault-exists (not baseline))
+          (sync-fail! args "no_local_baseline" "remote has an unknown vault; pull before pushing" SYNC-EXIT-CONFLICT))
+        (when (and baseline
+                   (or (not snapshot.vault-exists)
+                       (!= snapshot.vault-hash state.remote-hash)))
+          (sync-fail! args "remote_changed" "remote changed since the local baseline; pull before pushing" SYNC-EXIT-CONFLICT))
+        (when (arg-flag? args "--dry-run")
+          (sync-print-action args "sync_push_dry_run" "would_push" "")
+          (return))
+        (sync-push-commit! args snapshot branch local-data)
+        (when (not (sync-write-state state-path remote branch local-hash local-hash))
+          (sync-fail! args "state_write_failed" "push succeeded, but baseline could not be saved; rerun push to recover" SYNC-EXIT-PRECONDITION))
+        (sync-print-action args "sync_push" "pushed" "")))))
+
+(defn sync-backup-path [vault: string] -> string
+  (fmt.tprintf "%s.backup.%d" vault (time.to_unix_nanoseconds (time.now))))
+
+(defn sync-pull! [args: []string]
+  (let [vault (vault-path args)
+        state-path (sync-state-path vault)
+        state (sync-read-state state-path)]
+    (defer (sync-delete-state state))
+    (let [[remote branch] (sync-resolve-config args state)
+          baseline (sync-state-matches? state remote branch)
+          snapshot (sync-remote-snapshot args remote branch)]
+      (defer (sync-delete-snapshot snapshot))
+      (when (not snapshot.vault-exists)
+        (sync-fail! args "remote_vault_missing" "remote does not contain vault.kv" SYNC-EXIT-PRECONDITION))
+      (when (not (sync-valid-vault-bytes? snapshot.vault-bytes))
+        (sync-fail! args "invalid_remote_vault" "remote vault is not a supported encrypted Kimen vault" SYNC-EXIT-PRECONDITION))
+      (let [[local-data local-hash local-exists] (sync-read-local args vault)]
+        (defer (when local-exists
+                 (delete local-data)
+                 (delete local-hash)))
+        (when (and local-exists (= local-hash snapshot.vault-hash))
+          (when (not (arg-flag? args "--dry-run"))
+            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash))
+              (sync-fail! args "state_write_failed" "vault matches remote, but baseline could not be saved" SYNC-EXIT-PRECONDITION)))
+          (sync-print-action args (if (arg-flag? args "--dry-run") "sync_pull_dry_run" "sync_pull") "unchanged" "")
+          (return))
+        (when (and local-exists (not baseline) (not (arg-flag? args "--force")))
+          (sync-fail! args "local_changes" "local vault has no baseline; move it aside or reconcile explicitly" SYNC-EXIT-CONFLICT))
+        (when (and local-exists (!= local-hash state.local-hash) (not (arg-flag? args "--force")))
+          (sync-fail! args "local_changes" "local vault changed since the baseline; refusing to replace it" SYNC-EXIT-CONFLICT))
+        (when (arg-flag? args "--dry-run")
+          (sync-print-action args "sync_pull_dry_run" "would_pull" "")
+          (return))
+        (let [backup (if local-exists (sync-backup-path vault) "")]
+          (when local-exists
+            (when (not (sync-atomic-write backup local-data (os.perm 0o600)))
+              (sync-fail! args "backup_failed" "could not create the pre-pull backup" SYNC-EXIT-PRECONDITION)))
+          (when (not (sync-atomic-write vault snapshot.vault-bytes (os.perm 0o600)))
+            (sync-fail! args "vault_replace_failed" "could not atomically replace the local vault; backup is intact" SYNC-EXIT-PRECONDITION))
+          (when (not (sync-write-state state-path remote branch snapshot.vault-hash snapshot.vault-hash))
+            (sync-fail! args "state_write_failed" "pull completed, but baseline could not be saved; rerun pull to recover" SYNC-EXIT-PRECONDITION))
+          (sync-print-action args "sync_pull" "pulled" backup))))))
+
+(defn handle-sync [args: []string]
+  (let [subcmd (command-at args 2)]
+    (cond
+      (= subcmd "status") (sync-status! args)
+      (= subcmd "push") (sync-push! args)
+      (= subcmd "pull") (sync-pull! args)
+      :else (sync-fail! args "usage" "usage: kimen sync status|push|pull [--remote <git-url>] [--branch <name>] [--vault <path>] [--dry-run] [--force] [--json]" SYNC-EXIT-USAGE))))
