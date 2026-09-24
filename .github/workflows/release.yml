@@ -68,7 +68,7 @@ jobs:
 
       - name: Build Kvist
         shell: bash
-        run: odin build cmd/kvist -out:./kvist${{ matrix.exe_suffix }}
+        run: odin build src/cli/kvist -out:./kvist${{ matrix.exe_suffix }}
         working-directory: kvist
 
       - name: Build archive
