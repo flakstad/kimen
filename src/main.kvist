@@ -34,6 +34,7 @@
   (println "  kimen sync status [--remote <git-url>] [--branch <name>] [--json]")
   (println "  kimen sync push [--remote <git-url>] [--branch <name>] [--dry-run] [--json]")
   (println "  kimen sync pull [--remote <git-url>] [--branch <name>] [--dry-run] [--force] [--json]")
+  (println "  kimen sync auto on|off|status [--remote <git-url>] [--branch <name>] [--json]")
   (println "")
   (println "  kimen run [source] [projection...] -- <command>...")
   (println "  kimen render (--dir <path>|--systemd-service <name>) [source] [--file path=value]")
@@ -327,29 +328,53 @@
 (defn handle-vault [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
-      (= subcmd "init") (vault-init! args)
+      (= subcmd "init") (do
+                           (vault-init! args)
+                           (sync-auto-apply-after! args))
       (= subcmd "path") (vault-path! args)
-      (= subcmd "info") (vault-info! args)
-      (= subcmd "rekey") (vault-rekey! args)
+      (= subcmd "info") (do
+                           (sync-auto-apply-before! args false)
+                           (vault-info! args))
+      (= subcmd "rekey") (do
+                            (sync-auto-apply-before! args (not (arg-flag? args "--dry-run")))
+                            (vault-rekey! args)
+                            (when (not (arg-flag? args "--dry-run"))
+                              (sync-auto-apply-after! args)))
       :else (fail! "usage: kimen vault init|path|info|rekey"))))
 
 (defn handle-secret [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
-      (= subcmd "list") (secret-list! args)
-      (= subcmd "set") (secret-set! args)
-      (= subcmd "get") (secret-get! args)
-      (= subcmd "rm") (secret-rm! args)
-      (= subcmd "mv") (secret-mv! args)
+      (= subcmd "list") (do
+                           (sync-auto-apply-before! args false)
+                           (secret-list! args))
+      (= subcmd "set") (do
+                          (sync-auto-apply-before! args true)
+                          (secret-set! args)
+                          (sync-auto-apply-after! args))
+      (= subcmd "get") (do
+                          (sync-auto-apply-before! args false)
+                          (secret-get! args))
+      (= subcmd "rm") (do
+                         (sync-auto-apply-before! args true)
+                         (secret-rm! args)
+                         (sync-auto-apply-after! args))
+      (= subcmd "mv") (do
+                         (sync-auto-apply-before! args true)
+                         (secret-mv! args)
+                         (sync-auto-apply-after! args))
       :else (fail! "usage: kimen secret set|list|get|rm|mv"))))
 
 (defn handle-run [args: []string]
+  (sync-auto-apply-before! args false)
   (run-profile-command args))
 
 (defn handle-render [args: []string]
+  (sync-auto-apply-before! args false)
   (render-profile-files args))
 
 (defn handle-envfile [args: []string]
+  (sync-auto-apply-before! args false)
   (write-profile-envfile args))
 
 (defn handle-plan [args: []string]
@@ -366,6 +391,7 @@
       (fail! "usage: kimen map lint (--profile <name>|--map <path>) [--strict]"))))
 
 (defn handle-doctor [args: []string]
+  (sync-auto-apply-before! args false)
   (if (doctor-profile args)
     (fmt.println "doctor ok")
     (os.exit 1)))
@@ -373,7 +399,9 @@
 (defn handle-session [args: []string]
   (let [subcmd (command-at args 2)]
     (cond
-      (= subcmd "start") (session-start! args)
+      (= subcmd "start") (do
+                            (sync-auto-apply-before! args false)
+                            (session-start! args))
       (= subcmd "status") (session-status! args)
       (= subcmd "lock") (session-lock!)
       (= subcmd "stop") (session-lock!)

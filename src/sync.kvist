@@ -14,6 +14,7 @@
 
 (defstruct SyncState [
   valid: bool
+  auto: bool
   remote: string
   branch: string
   local-hash: string
@@ -97,12 +98,14 @@
         (let [remote (strings.clone (transmute string remote-bytes))
               branch (strings.clone (transmute string branch-bytes))
               local-hash (strings.clone (get lines 3))
-              remote-hash (strings.clone (get lines 4))]
+              remote-hash (strings.clone (get lines 4))
+              auto (and (>= (len lines) 6) (= (get lines 5) "auto"))]
           (if (and (sync-valid-setting? remote)
                    (sync-valid-setting? branch)
-                   (= (len local-hash) 64)
-                   (= (len remote-hash) 64))
+                   (or (and (= (len local-hash) 0) (= (len remote-hash) 0))
+                       (and (= (len local-hash) 64) (= (len remote-hash) 64))))
             (SyncState :valid true
+                       :auto auto
                        :remote remote
                        :branch branch
                        :local-hash local-hash
@@ -137,15 +140,15 @@
           (return false))
         (= (os.rename temp-path path) nil)))))
 
-(defn sync-write-state [path: string, remote: string, branch: string, local-hash: string, remote-hash: string] -> bool
+(defn sync-write-state [path: string, remote: string, branch: string, local-hash: string, remote-hash: string, auto: bool] -> bool
   (let [[remote64 remote-err] (base64.encode (transmute []byte remote))
         [branch64 branch-err] (base64.encode (transmute []byte branch))]
     (when (or (!= remote-err nil) (!= branch-err nil))
       (return false))
     (defer (delete remote64))
     (defer (delete branch64))
-    (let [body (fmt.tprintf "%s\n%s\n%s\n%s\n%s\n"
-                            SYNC-STATE-FORMAT remote64 branch64 local-hash remote-hash)]
+    (let [body (fmt.tprintf "%s\n%s\n%s\n%s\n%s\n%s\n"
+                            SYNC-STATE-FORMAT remote64 branch64 local-hash remote-hash (if auto "auto" "manual"))]
       (sync-atomic-write path (transmute []byte body) (os.perm 0o600)))))
 
 (defn sync-run-git [command: []string, working-dir: string] -> [stdout: []byte, stderr: []byte, exit-code: int, ok: bool]
@@ -250,7 +253,11 @@
     (return resolved-remote resolved-branch)))
 
 (defn sync-state-matches? [state: SyncState, remote: string, branch: string] -> bool
-  (and state.valid (= state.remote remote) (= state.branch branch)))
+  (and state.valid
+       (= (len state.local-hash) 64)
+       (= (len state.remote-hash) 64)
+       (= state.remote remote)
+       (= state.branch branch)))
 
 (defn sync-read-local [args: []string, path: string] -> [data: []byte, hash: string, exists: bool]
   (when (not (os.exists path))
@@ -387,7 +394,7 @@
         (defer (sync-delete-snapshot snapshot))
         (when (and snapshot.vault-exists (= local-hash snapshot.vault-hash))
           (when (not (arg-flag? args "--dry-run"))
-            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash))
+            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash state.auto))
               (sync-fail! args "state_write_failed" "vault matches remote, but baseline could not be saved" SYNC-EXIT-PRECONDITION)))
           (sync-print-action args (if (arg-flag? args "--dry-run") "sync_push_dry_run" "sync_push") "unchanged" "")
           (return))
@@ -401,7 +408,7 @@
           (sync-print-action args "sync_push_dry_run" "would_push" "")
           (return))
         (sync-push-commit! args snapshot branch local-data)
-        (when (not (sync-write-state state-path remote branch local-hash local-hash))
+        (when (not (sync-write-state state-path remote branch local-hash local-hash state.auto))
           (sync-fail! args "state_write_failed" "push succeeded, but baseline could not be saved; rerun push to recover" SYNC-EXIT-PRECONDITION))
         (sync-print-action args "sync_push" "pushed" "")))))
 
@@ -427,7 +434,7 @@
                  (delete local-hash)))
         (when (and local-exists (= local-hash snapshot.vault-hash))
           (when (not (arg-flag? args "--dry-run"))
-            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash))
+            (when (not (sync-write-state state-path remote branch local-hash snapshot.vault-hash state.auto))
               (sync-fail! args "state_write_failed" "vault matches remote, but baseline could not be saved" SYNC-EXIT-PRECONDITION)))
           (sync-print-action args (if (arg-flag? args "--dry-run") "sync_pull_dry_run" "sync_pull") "unchanged" "")
           (return))
@@ -444,9 +451,124 @@
               (sync-fail! args "backup_failed" "could not create the pre-pull backup" SYNC-EXIT-PRECONDITION)))
           (when (not (sync-atomic-write vault snapshot.vault-bytes (os.perm 0o600)))
             (sync-fail! args "vault_replace_failed" "could not atomically replace the local vault; backup is intact" SYNC-EXIT-PRECONDITION))
-          (when (not (sync-write-state state-path remote branch snapshot.vault-hash snapshot.vault-hash))
+          (when (not (sync-write-state state-path remote branch snapshot.vault-hash snapshot.vault-hash state.auto))
             (sync-fail! args "state_write_failed" "pull completed, but baseline could not be saved; rerun pull to recover" SYNC-EXIT-PRECONDITION))
           (sync-print-action args "sync_pull" "pulled" backup))))))
+
+(defn sync-env-auto [] -> [enabled: bool, configured: bool]
+  (let [[value found] (os.lookup_env "KIMEN_SYNC_AUTO" context.temp_allocator)]
+    (if found
+      (let [normalized (strings.to_lower (strings.trim_space value))]
+        (defer (delete normalized))
+        (return (or (= normalized "1")
+                    (= normalized "true")
+                    (= normalized "yes")
+                    (= normalized "on"))
+                true))
+      (return false false))))
+
+(defn sync-auto-enabled? [args: []string] -> bool
+  (when (arg-flag? args "--no-sync")
+    (return false))
+  (let [[env-enabled env-configured] (sync-env-auto)]
+    (when env-configured
+      (return env-enabled)))
+  (let [state (sync-read-state (sync-state-path (vault-path args)))]
+    (defer (sync-delete-state state))
+    (and state.valid state.auto)))
+
+(defn sync-auto-child [verb: string, vault: string] -> [output: []byte, exit-code: int]
+  (let [executable (command-at os.args 0)
+        [out err code _] (sync-run-git ([]string [executable "sync" verb "--vault" vault "--json"]) ".")]
+    (delete err)
+    (return out code)))
+
+(defn sync-auto-problem! [write-command: bool, message: string, code: int]
+  (if write-command
+    (do
+      (fmt.eprintf "auto-sync: %s\n" message)
+      (os.exit code))
+    (fmt.eprintf "auto-sync warning: %s; using the local vault\n" message)))
+
+(defn sync-auto-apply-before! [args: []string, write-command: bool]
+  (when (not (sync-auto-enabled? args))
+    (return))
+  (let [vault (vault-path args)
+        [status-out status-code] (sync-auto-child "status" vault)]
+    (defer (delete status-out))
+    (when (= status-code SYNC-EXIT-REMOTE)
+      (return))
+    (when (= status-code SYNC-EXIT-CONFLICT)
+      (sync-auto-problem! write-command "local and remote vaults have diverged; resolve with kimen sync status/pull" SYNC-EXIT-CONFLICT)
+      (return))
+    (when (!= status-code 0)
+      (sync-auto-problem! write-command "preflight failed" status-code)
+      (return))
+    (let [action (cond
+                   (or (strings.contains (transmute string status-out) "\"status\":\"local_ahead\"")
+                       (strings.contains (transmute string status-out) "\"status\":\"local_only\"")) "push"
+                   (strings.contains (transmute string status-out) "\"status\":\"remote_ahead\"") "pull"
+                   :else "")]
+      (when (!= action "")
+        (let [[sync-out sync-code] (sync-auto-child action vault)]
+          (defer (delete sync-out))
+          (when (= sync-code SYNC-EXIT-REMOTE)
+            (return))
+          (when (!= sync-code 0)
+            (sync-auto-problem! write-command
+                                (if (= sync-code SYNC-EXIT-CONFLICT)
+                                  "local and remote vaults have diverged; resolve explicitly"
+                                  "preflight sync failed")
+                                sync-code)))))))
+
+(defn sync-auto-apply-after! [args: []string]
+  (when (not (sync-auto-enabled? args))
+    (return))
+  (let [vault (vault-path args)
+        [out code] (sync-auto-child "push" vault)]
+    (defer (delete out))
+    (when (!= code 0)
+      (if (= code SYNC-EXIT-REMOTE)
+        (fmt.eprintln "auto-sync: saved locally; remote is unavailable, so push is pending")
+        (if (= code SYNC-EXIT-CONFLICT)
+          (fmt.eprintln "auto-sync: saved locally; remote changed, so conflict resolution is pending")
+          (fmt.eprintf "auto-sync: saved locally; push is pending (exit %d)\n" code))))))
+
+(defn sync-auto-command! [args: []string]
+  (let [mode (command-at args 3)
+        vault (vault-path args)
+        state-path (sync-state-path vault)
+        state (sync-read-state state-path)]
+    (defer (sync-delete-state state))
+    (cond
+      (= mode "on")
+        (let [[remote branch] (sync-resolve-config args state)
+              same-endpoint (and state.valid (= state.remote remote) (= state.branch branch))
+              local-hash (if same-endpoint state.local-hash "")
+              remote-hash (if same-endpoint state.remote-hash "")]
+          (when (not (sync-write-state state-path remote branch local-hash remote-hash true))
+            (sync-fail! args "state_write_failed" "could not enable automatic sync" SYNC-EXIT-PRECONDITION))
+          (if (arg-flag? args "--json")
+            (fmt.println "{\"ok\":true,\"action\":\"sync_auto\",\"enabled\":true,\"exit_code\":0}")
+            (fmt.println "automatic sync: on")))
+      (= mode "off")
+        (do
+          (when state.valid
+            (when (not (sync-write-state state-path state.remote state.branch state.local-hash state.remote-hash false))
+              (sync-fail! args "state_write_failed" "could not disable automatic sync" SYNC-EXIT-PRECONDITION)))
+          (if (arg-flag? args "--json")
+            (fmt.println "{\"ok\":true,\"action\":\"sync_auto\",\"enabled\":false,\"exit_code\":0}")
+            (fmt.println "automatic sync: off")))
+      (= mode "status")
+        (let [[env-enabled env-configured] (sync-env-auto)
+              enabled (if env-configured env-enabled (and state.valid state.auto))]
+          (if (arg-flag? args "--json")
+            (fmt.printf "{{\"ok\":true,\"action\":\"sync_auto_status\",\"enabled\":%v,\"configured\":%v,\"exit_code\":0}\n"
+                        enabled state.valid)
+            (do
+              (fmt.printf "automatic sync: %s\n" (if enabled "on" "off"))
+              (fmt.printf "remote configured: %v\n" state.valid))))
+      :else (sync-fail! args "usage" "usage: kimen sync auto on|off|status [--remote <git-url>] [--branch <name>] [--json]" SYNC-EXIT-USAGE))))
 
 (defn handle-sync [args: []string]
   (let [subcmd (command-at args 2)]
@@ -454,4 +576,5 @@
       (= subcmd "status") (sync-status! args)
       (= subcmd "push") (sync-push! args)
       (= subcmd "pull") (sync-pull! args)
-      :else (sync-fail! args "usage" "usage: kimen sync status|push|pull [--remote <git-url>] [--branch <name>] [--vault <path>] [--dry-run] [--force] [--json]" SYNC-EXIT-USAGE))))
+      (= subcmd "auto") (sync-auto-command! args)
+      :else (sync-fail! args "usage" "usage: kimen sync status|push|pull|auto [--remote <git-url>] [--branch <name>] [--vault <path>] [--dry-run] [--force] [--json]" SYNC-EXIT-USAGE))))

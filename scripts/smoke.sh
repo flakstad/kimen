@@ -46,7 +46,7 @@ odin build "$BUILD_DIR" -out:"$BIN_OUT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-"$BIN" | grep -qx '  kimen doctor (--profile <name>|--map <path>) \[--strict\]'
+"$BIN" | grep -x '  kimen doctor (--profile <name>|--map <path>) \[--strict\]' >/dev/null
 if "$BIN" doctor >/dev/null 2>"$tmp/doctor-no-source.err"; then
   echo "doctor accepted missing source" >&2
   exit 1

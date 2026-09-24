@@ -178,10 +178,9 @@
       (let [[dir _] (os.split_path path)]
         (when (!= dir "")
           (discard (os.make_directory_all dir))))
-      (when (!= (os.write_entire_file path body) nil)
+      (when (not (sync-atomic-write path (transmute []byte body) (os.perm 0o600)))
         (fmt.eprintf "could not write vault: %s\n" path)
-        (os.exit 1))
-      (discard (os.chmod path (os.perm 0o600))))))
+        (os.exit 1)))))
 
 (defn vault-payload [vault: Vault] -> string
   (let [builder (strings.builder_make)]
@@ -396,10 +395,9 @@
                         (fmt.tprintf "%s/%s.bak.%d" backup-dir file (now-nanos)))]
       (when (!= backup-dir "")
         (discard (os.make_directory_all backup-dir)))
-      (when (!= (os.write_entire_file backup-path data (os.perm 0o600)) nil)
+      (when (not (sync-atomic-write backup-path data (os.perm 0o600)))
         (fmt.eprintf "could not write vault backup: %s\n" backup-path)
         (os.exit 1))
-      (discard (os.chmod backup-path (os.perm 0o600)))
       backup-path)))
 
 (defn vault-rekey! [args: []string]

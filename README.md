@@ -72,6 +72,7 @@ kimen session stop
 kimen sync status
 kimen sync push [--dry-run]
 kimen sync pull [--dry-run] [--force]
+kimen sync auto on|off|status
 
 kimen run [source] [projection...] -- <command>...
 kimen render (--dir <path>|--systemd-service <name>) [source] [--file path=value]
@@ -131,7 +132,7 @@ The remote is selected in this order:
 
 1. `--remote <git-url>`
 2. `KIMEN_SYNC_REMOTE`
-3. the remote saved locally by the last successful push or pull
+3. the remote saved locally by `sync auto on`, or the last successful push or pull
 
 The branch is selected from `--branch`, `KIMEN_SYNC_BRANCH`, the saved local
 configuration, or `main`. Authentication is handled by Git itself, so SSH
@@ -154,6 +155,7 @@ export KIMEN_SYNC_REMOTE=git@github.com:flakstad/kimen-vault.git
 kimen sync status --json
 kimen sync push --dry-run
 kimen sync push
+kimen sync auto on
 ```
 
 The first push is accepted only when the remote branch has no `vault.kv`.
@@ -170,18 +172,43 @@ export KIMEN_SYNC_REMOTE=git@github.com:flakstad/kimen-vault.git
 kimen sync status
 kimen sync pull --dry-run
 kimen sync pull
+kimen sync auto on
 ```
 
 Machine B now has the same encrypted `~/.config/kimen/vault.kv`. Supply the
 vault passphrase locally when using secrets; sync neither needs nor transfers
 it.
 
-For the normal edit cycle, pull before editing and push afterwards:
+With automatic sync enabled, normal Kimen commands synchronize at command
+boundaries. No explicit pull or push is needed:
 
 ```sh
-kimen sync pull
 kimen secret set prod.api_token --stdin
-kimen sync push
+kimen secret get prod.api_token --unsafe-stdout
+```
+
+Before a vault command, Kimen checks the remote. It pulls when the remote is
+ahead and pushes any locally pending version when the local vault is ahead.
+After `secret set`, `secret rm`, `secret mv`, `vault init`, or `vault rekey`, it
+immediately attempts another push. `run`, `render`, `envfile`, `doctor`, vault
+reads, secret reads, and session start also reconcile pending changes before
+opening the vault.
+
+Automatic sync is deliberately offline-friendly. If Git cannot reach the
+remote, reads continue from the local vault and mutations are saved locally.
+The mutation prints a warning that its push is pending but still succeeds. The
+next vault command with connectivity pushes the pending ciphertext. A real
+local/remote divergence remains a conflict: write commands stop with exit 31,
+while read commands warn and use the local vault.
+
+Use `--no-sync` for a single command that must not contact the remote, or set
+`KIMEN_SYNC_AUTO=0` to temporarily override the saved setting. Conversely,
+`KIMEN_SYNC_AUTO=1` enables automatic mode from the environment when a remote
+is available through `KIMEN_SYNC_REMOTE` or saved state.
+
+```sh
+kimen secret get api_token --unsafe-stdout --no-sync
+kimen sync auto off
 ```
 
 Each successful sync stores SHA-256 baselines for the local and remote
@@ -196,10 +223,11 @@ kimen sync pull --force
 
 Every pull that replaces an existing vault first creates a mode-0600 backup
 named like `vault.kv.backup.<timestamp>`. Both the backup and final vault/state
-writes use same-directory temporary files followed by atomic rename. If an
-operation is interrupted after the vault or remote was updated but before the
-baseline was saved, rerunning the same push or pull recognizes matching
-ciphertext and repairs the baseline without another replacement.
+writes use same-directory temporary files followed by atomic rename. All
+ordinary vault mutations use the same atomic-write primitive. If an operation
+is interrupted after the vault or remote was updated but before the baseline
+was saved, rerunning the same push or pull recognizes matching ciphertext and
+repairs the baseline without another replacement.
 
 `--dry-run` performs the remote checks and conflict detection without changing
 the vault, baseline, or Git repository. `--json` writes one JSON object to

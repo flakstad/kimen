@@ -84,6 +84,33 @@ grep -q '"status":"unchanged"' <<<"$recover_json"
 status_json="$(KIMEN_VAULT="$vault_a" "$BIN" sync status --json)"
 grep -q '"status":"synced"' <<<"$status_json"
 
+# Automatic mode pulls before use, pushes after mutations, and stays usable
+# while the configured Git remote is temporarily unavailable.
+KIMEN_VAULT="$vault_a" "$BIN" sync auto on >/dev/null
+KIMEN_VAULT="$vault_b" "$BIN" sync auto on >/dev/null
+printf 'automatic-b' | KIMEN_VAULT="$vault_b" "$BIN" secret set automatic_remote --stdin >/dev/null
+test "$(KIMEN_VAULT="$vault_a" "$BIN" secret get automatic_remote --unsafe-stdout)" = "automatic-b"
+
+offline_remote="$tmp/kimen-vault.offline"
+mv "$remote" "$offline_remote"
+printf 'saved-offline' | KIMEN_VAULT="$vault_a" "$BIN" secret set offline_secret --stdin 2>"$tmp/offline.err"
+grep -q 'saved locally; remote is unavailable, so push is pending' "$tmp/offline.err"
+test "$(KIMEN_VAULT="$vault_a" "$BIN" secret get offline_secret --unsafe-stdout --no-sync)" = "saved-offline"
+mv "$offline_remote" "$remote"
+KIMEN_VAULT="$vault_a" "$BIN" secret list >/dev/null
+test "$(KIMEN_VAULT="$vault_b" "$BIN" secret get offline_secret --unsafe-stdout)" = "saved-offline"
+auto_json="$(KIMEN_VAULT="$vault_a" "$BIN" sync auto status --json)"
+grep -q '"enabled":true' <<<"$auto_json"
+
+# Offline availability must not weaken real conflict detection once both sides
+# have independently changed.
+printf 'local-divergence' | KIMEN_VAULT="$vault_a" "$BIN" secret set diverged_local --stdin --no-sync >/dev/null
+printf 'remote-divergence' | KIMEN_VAULT="$vault_b" "$BIN" secret set diverged_remote --stdin --no-sync >/dev/null
+KIMEN_VAULT="$vault_b" "$BIN" sync push >/dev/null
+printf 'must-not-be-written' >"$tmp/rejected.input"
+expect_code 31 env KIMEN_VAULT="$vault_a" "$BIN" secret set rejected_write --stdin <"$tmp/rejected.input"
+expect_code 1 env KIMEN_VAULT="$vault_a" "$BIN" secret get rejected_write --unsafe-stdout --no-sync
+
 # A missing repository is a remote error; an existing branch without vault.kv
 # is a clear precondition failure.
 expect_code 30 env KIMEN_VAULT="$vault_a" "$BIN" sync status --remote "$tmp/does-not-exist.git"
